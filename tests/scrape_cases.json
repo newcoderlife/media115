@@ -1,0 +1,28 @@
+[
+  {
+    "id": "example_001",
+    "filename": "The.Matrix.1999.BluRay.1080p.x264.mkv",
+    "expect": {
+      "type": "movie",
+      "title": "The Matrix",
+      "year": 1999,
+      "source": "tmdb",
+      "source_id": "603"
+    },
+    "added": "2026-04-03",
+    "note": "标准英文电影文件名"
+  },
+  {
+    "id": "example_002",
+    "filename": "[SubHD] 進撃の巨人 The Final Season - 28 [1080p].mkv",
+    "expect": {
+      "type": "anime",
+      "title": "進撃の巨人",
+      "source": "bangumi",
+      "season": 4,
+      "episode": 28
+    },
+    "added": "2026-04-03",
+    "note": "字幕组格式动漫文件名"
+  }
+]
