@@ -147,7 +147,7 @@ class Cloud115Client:
         qr_content = f"https://115.com/scan/dg-{uid}"
         qr_image_url = f"{QR_API}/api/1.0/web/1.0/qrcode?qrfrom=1&client=0d&uid={uid}"
         _print_qr(qr_content, qr_image_url)
-        print("\nWaiting for scan...")
+        print("Waiting for scan...")
 
         # Step 3: Poll for scan status
         while True:
@@ -565,4 +565,4 @@ class Cloud115Client:
 
 def _print_qr(content: str, image_url: str):
     """Print QR login URL for the user to open in browser."""
-    print(f"Open this URL in your browser and scan with 115 App:\n\n  {image_url}\n")
+    print(f"Scan QR: {image_url}")
