@@ -2,41 +2,69 @@
 
 115 网盘媒体库管理工具：LLM 驱动刮削、秒传上传、STRM 化、302 直链播放。
 
-## 安装
+## 快速开始
 
 ```bash
+# 1. 安装
 git clone <repo-url> && cd 115-media
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
+
+# 2. 配置密钥
 cp .env.example .env && chmod 600 .env
-# 编辑 .env，填入 TMDB / Bangumi / 115 的密钥
+# 编辑 .env，填入 TMDB_READ_ACCESS_TOKEN（必需）和 BANGUMI_ACCESS_TOKEN（可选）
+
+# 3. 验证安装
+.venv/bin/pytest tests/ -v   # 108 tests should pass
+
+# 4. 试用：搜索电影元数据
+115-media scrape "The Matrix"
+
+# 5. 试用：搜索动漫
+115-media scrape "孤独摇滚" --source bangumi
+
+# 6.（可选）登录 115 网盘
+115-media auth   # 手机扫码登录，cookie 保存到 .115-cookies
+115-media ls 0   # 列出网盘根目录
 ```
 
-## 使用
+## 115 网盘认证
 
-### AI Agent（推荐）
+支持两种模式，优先使用 cookie 模式：
 
-本项目设计为 AI agent 驱动。让 agent 读 `AGENTS.md` 即可开始工作。
+| 模式 | 认证方式 | 是否需要审批 | 适用场景 |
+|------|---------|------------|---------|
+| **Cookie（推荐）** | `115-media auth` 扫码登录 | 不需要 | 立即可用 |
+| OpenAPI | App ID + Secret | 需要在 open.115.com 审批 | 官方方式 |
 
+```bash
+# Cookie 模式：扫码登录
+115-media auth                    # 打印二维码 URL，用 115 手机 App 扫码
+# 登录成功后 cookie 自动保存到 .115-cookies
+
+# OpenAPI 模式：在 .env 中配置
+CLOUD_115_APP_ID=your_app_id
+CLOUD_115_APP_SECRET=your_secret
 ```
-读一下 AGENTS.md，然后刮削 /downloads/新番/ 这个文件夹
-```
 
-不同工具的启动方式：
+## 使用方式
+
+### 方式一：AI Agent（推荐）
+
+在项目目录下启动任意 AI 编程工具，让 agent 读 `AGENTS.md`：
 
 ```bash
 # Claude Code
-claude -p "读 AGENTS.md，然后执行 Scrape workflow，目标目录 /downloads/新番/"
+claude -p "读 AGENTS.md，然后刮削 /downloads/新番/"
 
 # OpenAI Codex
-codex "读 AGENTS.md，然后执行 Scrape workflow，目标目录 /downloads/新番/"
+codex "读 AGENTS.md，然后刮削 /downloads/新番/"
 
-# 交互模式（Claude Code / Cursor / 任何 AI 工具）
-# 进入项目目录，启动 agent，告诉它：
-#   "读 AGENTS.md，按里面的流程刮削 /downloads/新番/"
+# 交互模式（Claude Code / Cursor / 任意 AI）
+# 启动后告诉 agent："读 AGENTS.md，按里面的流程刮削 /path/to/folder"
 ```
 
-#### 刮削流程
+刮削流程：
 
 ```
 你: "刮削 /downloads/新番/"
@@ -49,58 +77,73 @@ Agent: 执行刮削，生成 NFO + 海报，输出结果表
   ↓
 你: "第 1 行不对"
   ↓
-Agent: 修正 → 写入回归 case → 跑 pytest → 报告
+Agent: 修正 → 写入回归测试 case → 跑 pytest 验证
 ```
 
-每次纠正自动变成回归测试，保证以后改代码不会破坏已有纠正。
+每次纠正自动变成回归测试用例，保证历史纠正不被破坏。
 
-### CLI（不依赖 AI）
+### 方式二：CLI
 
 ```bash
-115-media scrape "The Matrix"                     # 搜索 TMDB
-115-media scrape "孤独摇滚" --source bangumi       # 搜索 Bangumi
-115-media scrape "ABC-123" --source javbus         # 搜索 JavBus
-115-media ls 0                                     # 列出 115 网盘根目录
+# 搜索元数据
+115-media scrape "The Matrix"                     # TMDB（默认）
+115-media scrape "孤独摇滚" --source bangumi       # Bangumi
+115-media scrape "ABC-123" --source javbus         # JavBus
+
+# 115 网盘操作（需要先 auth）
+115-media auth                                     # 扫码登录
+115-media ls 0                                     # 列出根目录
 115-media upload movie.mkv --remote-dir 12345      # 秒传上传
 115-media serve --port 9000                        # 启动 strm-proxy
 ```
 
-### Python API
+### 方式三：Python API
 
 ```python
 from media115.scraper.tmdb import TMDBClient
 from media115.scraper.nfo import generate_movie_nfo
+from media115.scraper.artwork import save_poster
 from pathlib import Path
 
 client = TMDBClient(read_access_token="your_token")
 detail = client.movie_detail(603)
+images = client.movie_images(603)
+
 generate_movie_nfo({
     "title": detail["title"],
     "year": int(detail["release_date"][:4]),
     "uniqueids": {"tmdb": str(detail["id"])},
 }, Path("./movie.nfo"))
+
+save_poster(images["posters"][0]["file_path"], Path("."))
 ```
 
 ## 项目结构
 
 ```
-AGENTS.md              # Agent 指令文件（所有 AI 工具读这个）
-skills/                # Agent Skills（可选，供支持 skill 的工具加载）
-src/media115/          # Python 源码
-tests/                 # 93 个测试 + 回归用例
+AGENTS.md                  # Agent 指令（任何 AI 工具读这个就能跑）
+skills/                    # Agent Skills 定义（可选）
+src/media115/              # Python 源码（1546 行，零额外依赖的 115 加密）
+  ├── client.py            # 115 客户端（cookie + OpenAPI 双模式）
+  ├── _crypto.py           # M115 加密（纯 Python RSA+XOR）
+  ├── proxy.py             # strm-proxy（Jellyfin 反代 + 302）
+  ├── organizer.py         # SHA1 + 秒传 + STRM 化
+  ├── cli.py               # CLI 入口
+  └── scraper/             # 刮削工具库（TMDB / Bangumi / JavBus / NFO）
+tests/                     # 108 个测试 + 回归用例
 ```
 
 ## 测试
 
 ```bash
-.venv/bin/pytest tests/ -v                          # 全部（93 tests）
+.venv/bin/pytest tests/ -v                          # 全部（108 tests）
 .venv/bin/pytest tests/test_scrape_regression.py -v  # 刮削回归
 ```
 
 ## 数据源
 
-| 类别 | 主源 | 认证 |
-|------|------|------|
-| 电影/剧集 | TMDB | API Key (免费) |
-| 动漫 | Bangumi | Bearer Token (可选) |
-| AV | JavBus | 无需 |
+| 类别 | 主源 | 认证 | 备注 |
+|------|------|------|------|
+| 电影/剧集 | TMDB | API Key (免费) | 中文支持完整 |
+| 动漫 | Bangumi | Bearer Token (可选) | 原生中文 |
+| AV | JavBus | 无需 | HTML 刮削 |

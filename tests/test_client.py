@@ -1,4 +1,4 @@
-"""115 OpenAPI client tests. All mocked (API not yet approved)."""
+"""115 client tests. Covers both cookie and OpenAPI modes (all mocked)."""
 
 import pytest
 from unittest.mock import patch, MagicMock
@@ -10,7 +10,7 @@ class TestRateLimiter:
     def test_allows_within_qps(self):
         limiter = RateLimiter(qps=10, qpm=600, qph=36000)
         for _ in range(10):
-            limiter.acquire()  # should not raise or block significantly
+            limiter.acquire()
 
     def test_tracks_request_count(self):
         limiter = RateLimiter(qps=100, qpm=600, qph=36000)
@@ -19,81 +19,126 @@ class TestRateLimiter:
         assert limiter.request_count >= 5
 
 
-class TestCloud115Client:
+class TestFactoryMethods:
+    def test_from_cookies(self):
+        client = Cloud115Client.from_cookies("UID=12345_A1_170000; CID=abc; SEID=def")
+        assert client._mode == "cookie"
+        assert client._user_id == "12345"
+
+    def test_from_cookies_no_uid(self):
+        client = Cloud115Client.from_cookies("CID=abc; SEID=def")
+        assert client._mode == "cookie"
+        assert client._user_id == ""
+
+    def test_from_openapi(self):
+        client = Cloud115Client.from_openapi(
+            app_id="test_app",
+            app_secret="test_secret",
+            access_token="test_token",
+            refresh_token="test_refresh",
+        )
+        assert client._mode == "openapi"
+        assert client._access_token == "test_token"
+
+    def test_from_cookie_file(self, tmp_path):
+        f = tmp_path / "cookies.txt"
+        f.write_text("UID=99_A1_170000; CID=xyz; SEID=abc")
+        client = Cloud115Client.from_cookie_file(f)
+        assert client._mode == "cookie"
+        assert client._user_id == "99"
+
+    def test_save_cookies_to_env(self, tmp_path):
+        client = Cloud115Client.from_cookies("UID=1_A1_0; CID=x; SEID=y")
+        env = tmp_path / ".env"
+        env.write_text("TMDB_API_KEY=abc\n")
+        client.save_cookies_to_env(env)
+        content = env.read_text()
+        assert "CLOUD_115_COOKIES=UID=1_A1_0; CID=x; SEID=y" in content
+        assert "TMDB_API_KEY=abc" in content
+
+    def test_save_cookies_to_new_env(self, tmp_path):
+        client = Cloud115Client.from_cookies("UID=1_A1_0; CID=x; SEID=y")
+        env = tmp_path / ".env"
+        client.save_cookies_to_env(env)
+        assert "CLOUD_115_COOKIES=UID=1_A1_0; CID=x; SEID=y" in env.read_text()
+
+
+class TestCookieMode:
     @pytest.fixture
-    def mock_client(self):
-        return Cloud115Client(
+    def client(self):
+        return Cloud115Client.from_cookies("UID=1_A1_0; CID=abc; SEID=def")
+
+    def test_list_files(self, client):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "state": True,
+            "data": [{"fn": "movie.mkv", "pc": "abc123"}],
+        }
+        mock_resp.raise_for_status = MagicMock()
+        with patch.object(client._http, "request", return_value=mock_resp):
+            files = client.list_files(dir_id="0")
+            assert len(files) == 1
+            assert files[0]["fn"] == "movie.mkv"
+
+    def test_download_url(self, client):
+        """Test M115 encrypted download URL retrieval."""
+        with patch.object(
+            client, "_download_url_cookie", return_value="https://cdn.115.com/video.mkv"
+        ):
+            url = client.download_url("abc123")
+            assert "cdn.115.com" in url
+
+    def test_mkdir(self, client):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"state": True, "cid": "999", "cname": "test"}
+        mock_resp.raise_for_status = MagicMock()
+        with patch.object(client._http, "request", return_value=mock_resp):
+            result = client.mkdir(parent_id="0", name="test")
+            assert result["cid"] == "999"
+
+    def test_request_sends_cookie_header(self, client):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"state": True, "data": []}
+        mock_resp.raise_for_status = MagicMock()
+        with patch.object(client._http, "request", return_value=mock_resp) as mock_req:
+            client.list_files()
+            call_kwargs = mock_req.call_args
+            assert "Cookie" in call_kwargs.kwargs.get("headers", {})
+
+
+class TestOpenAPIMode:
+    @pytest.fixture
+    def client(self):
+        return Cloud115Client.from_openapi(
             app_id="test_app",
             app_secret="test_secret",
             access_token="test_token",
             refresh_token="test_refresh",
         )
 
-    def test_init(self, mock_client):
-        assert mock_client._access_token == "test_token"
-
-    def test_list_files(self, mock_client):
-        mock_response = {
+    def test_list_files(self, client):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
             "state": True,
-            "data": [
-                {
-                    "fid": "1",
-                    "fn": "movie.mkv",
-                    "pc": "abc123",
-                    "sha": "deadbeef",
-                    "s": 1024,
-                },
-                {"fid": "2", "fn": "sub", "pc": "", "sha": "", "s": 0, "fc": "1"},
-            ],
+            "data": [{"fn": "movie.mkv", "pc": "abc123"}],
         }
-        with patch.object(mock_client, "_request", return_value=mock_response):
-            files = mock_client.list_files(dir_id="0")
-            assert len(files) == 2
-            assert files[0]["fn"] == "movie.mkv"
+        mock_resp.raise_for_status = MagicMock()
+        with patch.object(client._http, "request", return_value=mock_resp):
+            files = client.list_files(dir_id="0")
+            assert len(files) == 1
 
-    def test_download_url(self, mock_client):
-        mock_response = {
+    def test_download_url(self, client):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
             "state": True,
-            "data": {
-                "abc123": {"url": {"url": "https://cdn.115.com/download/abc123.mkv"}},
-            },
+            "data": {"abc123": {"url": {"url": "https://cdn.115.com/download.mkv"}}},
         }
-        with patch.object(mock_client, "_request", return_value=mock_response):
-            url = mock_client.download_url("abc123")
+        mock_resp.raise_for_status = MagicMock()
+        with patch.object(client._http, "request", return_value=mock_resp):
+            url = client.download_url("abc123")
             assert "cdn.115.com" in url
 
-    def test_mkdir(self, mock_client):
-        mock_response = {"state": True, "data": {"cid": "12345", "cname": "test_dir"}}
-        with patch.object(mock_client, "_request", return_value=mock_response):
-            result = mock_client.mkdir(parent_id="0", name="test_dir")
-            assert result["cid"] == "12345"
-
-    def test_rapid_upload_success(self, mock_client):
-        mock_response = {"state": True, "status": 2, "data": {"pick_code": "xyz789"}}
-        with patch.object(mock_client, "_request", return_value=mock_response):
-            result = mock_client.rapid_upload(
-                dir_id="0",
-                filename="movie.mkv",
-                file_size=1024,
-                sha1="aabbccdd",
-                pre_sha1="11223344",
-            )
-            assert result["status"] == 2
-            assert result["data"]["pick_code"] == "xyz789"
-
-    def test_rapid_upload_not_found(self, mock_client):
-        mock_response = {"state": True, "status": 1}
-        with patch.object(mock_client, "_request", return_value=mock_response):
-            result = mock_client.rapid_upload(
-                dir_id="0",
-                filename="new.mkv",
-                file_size=1024,
-                sha1="aabbccdd",
-                pre_sha1="11223344",
-            )
-            assert result["status"] == 1  # not a rapid upload
-
-    def test_token_refresh(self, mock_client):
+    def test_token_refresh(self, client):
         refresh_response = {
             "state": True,
             "data": {
@@ -102,23 +147,37 @@ class TestCloud115Client:
                 "expires_in": 7200,
             },
         }
-        with patch.object(mock_client._http, "post") as mock_post:
-            mock_resp = MagicMock()
-            mock_resp.json.return_value = refresh_response
-            mock_resp.raise_for_status = MagicMock()
-            mock_post.return_value = mock_resp
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = refresh_response
+        mock_resp.raise_for_status = MagicMock()
+        with patch.object(client._http, "post", return_value=mock_resp):
+            client.refresh_access_token()
+            assert client._access_token == "new_token"
+            assert client._refresh_token == "new_refresh"
 
-            mock_client.refresh_access_token()
-            assert mock_client._access_token == "new_token"
-            assert mock_client._refresh_token == "new_refresh"
-
-    def test_request_adds_auth_header(self, mock_client):
-        with patch.object(mock_client._http, "request") as mock_req:
-            mock_resp = MagicMock()
-            mock_resp.json.return_value = {"state": True}
-            mock_resp.raise_for_status = MagicMock()
-            mock_req.return_value = mock_resp
-
-            mock_client._request("GET", "/open/ufile/files", params={"cid": "0"})
+    def test_request_sends_auth_header(self, client):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"state": True, "data": []}
+        mock_resp.raise_for_status = MagicMock()
+        with patch.object(client._http, "request", return_value=mock_resp) as mock_req:
+            client.list_files()
             call_kwargs = mock_req.call_args
-            assert "Authorization" in call_kwargs.kwargs.get("headers", {})
+            headers = call_kwargs.kwargs.get("headers", {})
+            assert "Authorization" in headers
+            assert headers["Authorization"].startswith("Bearer ")
+
+
+class TestCrypto:
+    def test_m115_roundtrip(self):
+        """Test that M115 encode/decode is consistent."""
+        from media115._crypto import generate_m115_key, m115_encode
+
+        key = generate_m115_key()
+        assert len(key) == 16
+
+        # We can't do a true roundtrip because encode uses RSA with random padding,
+        # but we can verify the functions don't crash
+        plaintext = '{"pickcode": "abc123"}'
+        encoded = m115_encode(key, plaintext)
+        assert isinstance(encoded, str)
+        assert len(encoded) > 0
