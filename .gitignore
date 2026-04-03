@@ -1,4 +1,5 @@
 .env
+.115_rate_limit
 .claude/
 config.yaml
 __pycache__/
