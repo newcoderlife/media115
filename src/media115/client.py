@@ -151,16 +151,26 @@ class Cloud115Client:
 
         # Step 3: Poll for scan status
         while True:
-            resp = http.get(
-                f"{QR_API}/get/status/",
-                params={
-                    "uid": uid,
-                    "time": qr_time,
-                    "sign": sign,
-                    "_": int(time.time()),
-                },
-            )
-            result = resp.json()
+            try:
+                resp = http.get(
+                    f"{QR_API}/get/status/",
+                    params={
+                        "uid": uid,
+                        "time": qr_time,
+                        "sign": sign,
+                        "_": int(time.time()),
+                    },
+                )
+                if not resp.content:
+                    # Long-poll timeout, empty response — retry
+                    time.sleep(1)
+                    continue
+                result = resp.json()
+            except (httpx.ReadTimeout, ValueError):
+                # Timeout or invalid JSON — retry
+                time.sleep(1)
+                continue
+
             status = result.get("data", {}).get("status", 0)
 
             if status == 0:
@@ -198,6 +208,26 @@ class Cloud115Client:
         http.close()
         print(f"Login success! Cookie length: {len(cookie_str)}")
         return cls.from_cookies(cookie_str)
+
+    def check_login(self) -> bool:
+        """Check if current credentials are valid. Returns True if logged in."""
+        try:
+            if self._mode == "cookie":
+                resp = self._http.get(
+                    "https://my.115.com/?ct=guide&ac=status",
+                    headers={"Cookie": self._cookies},
+                    timeout=10,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    return data.get("state", False)
+                return False
+            else:
+                # OpenAPI: try listing root
+                self.list_files(dir_id="0", limit=1)
+                return True
+        except Exception:
+            return False
 
     def save_cookies_to_env(self, env_path: Path):
         """Save cookies to .env file as CLOUD_115_COOKIES=..."""

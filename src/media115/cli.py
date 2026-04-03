@@ -35,9 +35,24 @@ def main():
 
 @main.command()
 @click.option("--app", default="tv", help="Device type for QR login (tv/qandroid/web)")
-def auth(app):
+@click.option("--check", is_flag=True, help="Only check if already logged in")
+def auth(app, check):
     """Login to 115 via QR code scan. Saves cookies to .env."""
     from media115.client import Cloud115Client
+
+    # Check existing login first
+    existing = _get_115_client()
+    if existing and existing.check_login():
+        click.echo("Already logged in to 115.")
+        if not check:
+            click.echo(
+                "Use --check to verify, or re-run without existing cookies to re-login."
+            )
+        return
+
+    if check:
+        click.echo("Not logged in to 115.")
+        return
 
     client = Cloud115Client.qr_login(app=app)
     env_path = Path.cwd() / ".env"
