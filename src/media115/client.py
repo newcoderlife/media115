@@ -229,6 +229,74 @@ class Cloud115Client:
         except Exception:
             return False
 
+    def renew_cookies(self, app: str = "tv") -> bool:
+        """Auto-renew cookies without user interaction.
+
+        Uses the current cookie to programmatically scan a new QR code,
+        confirm it, and get fresh cookies. No manual scan needed.
+        Returns True if renewal succeeded, False otherwise.
+        """
+        if self._mode != "cookie" or not self._cookies:
+            return False
+
+        try:
+            http_headers = {"Cookie": self._cookies}
+
+            # Step 1: Get a new QR token
+            resp = self._http.get(
+                f"{QR_API}/api/1.0/{app}/1.0/token/",
+            )
+            resp.raise_for_status()
+            token_data = resp.json().get("data", {})
+            uid = token_data.get("uid")
+            if not uid:
+                return False
+
+            # Step 2: Auto-scan the QR code (using current cookie)
+            resp = self._http.get(
+                f"{QR_API}/api/2.0/prompt.php",
+                params={"uid": uid},
+                headers=http_headers,
+            )
+            resp.raise_for_status()
+
+            # Step 3: Auto-confirm
+            resp = self._http.get(
+                f"{QR_API}/api/2.0/slogin.php",
+                params={"key": uid, "uid": uid, "client": 0},
+                headers=http_headers,
+            )
+            resp.raise_for_status()
+
+            # Step 4: Get new cookies
+            resp = self._http.post(
+                f"{PASSPORT_API}/app/1.0/{app}/1.0/login/qrcode",
+                data={"account": uid, "app": app},
+            )
+            resp.raise_for_status()
+            login_data = resp.json().get("data", {})
+            cookies = login_data.get("cookie", {})
+
+            if isinstance(cookies, dict):
+                cookie_str = "; ".join(f"{k}={v}" for k, v in cookies.items())
+            else:
+                cookie_str = str(cookies)
+
+            if not cookie_str or len(cookie_str) < 10:
+                return False
+
+            self._cookies = cookie_str
+            # Re-extract user_id
+            for part in cookie_str.split(";"):
+                part = part.strip()
+                if part.startswith("UID="):
+                    self._user_id = part[4:].split("_")[0]
+                    break
+
+            return True
+        except Exception:
+            return False
+
     def save_cookies_to_env(self, env_path: Path):
         """Save cookies to .env file as CLOUD_115_COOKIES=..."""
         if self._mode != "cookie":
@@ -256,21 +324,24 @@ class Cloud115Client:
         params: dict | None = None,
         data: dict | None = None,
     ) -> dict:
-        for attempt in range(4):
-            self._limiter.acquire()
-            resp = self._http.request(
-                method,
-                url,
-                params=params,
-                data=data,
-                headers={"Cookie": self._cookies},
-            )
-            if resp.status_code == 405:
-                wait = 2**attempt * 5
-                time.sleep(wait)
-                continue
-            resp.raise_for_status()
-            return resp.json()
+        self._limiter.acquire()
+        resp = self._http.request(
+            method,
+            url,
+            params=params,
+            data=data,
+            headers={"Cookie": self._cookies},
+        )
+        if resp.status_code == 405:
+            # Cookie expired — try auto-renewal
+            if self.renew_cookies():
+                resp = self._http.request(
+                    method,
+                    url,
+                    params=params,
+                    data=data,
+                    headers={"Cookie": self._cookies},
+                )
         resp.raise_for_status()
         return resp.json()
 
