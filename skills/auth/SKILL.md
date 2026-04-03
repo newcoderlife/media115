@@ -1,34 +1,35 @@
 ---
 name: auth
-description: Check 115 login status and initiate QR login if needed
+description: Check 115 login status and guide QR login if needed
 version: 1.0
 ---
 
-Check if the user is logged into 115 cloud. If not, guide them through QR login.
-
-## Steps
-
-1. Check login status:
+## Step 1: Check login status
 
 ```bash
 .venv/bin/python -m media115.cli auth --check
 ```
 
-2. If already logged in, tell the user and proceed with their request.
+## Step 2: If already logged in
 
-3. If not logged in, run the auth command:
+Tell the user "115 已登录" and proceed.
+
+## Step 3: If NOT logged in
+
+**DO NOT run `115-media auth` via Bash.** It is interactive and will block forever.
+
+Tell the user to run it themselves in a separate terminal:
+
+> 115 还没登录。请在终端运行：
+>
+> `.venv/bin/115-media auth`
+>
+> 浏览器打开输出的链接，用 115 App 扫码。完成后告诉我。
+
+## Step 4: After user confirms login
+
+Verify:
 
 ```bash
-.venv/bin/python -m media115.cli auth
+.venv/bin/python -m media115.cli auth --check
 ```
-
-This will print a URL. Tell the user:
-- Open the URL in a browser
-- Scan the QR code with the 115 mobile app
-- Wait for confirmation
-
-4. After login succeeds, cookies are saved to `.env`. Verify by running `--check` again.
-
-## When to use
-
-Call this skill automatically before any command that requires 115 access (`ls`, `scan`, `upload`, `serve`). If the command fails with a credentials error, invoke this skill.
