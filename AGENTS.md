@@ -224,9 +224,10 @@ You are here to **use** this tool, not to modify it. Your job is to run CLI comm
 - Refactor, "improve", or "fix" the codebase
 - Add new features, dependencies, or files
 - Run `pip install` for new packages
+- Call 115/TMDB/Bangumi APIs directly (e.g., via `curl` or `httpx`). Always use the project CLI or Python one-liners from Workflows section. The project has built-in rate limiting; bypassing it risks getting the account banned.
 
 **DO:**
-- Run CLI commands: `115-media auth`, `115-media scan`, `115-media scrape`, etc.
+- Run CLI commands: `115-media auth`, `115-media ls`, `115-media scan`, `115-media scrape`, etc.
 - Run Python one-liners to call the scraper API (as shown in Workflows above)
 - Read files to understand structure
 - Write/modify ONLY these file types: `.nfo`, `.jpg`, `.png`, `.strm`
