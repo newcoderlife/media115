@@ -12,8 +12,13 @@ After reading this file, offer the user these options:
 4. **纠正刮削结果** — 用户说"第 X 行不对"时，修正并写入回归测试
 5. **跑回归测试** — `pytest tests/test_scrape_regression.py -v` 验证所有历史纠正
 6. **登录 115 网盘** — `115-media auth` QR 扫码登录
+7. **检查 115 登录状态** — `115-media auth --check`
 
-If 115 is not logged in yet, guide the user to run `115-media auth` first.
+Before any 115 operation (`ls`, `scan`, `upload`, `serve`), first check login:
+```bash
+.venv/bin/python -m media115.cli auth --check
+```
+If not logged in, run `115-media auth` and guide the user to scan the QR code.
 
 ## Setup
 
