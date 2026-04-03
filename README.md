@@ -15,7 +15,7 @@ cp .env.example .env && chmod 600 .env
 # 编辑 .env，填入 TMDB_READ_ACCESS_TOKEN（必需）和 BANGUMI_ACCESS_TOKEN（可选）
 
 # 3. 验证安装
-.venv/bin/pytest tests/ -v   # 108 tests should pass
+.venv/bin/pytest tests/ -v   # 111 tests should pass
 
 # 4. 试用：搜索电影元数据
 115-media scrape "The Matrix"
@@ -24,8 +24,9 @@ cp .env.example .env && chmod 600 .env
 115-media scrape "孤独摇滚" --source bangumi
 
 # 6.（可选）登录 115 网盘
-115-media auth   # 手机扫码登录，cookie 保存到 .115-cookies
-115-media ls 0   # 列出网盘根目录
+115-media auth               # 浏览器打开链接，手机扫码，cookie 自动保存到 .env
+115-media ls /               # 列出网盘根目录
+115-media scan /影音          # 扫描文件夹，输出刮削计划表
 ```
 
 ## 115 网盘认证
@@ -39,8 +40,11 @@ cp .env.example .env && chmod 600 .env
 
 ```bash
 # Cookie 模式：扫码登录
-115-media auth                    # 打印二维码 URL，用 115 手机 App 扫码
-# 登录成功后 cookie 自动保存到 .115-cookies
+115-media auth                    # 打印 URL，浏览器打开扫码
+# 登录成功后 cookie 自动保存到 .env 的 CLOUD_115_COOKIES 字段
+
+# 检查是否已登录
+115-media auth --check
 
 # OpenAPI 模式：在 .env 中配置
 CLOUD_115_APP_ID=your_app_id
@@ -69,6 +73,8 @@ codex "读 AGENTS.md，然后刮削 /downloads/新番/"
 ```
 你: "刮削 /downloads/新番/"
   ↓
+Agent: 检查 115 登录状态，未登录则引导扫码
+  ↓
 Agent: 扫描文件，分析类型，输出计划表
   ↓
 你: 确认或纠正（"第 3 行是电影《满江红》"）
@@ -92,7 +98,10 @@ Agent: 修正 → 写入回归测试 case → 跑 pytest 验证
 
 # 115 网盘操作（需要先 auth）
 115-media auth                                     # 扫码登录
-115-media ls 0                                     # 列出根目录
+115-media auth --check                             # 检查登录状态
+115-media ls /                                     # 列出根目录
+115-media ls /影音/电影                             # 列出子目录
+115-media scan /影音                               # 扫描并输出刮削计划表
 115-media upload movie.mkv --remote-dir 12345      # 秒传上传
 115-media serve --port 9000                        # 启动 strm-proxy
 ```
@@ -123,20 +132,14 @@ save_poster(images["posters"][0]["file_path"], Path("."))
 ```
 AGENTS.md                  # Agent 指令（任何 AI 工具读这个就能跑）
 skills/                    # Agent Skills 定义（可选）
-src/media115/              # Python 源码（1546 行，零额外依赖的 115 加密）
-  ├── client.py            # 115 客户端（cookie + OpenAPI 双模式）
-  ├── _crypto.py           # M115 加密（纯 Python RSA+XOR）
-  ├── proxy.py             # strm-proxy（Jellyfin 反代 + 302）
-  ├── organizer.py         # SHA1 + 秒传 + STRM 化
-  ├── cli.py               # CLI 入口
-  └── scraper/             # 刮削工具库（TMDB / Bangumi / JavBus / NFO）
-tests/                     # 108 个测试 + 回归用例
+src/media115/              # Python 源码（~1600 行，零额外依赖的 115 加密）
+tests/                     # 111 个测试 + 回归用例
 ```
 
 ## 测试
 
 ```bash
-.venv/bin/pytest tests/ -v                          # 全部（108 tests）
+.venv/bin/pytest tests/ -v                          # 全部（111 tests）
 .venv/bin/pytest tests/test_scrape_regression.py -v  # 刮削回归
 ```
 
