@@ -110,7 +110,7 @@ NFO_EXT = ".nfo"
 @main.command()
 @click.argument("path")
 @click.option("--recursive/--no-recursive", default=True, help="Scan subdirectories")
-@click.option("--depth", default=2, type=int, help="Max recursion depth")
+@click.option("--depth", default=3, type=int, help="Max recursion depth")
 def scan(path, recursive, depth):
     """Scan a 115 cloud folder and output a scraping plan (dry-run).
 
@@ -278,6 +278,9 @@ def scrape(query, source, language):
         results = client.search_movie(query)
         if not results:
             results = client.search_tv(query)
+        if not results:
+            click.echo(f"  No results found for '{query}'")
+            return
         for r in results[:5]:
             title = r.get("title", r.get("name", "?"))
             year = (r.get("release_date", r.get("first_air_date", "")) or "")[:4]
@@ -290,6 +293,9 @@ def scrape(query, source, language):
         token = os.environ.get("BANGUMI_ACCESS_TOKEN")
         client = BangumiClient(access_token=token)
         results = client.search(query)
+        if not results:
+            click.echo(f"  No results found for '{query}'")
+            return
         for r in results[:5]:
             name = r.get("name_cn") or r.get("name", "?")
             rid = r.get("id")

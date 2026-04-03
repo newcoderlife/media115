@@ -111,8 +111,8 @@ class Cloud115Client:
         )
         self._env_path = Path.cwd() / ".env"
         self._limiter = RateLimiter(
-            qps=1, env_path=self._env_path
-        )  # Conservative for cookie mode
+            qps=0.5, env_path=self._env_path
+        )  # Very conservative: 1 request per 2 seconds
         self._download_limiter = RateLimiter(qps=1, env_path=self._env_path)
         self._mode: str = ""  # "cookie" or "openapi"
         # Cookie mode
