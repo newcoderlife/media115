@@ -107,7 +107,9 @@ class Cloud115Client:
             headers={"User-Agent": self._USER_AGENT},
         )
         self._env_path = Path.cwd() / ".env"
-        self._limiter = RateLimiter(qps=3, env_path=self._env_path)
+        self._limiter = RateLimiter(
+            qps=1, env_path=self._env_path
+        )  # Conservative for cookie mode
         self._download_limiter = RateLimiter(qps=1, env_path=self._env_path)
         self._mode: str = ""  # "cookie" or "openapi"
         # Cookie mode
@@ -453,8 +455,12 @@ class Cloud115Client:
             offset += len(batch)
         return all_files
 
-    def list_files_recursive(self, dir_id: str = "0") -> list[dict]:
+    def list_files_recursive(
+        self, dir_id: str = "0", max_depth: int = 5, _depth: int = 0
+    ) -> list[dict]:
         """Recursively list all files and directories."""
+        if _depth > max_depth:
+            return []
         result = []
         items = self.list_files_all(dir_id=dir_id)
         for item in items:
@@ -465,8 +471,13 @@ class Cloud115Client:
             if is_dir:
                 child_id = item.get("cid", item.get("fid", ""))
                 if child_id:
-                    time.sleep(0.5)
-                    result.extend(self.list_files_recursive(dir_id=str(child_id)))
+                    result.extend(
+                        self.list_files_recursive(
+                            dir_id=str(child_id),
+                            max_depth=max_depth,
+                            _depth=_depth + 1,
+                        )
+                    )
         return result
 
     def resolve_path(self, path: str) -> str:
