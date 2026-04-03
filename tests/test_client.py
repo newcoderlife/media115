@@ -63,6 +63,57 @@ class TestFactoryMethods:
         assert "CLOUD_115_COOKIES=UID=1_A1_0; CID=x; SEID=y" in env.read_text()
 
 
+class TestRenewCookies:
+    def test_renew_success(self):
+        client = Cloud115Client.from_cookies("UID=1_A1_0; CID=old; SEID=old")
+
+        # Mock the 4-step auto-scan flow
+        get_responses = [
+            # Step 1: QR token
+            MagicMock(
+                json=lambda: {"data": {"uid": "test_uid"}}, raise_for_status=MagicMock()
+            ),
+            # Step 2: auto-scan
+            MagicMock(json=lambda: {"state": True}, raise_for_status=MagicMock()),
+            # Step 3: auto-confirm
+            MagicMock(json=lambda: {"state": True}, raise_for_status=MagicMock()),
+        ]
+        post_resp = MagicMock(
+            json=lambda: {
+                "data": {"cookie": {"UID": "2_A1_1", "CID": "new", "SEID": "new"}}
+            },
+            raise_for_status=MagicMock(),
+        )
+
+        with patch.object(client._http, "get", side_effect=get_responses):
+            with patch.object(client._http, "post", return_value=post_resp):
+                result = client.renew_cookies()
+                assert result is True
+                assert "new" in client._cookies
+
+    def test_renew_fails_no_cookies(self):
+        client = Cloud115Client.from_openapi(app_id="x", app_secret="y")
+        assert client.renew_cookies() is False
+
+    def test_auto_renew_on_405(self):
+        """When cookie request returns 405, should auto-renew and retry."""
+        client = Cloud115Client.from_cookies("UID=1_A1_0; CID=old; SEID=old")
+
+        with patch.object(client, "renew_cookies", return_value=True) as mock_renew:
+            # First call returns 405, second succeeds
+            resp_405 = MagicMock()
+            resp_405.status_code = 405
+            resp_ok = MagicMock()
+            resp_ok.status_code = 200
+            resp_ok.json.return_value = {"state": True, "data": []}
+            resp_ok.raise_for_status = MagicMock()
+
+            with patch.object(client._http, "request", side_effect=[resp_405, resp_ok]):
+                result = client._cookie_request("GET", "https://webapi.115.com/files")
+                mock_renew.assert_called_once()
+                assert result["state"] is True
+
+
 class TestCookieMode:
     @pytest.fixture
     def client(self):
