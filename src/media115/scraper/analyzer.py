@@ -116,7 +116,7 @@ def analyze_filename(filename: str) -> AnalysisResult:
         )
 
     # Movie: Title.Year pattern
-    movie_match = re.search(r"^(.+?)[.\s](\d{4})[.\s]", name)
+    movie_match = re.search(r"^(.+?)[.\s](\d{4})(?:[.\s]|$)", name)
     if movie_match:
         title = movie_match.group(1).replace(".", " ").strip()
         year = int(movie_match.group(2))

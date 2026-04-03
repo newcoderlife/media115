@@ -1,7 +1,9 @@
 """strm-proxy tests. Mock 115 API and Jellyfin."""
 
+from unittest.mock import AsyncMock, MagicMock
+
+import httpx
 import pytest
-from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
 from media115.proxy import create_app
@@ -20,6 +22,17 @@ def client(app):
     return TestClient(app)
 
 
+def _mock_async_response(json_data=None, status_code=200, content=b"", headers=None):
+    resp = MagicMock(spec=httpx.Response)
+    resp.status_code = status_code
+    resp.headers = headers or {}
+    resp.content = content
+    resp.raise_for_status = MagicMock()
+    if json_data is not None:
+        resp.json.return_value = json_data
+    return resp
+
+
 class TestPlayEndpoint:
     def test_302_redirect(self, client, app):
         app.state.cloud115.download_url.return_value = "https://cdn.115.com/video.mkv"
@@ -31,7 +44,6 @@ class TestPlayEndpoint:
         app.state.cloud115.download_url.return_value = "https://cdn.115.com/video.mkv"
         client.get("/play/abc123", follow_redirects=False)
         client.get("/play/abc123", follow_redirects=False)
-        # Should only call download_url once (cached)
         assert app.state.cloud115.download_url.call_count == 1
 
     def test_different_pickcode_not_cached(self, client, app):
@@ -45,7 +57,6 @@ class TestPlayEndpoint:
 class TestVideoStreamIntercept:
     def test_strm_item_redirects(self, client, app):
         """When Jellyfin item is .strm, should 302 to 115 CDN."""
-        # Mock Jellyfin API response
         jellyfin_item = {
             "Items": [
                 {
@@ -57,18 +68,14 @@ class TestVideoStreamIntercept:
             ]
         }
         app.state.cloud115.download_url.return_value = "https://cdn.115.com/real.mkv"
+        app.state.http = AsyncMock(spec=httpx.AsyncClient)
+        app.state.http.get.return_value = _mock_async_response(json_data=jellyfin_item)
 
-        with patch("media115.proxy.httpx") as mock_httpx:
-            mock_resp = MagicMock()
-            mock_resp.json.return_value = jellyfin_item
-            mock_resp.raise_for_status = MagicMock()
-            mock_httpx.get.return_value = mock_resp
-
-            resp = client.get(
-                "/Videos/abc/stream?mediasourceid=src1&api_key=test",
-                follow_redirects=False,
-            )
-            assert resp.status_code == 302
+        resp = client.get(
+            "/Videos/abc/stream?mediasourceid=src1&api_key=test",
+            follow_redirects=False,
+        )
+        assert resp.status_code == 302
 
     def test_non_strm_item_proxies(self, client, app):
         """When Jellyfin item is local file, should proxy to Jellyfin."""
@@ -80,39 +87,29 @@ class TestVideoStreamIntercept:
                 }
             ]
         }
-        with patch("media115.proxy.httpx") as mock_httpx:
-            # Jellyfin API call for item query
-            mock_item_resp = MagicMock()
-            mock_item_resp.json.return_value = jellyfin_item
-            mock_item_resp.raise_for_status = MagicMock()
+        app.state.http = AsyncMock(spec=httpx.AsyncClient)
+        app.state.http.get.return_value = _mock_async_response(json_data=jellyfin_item)
+        app.state.http.request.return_value = _mock_async_response(
+            status_code=200,
+            content=b"fake video bytes",
+            headers={"content-type": "video/mp4"},
+        )
 
-            # Jellyfin proxy response for the actual video
-            mock_proxy_resp = MagicMock()
-            mock_proxy_resp.status_code = 200
-            mock_proxy_resp.headers = {"content-type": "video/mp4"}
-            mock_proxy_resp.content = b"fake video bytes"
-            mock_proxy_resp.raise_for_status = MagicMock()
-
-            mock_httpx.get.side_effect = [mock_item_resp]
-            mock_httpx.request.return_value = mock_proxy_resp
-
-            resp = client.get(
-                "/Videos/abc/stream?mediasourceid=src1&api_key=test",
-                follow_redirects=False,
-            )
-            # Should proxy (200), not redirect (302)
-            assert resp.status_code == 200
+        resp = client.get(
+            "/Videos/abc/stream?mediasourceid=src1&api_key=test",
+            follow_redirects=False,
+        )
+        assert resp.status_code == 200
 
 
 class TestPassthrough:
-    def test_other_requests_proxy_to_jellyfin(self, client):
-        with patch("media115.proxy.httpx") as mock_httpx:
-            mock_resp = MagicMock()
-            mock_resp.status_code = 200
-            mock_resp.headers = {"content-type": "application/json"}
-            mock_resp.content = b'{"Items": []}'
-            mock_resp.raise_for_status = MagicMock()
-            mock_httpx.request.return_value = mock_resp
+    def test_other_requests_proxy_to_jellyfin(self, client, app):
+        app.state.http = AsyncMock(spec=httpx.AsyncClient)
+        app.state.http.request.return_value = _mock_async_response(
+            status_code=200,
+            content=b'{"Items": []}',
+            headers={"content-type": "application/json"},
+        )
 
-            resp = client.get("/Items?api_key=test")
-            assert resp.status_code == 200
+        resp = client.get("/Items?api_key=test")
+        assert resp.status_code == 200
