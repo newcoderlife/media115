@@ -28,10 +28,19 @@ Before running any command, ensure the virtual environment exists:
 test -d .venv || (python3 -m venv .venv && .venv/bin/pip install -e .)
 ```
 
-All config is in `.env` (not committed):
-- `TMDB_READ_ACCESS_TOKEN` — required for movie/TV scraping
-- `BANGUMI_ACCESS_TOKEN` — optional, for anime
-- `CLOUD_115_COOKIES` — auto-saved by `115-media auth` (QR scan login)
+### Check existing config
+
+**Read `.env` first** to see what's already configured. Do NOT ask the user to configure keys that already have values.
+
+```bash
+grep -E "^(TMDB_READ_ACCESS_TOKEN|BANGUMI_ACCESS_TOKEN|CLOUD_115_COOKIES)=" .env 2>/dev/null
+```
+
+- If `TMDB_READ_ACCESS_TOKEN` has a value → TMDB is ready, no action needed
+- If `BANGUMI_ACCESS_TOKEN` has a value → Bangumi is ready
+- If `CLOUD_115_COOKIES` has a value → check with `115-media auth --check` if still valid
+
+Only ask the user to configure keys that are missing or empty. If all keys are present, skip setup and go straight to "What You Can Do".
 
 ## Project Layout
 
