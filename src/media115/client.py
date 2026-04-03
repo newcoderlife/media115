@@ -7,7 +7,6 @@ OpenAPI mode: requires approved app_id/app_secret from open.115.com.
 import json
 import time
 import threading
-from collections import deque
 from pathlib import Path
 
 import httpx
@@ -23,42 +22,33 @@ OPEN_API = "https://proapi.115.com"
 
 
 class RateLimiter:
-    """Three-tier rate limiter: QPS / QPM / QPH."""
+    """Rate limiter with QPS control and global cooldown on 429."""
 
-    def __init__(self, qps: int = 3, qpm: int = 120, qph: int = 3600):
+    def __init__(self, qps: int = 3):
         self._qps = qps
-        self._qpm = qpm
-        self._qph = qph
-        self._timestamps: deque[float] = deque()
         self._lock = threading.Lock()
+        self._last_request: float = 0
+        self._cooldown_until: float = 0
         self.request_count = 0
 
     def acquire(self):
-        sleep_time = 0.0
         with self._lock:
             now = time.monotonic()
-            self._timestamps.append(now)
+            # Global cooldown (triggered by 429)
+            if now < self._cooldown_until:
+                wait = self._cooldown_until - now
+                time.sleep(wait)
+            # QPS throttle
+            elapsed = now - self._last_request
+            min_interval = 1.0 / self._qps
+            if elapsed < min_interval:
+                time.sleep(min_interval - elapsed)
+            self._last_request = time.monotonic()
             self.request_count += 1
 
-            cutoff_hour = now - 3600
-            while self._timestamps and self._timestamps[0] < cutoff_hour:
-                self._timestamps.popleft()
-
-            cutoff_sec = now - 1
-            recent_sec = sum(1 for t in self._timestamps if t >= cutoff_sec)
-            if recent_sec > self._qps:
-                sleep_time = 1.0 / self._qps
-
-            cutoff_min = now - 60
-            recent_min = sum(1 for t in self._timestamps if t >= cutoff_min)
-            if recent_min > self._qpm:
-                sleep_time = max(sleep_time, 1.0)
-
-            if len(self._timestamps) > self._qph:
-                sleep_time = max(sleep_time, self._timestamps[0] - cutoff_hour)
-
-        if sleep_time > 0:
-            time.sleep(sleep_time)
+    def set_cooldown(self, seconds: float):
+        """Set a global cooldown period (e.g., after hitting 429)."""
+        self._cooldown_until = time.monotonic() + seconds
 
 
 class Cloud115Client:
@@ -75,7 +65,8 @@ class Cloud115Client:
             timeout=15,
             headers={"User-Agent": self._USER_AGENT},
         )
-        self._limiter = RateLimiter()
+        self._limiter = RateLimiter(qps=3)  # General API: 3 QPS
+        self._download_limiter = RateLimiter(qps=1)  # Download URLs: 1 QPS (stricter)
         self._mode: str = ""  # "cookie" or "openapi"
         # Cookie mode
         self._cookies: str = ""
@@ -332,8 +323,9 @@ class Cloud115Client:
         url: str,
         params: dict | None = None,
         data: dict | None = None,
+        limiter: RateLimiter | None = None,
     ) -> dict:
-        self._limiter.acquire()
+        (limiter or self._limiter).acquire()
         resp = self._http.request(
             method,
             url,
@@ -341,6 +333,14 @@ class Cloud115Client:
             data=data,
             headers={"Cookie": self._cookies},
         )
+        if resp.status_code == 429:
+            # Rate limited — global cooldown
+            self._limiter.set_cooldown(3600)
+            self._download_limiter.set_cooldown(3600)
+            raise RuntimeError(
+                "115 API rate limit hit (429). Cooling down for 1 hour. "
+                "Reduce request frequency."
+            )
         if resp.status_code == 405:
             # Cookie expired — try auto-renewal
             if self.renew_cookies():
@@ -352,7 +352,17 @@ class Cloud115Client:
                     headers={"Cookie": self._cookies},
                 )
         resp.raise_for_status()
-        return resp.json()
+        result = resp.json()
+        # Check for rate limit in response body
+        if isinstance(result, dict) and "errNo" in result:
+            err = result["errNo"]
+            if err == 770004 or "访问上限" in str(result.get("error", "")):
+                self._limiter.set_cooldown(3600)
+                self._download_limiter.set_cooldown(3600)
+                raise RuntimeError(
+                    f"115 API rate limit hit (errNo={err}). Cooling down."
+                )
+        return result
 
     def _openapi_request(
         self,
@@ -518,7 +528,7 @@ class Cloud115Client:
         payload = json.dumps({"pickcode": pick_code})
         encrypted = m115_encode(key, payload)
 
-        self._limiter.acquire()
+        self._download_limiter.acquire()  # Stricter: 1 QPS
         resp = self._http.post(
             f"{PRO_API}/app/chrome/downurl",
             params={"t": int(time.time())},
