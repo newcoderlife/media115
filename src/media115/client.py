@@ -15,6 +15,7 @@ from media115._crypto import generate_m115_key, m115_encode, m115_decode
 
 # API endpoints
 WEB_API = "https://webapi.115.com"
+FILE_API = "http://web.api.115.com"  # More reliable for file listing than webapi/aps
 PRO_API = "https://proapi.115.com"
 QR_API = "https://qrcodeapi.115.com"
 PASSPORT_API = "https://passportapi.115.com"
@@ -416,7 +417,7 @@ class Cloud115Client:
         if self._mode == "cookie":
             result = self._cookie_request(
                 "GET",
-                f"{WEB_API}/files",
+                f"{FILE_API}/files",
                 params={
                     "aid": 1,
                     "cid": dir_id,
