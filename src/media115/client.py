@@ -15,7 +15,6 @@ from media115._crypto import generate_m115_key, m115_encode, m115_decode
 
 # API endpoints
 WEB_API = "https://webapi.115.com"
-FILE_API = "http://web.api.115.com"  # More reliable for file listing than webapi/aps
 PRO_API = "https://proapi.115.com"
 QR_API = "https://qrcodeapi.115.com"
 PASSPORT_API = "https://passportapi.115.com"
@@ -104,7 +103,11 @@ class Cloud115Client:
     def __init__(self):
         self._http = httpx.Client(
             timeout=15,
-            headers={"User-Agent": self._USER_AGENT},
+            headers={
+                "User-Agent": self._USER_AGENT,
+                "Origin": "https://115.com",
+                "Referer": "https://115.com/",
+            },
         )
         self._env_path = Path.cwd() / ".env"
         self._limiter = RateLimiter(
@@ -419,7 +422,7 @@ class Cloud115Client:
         if self._mode == "cookie":
             result = self._cookie_request(
                 "GET",
-                f"{FILE_API}/files",
+                f"{WEB_API}/files",
                 params={
                     "aid": 1,
                     "cid": dir_id,

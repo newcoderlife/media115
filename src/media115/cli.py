@@ -37,7 +37,8 @@ def main():
 @click.option("--app", default="tv", help="Device type for QR login (tv/qandroid/web)")
 @click.option("--check", is_flag=True, help="Only check if already logged in")
 @click.option("--renew", is_flag=True, help="Auto-renew cookies without scanning")
-def auth(app, check, renew):
+@click.option("--force", is_flag=True, help="Force re-login even if already logged in")
+def auth(app, check, renew, force):
     """Login to 115 via QR code scan. Saves cookies to .env."""
     from media115.client import Cloud115Client
 
@@ -66,7 +67,7 @@ def auth(app, check, renew):
             )
         return
 
-    if existing and existing.check_login():
+    if not force and existing and existing.check_login():
         click.echo("Already logged in to 115.")
         return
 
