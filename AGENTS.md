@@ -2,6 +2,19 @@
 
 You are working on **115-media**, a media library management tool for 115 cloud drive. This file tells you everything you need to operate.
 
+## What You Can Do
+
+After reading this file, offer the user these options:
+
+1. **扫描 115 网盘文件夹** — `115-media scan /影音/电影` 列出文件并分析类型，输出刮削计划表（dry-run）
+2. **搜索元数据** — `115-media scrape "电影名"` 搜索 TMDB/Bangumi/JavBus
+3. **执行刮削** — 按 Scrape workflow 逐个刮削，生成 NFO + 海报
+4. **纠正刮削结果** — 用户说"第 X 行不对"时，修正并写入回归测试
+5. **跑回归测试** — `pytest tests/test_scrape_regression.py -v` 验证所有历史纠正
+6. **登录 115 网盘** — `115-media auth` QR 扫码登录
+
+If 115 is not logged in yet, guide the user to run `115-media auth` first.
+
 ## Setup
 
 Before running any command, ensure the virtual environment exists:
@@ -10,15 +23,19 @@ Before running any command, ensure the virtual environment exists:
 test -d .venv || (python3 -m venv .venv && .venv/bin/pip install -e .)
 ```
 
-API keys are in `.env` (not committed). Required: `TMDB_READ_ACCESS_TOKEN`. Optional: `BANGUMI_ACCESS_TOKEN`, `CLOUD_115_*`.
+All config is in `.env` (not committed):
+- `TMDB_READ_ACCESS_TOKEN` — required for movie/TV scraping
+- `BANGUMI_ACCESS_TOKEN` — optional, for anime
+- `CLOUD_115_COOKIES` — auto-saved by `115-media auth` (QR scan login)
 
 ## Project Layout
 
 ```
 src/media115/
 ├── cli.py             # CLI entry point (run via: .venv/bin/python -m media115.cli)
-├── client.py          # 115 OpenAPI client
-├── proxy.py           # Jellyfin reverse proxy + 302 redirect
+├── client.py          # 115 client (cookie mode + OpenAPI mode)
+├── _crypto.py         # M115 encryption (RSA+XOR, for download URLs)
+├── proxy.py           # Jellyfin reverse proxy + 302 redirect (async)
 ├── organizer.py       # SHA1 hashing, rapid upload, STRM generation
 └── scraper/
     ├── tmdb.py        # TMDB API (movies, TV shows)
@@ -31,16 +48,19 @@ src/media115/
 tests/
 ├── scrape_cases.json  # Regression test cases (user corrections saved here)
 ├── conftest.py        # Loads .env for tests
-└── test_*.py          # 93 tests
+└── test_*.py          # 108 tests
 ```
 
 ## CLI Reference
 
 ```bash
+.venv/bin/python -m media115.cli auth                              # QR login, saves cookies to .env
+.venv/bin/python -m media115.cli ls /影音                           # List directory (path or dir_id)
+.venv/bin/python -m media115.cli scan /影音/电影                    # Dry-run scan: analyze + plan table
+.venv/bin/python -m media115.cli scan /影音 --no-recursive          # Scan single directory only
 .venv/bin/python -m media115.cli scrape "QUERY"                    # Search TMDB (default)
 .venv/bin/python -m media115.cli scrape "QUERY" --source bangumi   # Search Bangumi
 .venv/bin/python -m media115.cli scrape "QUERY" --source javbus    # Search JavBus
-.venv/bin/python -m media115.cli ls DIR_ID                         # List 115 cloud directory
 .venv/bin/python -m media115.cli upload FILE --remote-dir DIR_ID   # Rapid upload to 115
 .venv/bin/python -m media115.cli serve --port 9000                 # Start strm-proxy
 ```
@@ -48,7 +68,7 @@ tests/
 ## Running Tests
 
 ```bash
-.venv/bin/pytest tests/ -v                          # All tests (93)
+.venv/bin/pytest tests/ -v                          # All tests (108)
 .venv/bin/pytest tests/test_scrape_regression.py -v  # Regression tests only
 ```
 
@@ -58,9 +78,15 @@ tests/
 
 ### Workflow: Scrape
 
-Input: a folder path containing media files.
+Input: a folder path containing media files (local or 115 cloud path like `/影音/电影/`).
 
-**Step 1 — Scan.** List all video files (`*.mkv`, `*.mp4`, `*.avi`, `*.ts`, `*.rmvb`) recursively. For each file:
+**Step 1 — Scan.** Run the scan command first to get an overview:
+
+```bash
+.venv/bin/python -m media115.cli scan /path/to/folder
+```
+
+Or list files and analyze manually. For each video file:
 - Check if a `.nfo` exists in the same directory. If complete (has `<uniqueid>` + poster exists), mark as "skip".
 - If `.nfo` exists but incomplete, extract `<uniqueid>` or `<title>` + `<year>` for targeted lookup.
 - If no `.nfo`, analyze the filename to determine type (movie/tv/anime/av), title, year, season, episode.
@@ -151,7 +177,30 @@ add_case(Path('tests/scrape_cases.json'), r)
 
 ## Rules
 
-- **Never** modify video file binaries (only create/modify .nfo, .jpg, .strm)
+### You are an OPERATOR, not a developer
+
+You are here to **use** this tool, not to modify it. Your job is to run CLI commands, analyze output, and interact with the user.
+
+**DO NOT:**
+- Modify any `.py` file under `src/` or `tests/`
+- Change `pyproject.toml`, `.env.example`, `.gitignore`, or this file
+- Refactor, "improve", or "fix" the codebase
+- Add new features, dependencies, or files
+- Run `pip install` for new packages
+
+**DO:**
+- Run CLI commands: `115-media auth`, `115-media scan`, `115-media scrape`, etc.
+- Run Python one-liners to call the scraper API (as shown in Workflows above)
+- Read files to understand structure
+- Write/modify ONLY these file types: `.nfo`, `.jpg`, `.png`, `.strm`
+- Append to `tests/scrape_cases.json` (via the `add_case` API only)
+- Run `pytest` to verify
+
+If you think the code has a bug, tell the user. Do not fix it yourself.
+
+### Other rules
+
+- **Never** modify video file binaries
 - **Always** output results as markdown tables
 - **Always** save corrections to `tests/scrape_cases.json`
 - **Always** run regression tests after corrections

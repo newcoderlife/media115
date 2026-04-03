@@ -2,6 +2,7 @@
 
 import re
 import time
+from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, Request
@@ -12,33 +13,39 @@ EXCLUDED_HEADERS = {"host", "transfer-encoding", "content-encoding", "content-le
 
 
 def create_app(jellyfin_url: str, cloud115_client) -> FastAPI:
-    app = FastAPI(title="115 strm-proxy")
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        app.state.http = httpx.AsyncClient(timeout=30)
+        yield
+        await app.state.http.aclose()
+
+    app = FastAPI(title="115 strm-proxy", lifespan=lifespan)
     app.state.jellyfin_url = jellyfin_url.rstrip("/")
     app.state.cloud115 = cloud115_client
     app.state.url_cache: dict[str, tuple[str, float]] = {}
 
     @app.get("/play/{pick_code}")
-    def play_redirect(pick_code: str):
+    async def play_redirect(pick_code: str):
         url = _get_cached_url(app, pick_code)
         return RedirectResponse(url=url, status_code=302)
 
     @app.api_route("/Videos/{item_id}/{action}", methods=["GET", "HEAD"])
     async def video_stream(request: Request, item_id: str, action: str):
-        if action.lower() not in ("stream", "original"):
+        action_base = action.lower().split(".")[0]
+        if action_base not in ("stream", "original"):
             return await _proxy_to_jellyfin(app, request)
 
         media_source_id = request.query_params.get("mediasourceid", "")
         api_key = request.query_params.get("api_key", "")
 
         try:
-            item_resp = httpx.get(
+            item_resp = await app.state.http.get(
                 f"{app.state.jellyfin_url}/Items",
                 params={
                     "Ids": media_source_id or item_id,
                     "Fields": "Path,MediaSources",
                     "api_key": api_key,
                 },
-                timeout=10,
             )
             item_resp.raise_for_status()
             items = item_resp.json().get("Items", [])
@@ -98,12 +105,11 @@ async def _proxy_to_jellyfin(app: FastAPI, request: Request) -> Response:
     }
     body = await request.body()
 
-    resp = httpx.request(
+    resp = await app.state.http.request(
         method=request.method,
         url=target,
         headers=fwd_headers,
         content=body,
-        timeout=30,
     )
 
     resp_headers = {
