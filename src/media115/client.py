@@ -20,75 +20,98 @@ QR_API = "https://qrcodeapi.115.com"
 PASSPORT_API = "https://passportapi.115.com"
 OPEN_API = "https://proapi.115.com"
 
-# Rate limit state file — lives next to .env in project root
-_RATE_LIMIT_STATE_KEY = "CLOUD_115_COOLDOWN_UNTIL"
+
+_STATE_FILE = ".115_rate_limit"
 
 
-def _read_cooldown(env_path: Path) -> float:
-    """Read cooldown timestamp from .env."""
-    if not env_path.exists():
-        return 0
-    for line in env_path.read_text().splitlines():
-        if line.startswith(f"{_RATE_LIMIT_STATE_KEY}="):
-            try:
-                return float(line.split("=", 1)[1].strip())
-            except ValueError:
-                return 0
-    return 0
+def _read_state(state_path: Path) -> dict:
+    """Read rate limit state from a dedicated state file (not .env)."""
+    if not state_path.exists():
+        return {}
+    try:
+        return json.loads(state_path.read_text())
+    except (json.JSONDecodeError, ValueError):
+        return {}
 
 
-def _write_cooldown(env_path: Path, until: float):
-    """Write cooldown timestamp to .env."""
-    lines = []
-    replaced = False
-    if env_path.exists():
-        for line in env_path.read_text().splitlines():
-            if line.startswith(f"{_RATE_LIMIT_STATE_KEY}="):
-                lines.append(f"{_RATE_LIMIT_STATE_KEY}={until}")
-                replaced = True
-            else:
-                lines.append(line)
-    if not replaced:
-        lines.append(f"{_RATE_LIMIT_STATE_KEY}={until}")
-    env_path.write_text("\n".join(lines) + "\n")
+def _write_state(state_path: Path, state: dict):
+    """Write rate limit state atomically."""
+    state_path.write_text(json.dumps(state))
 
 
 class RateLimiter:
-    """Rate limiter with QPS control and persistent cooldown across processes."""
+    """Rate limiter with QPS + QPM control and cross-process persistence.
 
-    def __init__(self, qps: int = 3, env_path: Path | None = None):
+    State persisted to .115_rate_limit (JSON):
+    - cooldown_until: timestamp, 429 triggers 1-hour global cooldown
+    - last_request: timestamp of last API request
+    - minute_start: start of current minute window
+    - minute_count: requests in current minute window
+    """
+
+    def __init__(self, qps: float = 0.5, qpm: int = 20, state_dir: Path | None = None):
         self._qps = qps
-        self._env_path = env_path
+        self._qpm = qpm
+        self._state_path = state_dir / _STATE_FILE if state_dir else None
         self._lock = threading.Lock()
-        self._last_request: float = 0
         self.request_count = 0
 
     def acquire(self):
         with self._lock:
-            now = time.time()
-            # Check persistent cooldown
-            if self._env_path:
-                cooldown_until = _read_cooldown(self._env_path)
-                if now < cooldown_until:
-                    wait = cooldown_until - now
-                    raise RuntimeError(
-                        f"115 API is in cooldown for {int(wait)}s more "
-                        f"(until {time.strftime('%H:%M:%S', time.localtime(cooldown_until))}). "
-                        f"Try again later."
-                    )
-            # QPS throttle (in-process only, good enough for single CLI)
-            elapsed = now - self._last_request
-            min_interval = 1.0 / self._qps
-            if elapsed < min_interval:
-                time.sleep(min_interval - elapsed)
-            self._last_request = time.time()
+            self._wait_for_slot()
             self.request_count += 1
 
+    def _wait_for_slot(self):
+        if not self._state_path:
+            return
+
+        while True:
+            now = time.time()
+            state = _read_state(self._state_path)
+
+            # Check cooldown (429 ban)
+            cooldown_until = state.get("cooldown_until", 0)
+            if now < cooldown_until:
+                raise RuntimeError(
+                    f"115 API is in cooldown for {int(cooldown_until - now)}s more. "
+                    f"Try again later."
+                )
+
+            # Check QPS
+            last_req = state.get("last_request", 0)
+            min_interval = 1.0 / self._qps
+            wait = min_interval - (now - last_req)
+            if wait > 0:
+                time.sleep(wait)
+                now = time.time()
+
+            # Check QPM
+            minute_start = state.get("minute_start", 0)
+            minute_count = state.get("minute_count", 0)
+
+            if now - minute_start > 60:
+                minute_start = now
+                minute_count = 0
+
+            if minute_count >= self._qpm:
+                wait = 60 - (now - minute_start)
+                if wait > 0:
+                    time.sleep(wait)
+                    continue
+
+            # All checks passed — record this request
+            state["last_request"] = now
+            state["minute_start"] = minute_start
+            state["minute_count"] = minute_count + 1
+            _write_state(self._state_path, state)
+            break
+
     def set_cooldown(self, seconds: float):
-        """Set a global cooldown, persisted to .env for cross-process enforcement."""
-        until = time.time() + seconds
-        if self._env_path:
-            _write_cooldown(self._env_path, until)
+        """Set a global cooldown, persisted for cross-process enforcement."""
+        if self._state_path:
+            state = _read_state(self._state_path)
+            state["cooldown_until"] = time.time() + seconds
+            _write_state(self._state_path, state)
 
 
 class Cloud115Client:
@@ -110,10 +133,9 @@ class Cloud115Client:
             },
         )
         self._env_path = Path.cwd() / ".env"
-        self._limiter = RateLimiter(
-            qps=0.5, env_path=self._env_path
-        )  # Very conservative: 1 request per 2 seconds
-        self._download_limiter = RateLimiter(qps=1, env_path=self._env_path)
+        state_dir = Path.cwd()
+        self._limiter = RateLimiter(qps=0.5, qpm=20, state_dir=state_dir)
+        self._download_limiter = RateLimiter(qps=0.5, qpm=20, state_dir=state_dir)
         self._mode: str = ""  # "cookie" or "openapi"
         # Cookie mode
         self._cookies: str = ""
