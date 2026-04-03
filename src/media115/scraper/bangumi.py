@@ -1,8 +1,11 @@
 """Bangumi API client for anime metadata."""
 
+import time
+
 import httpx
 
 BASE_URL = "https://api.bgm.tv"
+_MIN_INTERVAL = 0.2  # 5 QPS max (conservative, Bangumi has no published limit)
 
 
 class BangumiClient:
@@ -15,6 +18,7 @@ class BangumiClient:
             headers=headers,
             timeout=10,
         )
+        self._last_request: float = 0
 
     def close(self):
         self._http.close()
@@ -25,9 +29,16 @@ class BangumiClient:
     def __exit__(self, *args):
         self.close()
 
+    def _throttle(self):
+        elapsed = time.monotonic() - self._last_request
+        if elapsed < _MIN_INTERVAL:
+            time.sleep(_MIN_INTERVAL - elapsed)
+        self._last_request = time.monotonic()
+
     def search(
         self, keyword: str, subject_type: int = 2, limit: int = 10
     ) -> list[dict]:
+        self._throttle()
         resp = self._http.post(
             "/v0/search/subjects",
             json={
@@ -41,6 +52,7 @@ class BangumiClient:
         return data.get("data", [])
 
     def subject(self, subject_id: int) -> dict:
+        self._throttle()
         resp = self._http.get(f"/v0/subjects/{subject_id}")
         resp.raise_for_status()
         return resp.json()
@@ -52,6 +64,7 @@ class BangumiClient:
         limit: int = 100,
         offset: int = 0,
     ) -> list[dict]:
+        self._throttle()
         params: dict = {
             "subject_id": subject_id,
             "limit": limit,
@@ -64,6 +77,7 @@ class BangumiClient:
         return resp.json().get("data", [])
 
     def subject_persons(self, subject_id: int) -> list[dict]:
+        self._throttle()
         resp = self._http.get(f"/v0/subjects/{subject_id}/persons")
         resp.raise_for_status()
         return resp.json()

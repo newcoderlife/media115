@@ -8,12 +8,12 @@ from media115.client import Cloud115Client, RateLimiter
 
 class TestRateLimiter:
     def test_allows_within_qps(self):
-        limiter = RateLimiter(qps=10, qpm=600, qph=36000)
+        limiter = RateLimiter(qps=10)
         for _ in range(10):
             limiter.acquire()
 
     def test_tracks_request_count(self):
-        limiter = RateLimiter(qps=100, qpm=600, qph=36000)
+        limiter = RateLimiter(qps=100)
         for _ in range(5):
             limiter.acquire()
         assert limiter.request_count >= 5
