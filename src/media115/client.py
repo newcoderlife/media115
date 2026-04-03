@@ -20,35 +20,75 @@ QR_API = "https://qrcodeapi.115.com"
 PASSPORT_API = "https://passportapi.115.com"
 OPEN_API = "https://proapi.115.com"
 
+# Rate limit state file — lives next to .env in project root
+_RATE_LIMIT_STATE_KEY = "CLOUD_115_COOLDOWN_UNTIL"
+
+
+def _read_cooldown(env_path: Path) -> float:
+    """Read cooldown timestamp from .env."""
+    if not env_path.exists():
+        return 0
+    for line in env_path.read_text().splitlines():
+        if line.startswith(f"{_RATE_LIMIT_STATE_KEY}="):
+            try:
+                return float(line.split("=", 1)[1].strip())
+            except ValueError:
+                return 0
+    return 0
+
+
+def _write_cooldown(env_path: Path, until: float):
+    """Write cooldown timestamp to .env."""
+    lines = []
+    replaced = False
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            if line.startswith(f"{_RATE_LIMIT_STATE_KEY}="):
+                lines.append(f"{_RATE_LIMIT_STATE_KEY}={until}")
+                replaced = True
+            else:
+                lines.append(line)
+    if not replaced:
+        lines.append(f"{_RATE_LIMIT_STATE_KEY}={until}")
+    env_path.write_text("\n".join(lines) + "\n")
+
 
 class RateLimiter:
-    """Rate limiter with QPS control and global cooldown on 429."""
+    """Rate limiter with QPS control and persistent cooldown across processes."""
 
-    def __init__(self, qps: int = 3):
+    def __init__(self, qps: int = 3, env_path: Path | None = None):
         self._qps = qps
+        self._env_path = env_path
         self._lock = threading.Lock()
         self._last_request: float = 0
-        self._cooldown_until: float = 0
         self.request_count = 0
 
     def acquire(self):
         with self._lock:
-            now = time.monotonic()
-            # Global cooldown (triggered by 429)
-            if now < self._cooldown_until:
-                wait = self._cooldown_until - now
-                time.sleep(wait)
-            # QPS throttle
+            now = time.time()
+            # Check persistent cooldown
+            if self._env_path:
+                cooldown_until = _read_cooldown(self._env_path)
+                if now < cooldown_until:
+                    wait = cooldown_until - now
+                    raise RuntimeError(
+                        f"115 API is in cooldown for {int(wait)}s more "
+                        f"(until {time.strftime('%H:%M:%S', time.localtime(cooldown_until))}). "
+                        f"Try again later."
+                    )
+            # QPS throttle (in-process only, good enough for single CLI)
             elapsed = now - self._last_request
             min_interval = 1.0 / self._qps
             if elapsed < min_interval:
                 time.sleep(min_interval - elapsed)
-            self._last_request = time.monotonic()
+            self._last_request = time.time()
             self.request_count += 1
 
     def set_cooldown(self, seconds: float):
-        """Set a global cooldown period (e.g., after hitting 429)."""
-        self._cooldown_until = time.monotonic() + seconds
+        """Set a global cooldown, persisted to .env for cross-process enforcement."""
+        until = time.time() + seconds
+        if self._env_path:
+            _write_cooldown(self._env_path, until)
 
 
 class Cloud115Client:
@@ -65,8 +105,9 @@ class Cloud115Client:
             timeout=15,
             headers={"User-Agent": self._USER_AGENT},
         )
-        self._limiter = RateLimiter(qps=3)  # General API: 3 QPS
-        self._download_limiter = RateLimiter(qps=1)  # Download URLs: 1 QPS (stricter)
+        self._env_path = Path.cwd() / ".env"
+        self._limiter = RateLimiter(qps=3, env_path=self._env_path)
+        self._download_limiter = RateLimiter(qps=1, env_path=self._env_path)
         self._mode: str = ""  # "cookie" or "openapi"
         # Cookie mode
         self._cookies: str = ""
@@ -95,7 +136,6 @@ class Cloud115Client:
         client = cls()
         client._mode = "cookie"
         client._cookies = cookies
-        # Extract user_id from UID cookie
         for part in cookies.split(";"):
             part = part.strip()
             if part.startswith("UID="):
@@ -129,27 +169,20 @@ class Cloud115Client:
 
     @classmethod
     def qr_login(cls, app: str = "tv") -> "Cloud115Client":
-        """Interactive QR code login. Returns a client with fresh cookies.
-
-        app: device type. Use 'tv' or 'qandroid' to avoid IP ban issues.
-              'web' may trigger "IP login exception" if used too frequently.
-        """
+        """Interactive QR code login. Returns a client with fresh cookies."""
         http = httpx.Client(timeout=35)
 
-        # Step 1: Get QR token
         resp = http.get(f"{QR_API}/api/1.0/{app}/1.0/token/")
         token_data = resp.json()["data"]
         uid = token_data["uid"]
         qr_time = token_data["time"]
         sign = token_data["sign"]
 
-        # Step 2: Show QR code
         qr_content = f"https://115.com/scan/dg-{uid}"
         qr_image_url = f"{QR_API}/api/1.0/web/1.0/qrcode?qrfrom=1&client=0d&uid={uid}"
         _print_qr(qr_content, qr_image_url)
         print("Waiting for scan...")
 
-        # Step 3: Poll for scan status
         while True:
             try:
                 resp = http.get(
@@ -162,17 +195,14 @@ class Cloud115Client:
                     },
                 )
                 if not resp.content:
-                    # Long-poll timeout, empty response — retry
                     time.sleep(1)
                     continue
                 result = resp.json()
             except (httpx.ReadTimeout, ValueError):
-                # Timeout or invalid JSON — retry
                 time.sleep(1)
                 continue
 
             status = result.get("data", {}).get("status", 0)
-
             if status == 0:
                 time.sleep(2)
                 continue
@@ -191,7 +221,6 @@ class Cloud115Client:
                 raise RuntimeError("Login cancelled")
             time.sleep(1)
 
-        # Step 4: Get cookies
         resp = http.post(
             f"{PASSPORT_API}/app/1.0/{app}/1.0/login/qrcode",
             data={"account": uid, "app": app},
@@ -199,7 +228,6 @@ class Cloud115Client:
         login_data = resp.json().get("data", {})
         cookies = login_data.get("cookie", {})
 
-        # Build cookie string
         if isinstance(cookies, dict):
             cookie_str = "; ".join(f"{k}={v}" for k, v in cookies.items())
         else:
@@ -210,7 +238,7 @@ class Cloud115Client:
         return cls.from_cookies(cookie_str)
 
     def check_login(self) -> bool:
-        """Check if current credentials are valid. Returns True if logged in."""
+        """Check if current credentials are valid."""
         try:
             if self._mode == "cookie":
                 resp = self._http.get(
@@ -219,40 +247,26 @@ class Cloud115Client:
                     timeout=10,
                 )
                 if resp.status_code == 200:
-                    data = resp.json()
-                    return data.get("state", False)
+                    return resp.json().get("state", False)
                 return False
             else:
-                # OpenAPI: try listing root
                 self.list_files(dir_id="0", limit=1)
                 return True
         except Exception:
             return False
 
     def renew_cookies(self, app: str = "tv") -> bool:
-        """Auto-renew cookies without user interaction.
-
-        Uses the current cookie to programmatically scan a new QR code,
-        confirm it, and get fresh cookies. No manual scan needed.
-        Returns True if renewal succeeded, False otherwise.
-        """
+        """Auto-renew cookies without user interaction."""
         if self._mode != "cookie" or not self._cookies:
             return False
-
         try:
             http_headers = {"Cookie": self._cookies}
-
-            # Step 1: Get a new QR token
-            resp = self._http.get(
-                f"{QR_API}/api/1.0/{app}/1.0/token/",
-            )
+            resp = self._http.get(f"{QR_API}/api/1.0/{app}/1.0/token/")
             resp.raise_for_status()
-            token_data = resp.json().get("data", {})
-            uid = token_data.get("uid")
+            uid = resp.json().get("data", {}).get("uid")
             if not uid:
                 return False
 
-            # Step 2: Auto-scan the QR code (using current cookie)
             resp = self._http.get(
                 f"{QR_API}/api/2.0/prompt.php",
                 params={"uid": uid},
@@ -260,7 +274,6 @@ class Cloud115Client:
             )
             resp.raise_for_status()
 
-            # Step 3: Auto-confirm
             resp = self._http.get(
                 f"{QR_API}/api/2.0/slogin.php",
                 params={"key": uid, "uid": uid, "client": 0},
@@ -268,14 +281,12 @@ class Cloud115Client:
             )
             resp.raise_for_status()
 
-            # Step 4: Get new cookies
             resp = self._http.post(
                 f"{PASSPORT_API}/app/1.0/{app}/1.0/login/qrcode",
                 data={"account": uid, "app": app},
             )
             resp.raise_for_status()
-            login_data = resp.json().get("data", {})
-            cookies = login_data.get("cookie", {})
+            cookies = resp.json().get("data", {}).get("cookie", {})
 
             if isinstance(cookies, dict):
                 cookie_str = "; ".join(f"{k}={v}" for k, v in cookies.items())
@@ -286,13 +297,11 @@ class Cloud115Client:
                 return False
 
             self._cookies = cookie_str
-            # Re-extract user_id
             for part in cookie_str.split(";"):
                 part = part.strip()
                 if part.startswith("UID="):
                     self._user_id = part[4:].split("_")[0]
                     break
-
             return True
         except Exception:
             return False
@@ -301,7 +310,6 @@ class Cloud115Client:
         """Save cookies to .env file as CLOUD_115_COOKIES=..."""
         if self._mode != "cookie":
             raise ValueError("Not in cookie mode")
-
         lines = []
         replaced = False
         if env_path.exists():
@@ -323,7 +331,7 @@ class Cloud115Client:
         url: str,
         params: dict | None = None,
         data: dict | None = None,
-        limiter: RateLimiter | None = None,
+        limiter: "RateLimiter | None" = None,
     ) -> dict:
         (limiter or self._limiter).acquire()
         resp = self._http.request(
@@ -334,15 +342,10 @@ class Cloud115Client:
             headers={"Cookie": self._cookies},
         )
         if resp.status_code == 429:
-            # Rate limited — global cooldown
             self._limiter.set_cooldown(3600)
             self._download_limiter.set_cooldown(3600)
-            raise RuntimeError(
-                "115 API rate limit hit (429). Cooling down for 1 hour. "
-                "Reduce request frequency."
-            )
+            raise RuntimeError("115 API rate limit hit (429). Cooling down for 1 hour.")
         if resp.status_code == 405:
-            # Cookie expired — try auto-renewal
             if self.renew_cookies():
                 resp = self._http.request(
                     method,
@@ -353,7 +356,6 @@ class Cloud115Client:
                 )
         resp.raise_for_status()
         result = resp.json()
-        # Check for rate limit in response body
         if isinstance(result, dict) and "errNo" in result:
             err = result["errNo"]
             if err == 770004 or "访问上限" in str(result.get("error", "")):
@@ -371,14 +373,12 @@ class Cloud115Client:
         params: dict | None = None,
         data: dict | None = None,
     ) -> dict:
-        # Auto-refresh token
         if (
             self._refresh_token
             and self._token_expires_at
             and time.time() >= self._token_expires_at
         ):
             self.refresh_access_token()
-
         self._limiter.acquire()
         resp = self._http.request(
             method,
@@ -389,15 +389,6 @@ class Cloud115Client:
         )
         resp.raise_for_status()
         return resp.json()
-
-    def _request(self, method: str, path: str, **kwargs) -> dict:
-        if self._mode == "cookie":
-            url = f"{WEB_API}{path}" if not path.startswith("http") else path
-            return self._cookie_request(method, url, **kwargs)
-        else:
-            return self._openapi_request(method, path, **kwargs)
-
-    # ── OpenAPI token refresh ────────────────────────────────────────
 
     def refresh_access_token(self):
         resp = self._http.post(
@@ -462,27 +453,22 @@ class Cloud115Client:
         result = []
         items = self.list_files_all(dir_id=dir_id)
         for item in items:
-            is_dir = "cid" in item and not item.get("sha")
+            is_dir = "cid" in item or (not item.get("sha") and not item.get("pc"))
             item["_is_dir"] = is_dir
             item["_parent_id"] = dir_id
             result.append(item)
             if is_dir:
-                child_id = item.get("cid", "")
-                if child_id and child_id != dir_id:
+                child_id = item.get("cid", item.get("fid", ""))
+                if child_id:
                     time.sleep(0.5)
                     result.extend(self.list_files_recursive(dir_id=str(child_id)))
         return result
 
     def resolve_path(self, path: str) -> str:
-        """Resolve a path like '/影音/电影/' to a dir_id.
-
-        Walks the directory tree from root, matching each path component.
-        Returns the dir_id of the final directory.
-        """
+        """Resolve a path like '/影音/电影/' to a dir_id."""
         parts = [p for p in path.strip("/").split("/") if p]
         if not parts:
             return "0"
-
         current_id = "0"
         for part in parts:
             items = self.list_files_all(dir_id=current_id)
@@ -528,7 +514,7 @@ class Cloud115Client:
         payload = json.dumps({"pickcode": pick_code})
         encrypted = m115_encode(key, payload)
 
-        self._download_limiter.acquire()  # Stricter: 1 QPS
+        self._download_limiter.acquire()
         resp = self._http.post(
             f"{PRO_API}/app/chrome/downurl",
             params={"t": int(time.time())},
@@ -550,7 +536,6 @@ class Cloud115Client:
         raise ValueError(f"No download URL for pick_code={pick_code}")
 
     def _download_url_openapi(self, pick_code: str) -> str:
-        """Get download URL using OpenAPI (no encryption needed)."""
         result = self._openapi_request(
             "POST", "/open/ufile/downurl", data={"pick_code": pick_code}
         )
@@ -581,11 +566,8 @@ class Cloud115Client:
         self, dir_id: str, filename: str, file_size: int, sha1: str, pre_sha1: str
     ) -> dict:
         if self._mode == "cookie":
-            # Cookie mode rapid upload requires EC115 encryption (ECDH+AES+LZ4),
-            # which is not yet implemented. Fall back to error.
             raise NotImplementedError(
-                "Rapid upload via cookie mode requires EC115 encryption (not yet implemented). "
-                "Use OpenAPI mode or upload manually."
+                "Rapid upload via cookie mode requires EC115 encryption (not yet implemented)."
             )
         return self._openapi_request(
             "POST",
@@ -598,19 +580,6 @@ class Cloud115Client:
                 "pre_sha1": pre_sha1,
             },
         )
-
-    def copy(self, file_ids: list[str], target_dir_id: str) -> dict:
-        if self._mode == "cookie":
-            data = {"pid": target_dir_id}
-            for i, fid in enumerate(file_ids):
-                data[f"fid[{i}]"] = fid
-            return self._cookie_request("POST", f"{WEB_API}/files/copy", data=data)
-        else:
-            return self._openapi_request(
-                "POST",
-                "/open/ufile/copy",
-                data={"fid": ",".join(file_ids), "pid": target_dir_id},
-            )
 
     def move(self, file_ids: list[str], target_dir_id: str) -> dict:
         if self._mode == "cookie":
