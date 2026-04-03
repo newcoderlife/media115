@@ -109,7 +109,8 @@ NFO_EXT = ".nfo"
 @main.command()
 @click.argument("path")
 @click.option("--recursive/--no-recursive", default=True, help="Scan subdirectories")
-def scan(path, recursive):
+@click.option("--depth", default=2, type=int, help="Max recursion depth")
+def scan(path, recursive, depth):
     """Scan a 115 cloud folder and output a scraping plan (dry-run).
 
     PATH can be a dir_id or a path like /影音/电影/.
@@ -133,7 +134,7 @@ def scan(path, recursive):
 
     # List files
     if recursive:
-        items = client.list_files_recursive(dir_id=dir_id)
+        items = client.list_files_recursive(dir_id=dir_id, max_depth=depth)
     else:
         items = client.list_files_all(dir_id=dir_id)
 
