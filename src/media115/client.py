@@ -64,8 +64,17 @@ class RateLimiter:
 class Cloud115Client:
     """Unified 115 client. Use `from_cookies` or `from_openapi` to create."""
 
+    _USER_AGENT = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/130.0.0.0 Safari/537.36"
+    )
+
     def __init__(self):
-        self._http = httpx.Client(timeout=15)
+        self._http = httpx.Client(
+            timeout=15,
+            headers={"User-Agent": self._USER_AGENT},
+        )
         self._limiter = RateLimiter()
         self._mode: str = ""  # "cookie" or "openapi"
         # Cookie mode
