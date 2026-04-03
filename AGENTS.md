@@ -4,21 +4,18 @@ You are working on **115-media**, a media library management tool for 115 cloud 
 
 ## What You Can Do
 
-After reading this file, offer the user these options:
+After checking setup (see below), tell the user in one sentence what's ready, then ask what they want to do. For example:
 
-1. **扫描 115 网盘文件夹** — `115-media scan /影音/电影` 列出文件并分析类型，输出刮削计划表（dry-run）
-2. **搜索元数据** — `115-media scrape "电影名"` 搜索 TMDB/Bangumi/JavBus
-3. **执行刮削** — 按 Scrape workflow 逐个刮削，生成 NFO + 海报
-4. **纠正刮削结果** — 用户说"第 X 行不对"时，修正并写入回归测试
-5. **跑回归测试** — `pytest tests/test_scrape_regression.py -v` 验证所有历史纠正
-6. **登录 115 网盘** — `115-media auth` QR 扫码登录
-7. **检查 115 登录状态** — `115-media auth --check`
+> "TMDB、Bangumi、115 都已配置好。你想扫描哪个文件夹？或者搜索某个电影/动漫的元数据？"
 
-Before any 115 operation (`ls`, `scan`, `upload`, `serve`), first check login:
-```bash
-.venv/bin/python -m media115.cli auth --check
-```
-If not logged in, run `115-media auth` and guide the user to scan the QR code.
+Your capabilities:
+1. **扫描 115 网盘文件夹** — 列出文件，分析类型，输出刮削计划表
+2. **搜索元数据** — 从 TMDB/Bangumi/JavBus 查询电影/剧集/动漫/AV 的信息
+3. **执行刮削** — 生成 NFO 文件和海报
+4. **纠正结果** — 用户说"不对"时修正，自动写入回归测试
+5. **跑测试** — 验证所有历史纠正没有被破坏
+
+Do NOT list CLI commands to the user. Just describe what you can do and ask what they want.
 
 ## Setup
 
@@ -38,9 +35,27 @@ grep -E "^(TMDB_READ_ACCESS_TOKEN|BANGUMI_ACCESS_TOKEN|CLOUD_115_COOKIES)=" .env
 
 - If `TMDB_READ_ACCESS_TOKEN` has a value → TMDB is ready, no action needed
 - If `BANGUMI_ACCESS_TOKEN` has a value → Bangumi is ready
-- If `CLOUD_115_COOKIES` has a value → check with `115-media auth --check` if still valid
+- If `CLOUD_115_COOKIES` has a value → 115 is ready. Optionally verify: `.venv/bin/python -m media115.cli auth --check`
+- If `CLOUD_115_COOKIES` is missing or empty → 115 needs login (see "115 Login" below)
 
 Only ask the user to configure keys that are missing or empty. If all keys are present, skip setup and go straight to "What You Can Do".
+
+### 115 Login
+
+**IMPORTANT**: The `115-media auth` command is INTERACTIVE — it prints a URL and waits for the user to scan a QR code. You CANNOT run it via Bash tool (it will block forever).
+
+When 115 login is needed, tell the user to run it themselves:
+
+> "115 还没登录。请在终端运行以下命令，然后用 115 App 扫码：
+>
+> `.venv/bin/115-media auth`
+>
+> 扫码完成后告诉我，我继续操作。"
+
+Do NOT attempt to run `115-media auth` yourself. Wait for the user to confirm login is done, then verify with:
+```bash
+.venv/bin/python -m media115.cli auth --check
+```
 
 ## Project Layout
 
