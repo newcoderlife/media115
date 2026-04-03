@@ -418,10 +418,14 @@ class Cloud115Client:
                 "GET",
                 f"{WEB_API}/files",
                 params={
+                    "aid": 1,
                     "cid": dir_id,
                     "limit": limit,
                     "offset": offset,
                     "show_dir": 1,
+                    "o": "user_ptime",
+                    "asc": 1,
+                    "natsort": 1,
                     "format": "json",
                 },
             )
