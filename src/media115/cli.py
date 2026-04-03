@@ -78,21 +78,26 @@ def auth(app, check, renew):
 
 @main.command()
 @click.argument("path", default="0")
-def ls(path):
+@click.option("--tree", is_flag=True, help="Show directory tree recursively")
+@click.option("--depth", default=3, type=int, help="Max depth for tree view")
+def ls(path, tree, depth):
     """List files in 115 cloud directory. Accepts dir_id or path like /影音/电影/."""
     client = _get_115_client()
     if not client:
         return
     try:
         dir_id = _resolve_dir(client, path)
-        files = client.list_files_all(dir_id=dir_id)
-        for f in files:
-            name = f.get("fn", f.get("n", "?"))
-            is_dir = "cid" in f or (not f.get("sha") and not f.get("pc"))
-            size = f.get("s", 0)
-            type_mark = "D" if is_dir else "F"
-            click.echo(f"  [{type_mark}] {name:40s}  {size:>12,}")
-        click.echo(f"\n  Total: {len(files)} items")
+        if tree:
+            _print_tree(client, dir_id, path, depth=depth)
+        else:
+            files = client.list_files_all(dir_id=dir_id)
+            for f in files:
+                name = f.get("fn", f.get("n", "?"))
+                is_dir = "cid" in f or (not f.get("sha") and not f.get("pc"))
+                size = f.get("s", 0)
+                type_mark = "D" if is_dir else "F"
+                click.echo(f"  [{type_mark}] {name:40s}  {size:>12,}")
+            click.echo(f"\n  Total: {len(files)} items")
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
 
@@ -338,6 +343,35 @@ def _trunc(s: str, maxlen: int) -> str:
     if len(s) <= maxlen:
         return s
     return s[: maxlen - 2] + ".."
+
+
+def _print_tree(client, dir_id: str, label: str, depth: int, prefix: str = ""):
+    """Print directory tree recursively."""
+    if depth < 0:
+        return
+    items = client.list_files_all(dir_id=dir_id)
+    dirs = []
+    files = []
+    for item in items:
+        is_dir = "cid" in item or (not item.get("sha") and not item.get("pc"))
+        if is_dir:
+            dirs.append(item)
+        else:
+            files.append(item)
+
+    entries = dirs + files
+    for i, item in enumerate(entries):
+        name = item.get("fn", item.get("n", "?"))
+        is_last = i == len(entries) - 1
+        connector = "\u2514\u2500\u2500 " if is_last else "\u251c\u2500\u2500 "
+        is_dir = item in dirs
+        mark = "\U0001f4c1" if is_dir else "\U0001f4c4"
+        click.echo(f"{prefix}{connector}{mark} {name}")
+
+        if is_dir and depth > 0:
+            child_id = str(item.get("cid", item.get("fid", "")))
+            child_prefix = prefix + ("    " if is_last else "\u2502   ")
+            _print_tree(client, child_id, name, depth - 1, child_prefix)
 
 
 if __name__ == "__main__":
