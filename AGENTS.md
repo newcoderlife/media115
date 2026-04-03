@@ -19,10 +19,18 @@ Do NOT list CLI commands to the user. Just describe what you can do and ask what
 
 ## Setup
 
-Before running any command, ensure the virtual environment exists:
+Before running any command, ensure the virtual environment and skills are set up:
 
 ```bash
 test -d .venv || (python3 -m venv .venv && .venv/bin/pip install -e .)
+```
+
+### Install skills (Claude Code only, one-time)
+
+Skills are in `skills/` (cross-tool). Claude Code needs them in `.claude/skills/`. Create a symlink if it doesn't exist:
+
+```bash
+mkdir -p .claude && test -L .claude/skills || ln -s ../skills .claude/skills
 ```
 
 ### Check existing config
