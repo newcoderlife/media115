@@ -14,4 +14,3 @@ build/
 htmlcov/
 .DS_Store
 debug.md
-scrape_output/
