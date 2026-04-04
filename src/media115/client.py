@@ -751,7 +751,8 @@ class Cloud115Client:
         )
         export_id = resp.get("data", {}).get("export_id")
         if not export_id:
-            return None
+            # Previous export might still be running — try polling with id=0
+            export_id = 0
 
         # Poll status
         pick_code = None
@@ -763,10 +764,13 @@ class Cloud115Client:
                 f"{WEB_API}/files/export_dir",
                 params={"export_id": export_id},
             )
-            pc = status.get("data", {}).get("pick_code")
+            data = status.get("data", {})
+            if isinstance(data, list):
+                data = data[0] if data else {}
+            pc = data.get("pick_code") if isinstance(data, dict) else None
             if pc:
                 pick_code = pc
-                file_id = status.get("data", {}).get("file_id")
+                file_id = data.get("file_id")
                 break
 
         if not pick_code:
