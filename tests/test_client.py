@@ -9,42 +9,47 @@ from media115.client import Cloud115Client, RateLimiter
 class TestRateLimiter:
     def test_allows_without_env(self):
         """Without env_path, limiter is in-process only and doesn't block."""
-        limiter = RateLimiter(qps=100, qpm=1000, state_dir=None)
+        limiter = RateLimiter(qps=100, qpm=1000, use_state=False)
         for _ in range(10):
             limiter.acquire()
 
     def test_persistent_state(self, tmp_path):
-        """State is persisted to .115_rate_limit file."""
-        limiter = RateLimiter(qps=10, qpm=1000, state_dir=tmp_path)
-        limiter.acquire()
-        state_file = tmp_path / ".115_rate_limit"
-        assert state_file.exists()
+        """State is persisted to state file."""
         import json
 
+        state_file = tmp_path / "rate_limit.json"
+        limiter = RateLimiter(qps=10, qpm=1000, use_state=False)
+        limiter._state_path = state_file  # Override for test
+        limiter.acquire()
+        assert state_file.exists()
         state = json.loads(state_file.read_text())
         assert "last_request" in state
         assert state["minute_count"] == 1
 
     def test_persistent_qpm(self, tmp_path):
         """QPM counter is tracked across calls."""
-        limiter = RateLimiter(qps=100, qpm=1000, state_dir=tmp_path)
-        limiter.acquire()
-        limiter.acquire()
-        limiter.acquire()
         import json
 
-        state = json.loads((tmp_path / ".115_rate_limit").read_text())
+        state_file = tmp_path / "rate_limit.json"
+        limiter = RateLimiter(qps=100, qpm=1000, use_state=False)
+        limiter._state_path = state_file
+        limiter.acquire()
+        limiter.acquire()
+        limiter.acquire()
+        state = json.loads(state_file.read_text())
         assert state["minute_count"] == 3
 
     def test_cooldown_blocks(self, tmp_path):
         """Cooldown blocks subsequent calls."""
-        limiter = RateLimiter(qps=100, qpm=1000, state_dir=tmp_path)
+        state_file = tmp_path / "rate_limit.json"
+        limiter = RateLimiter(qps=100, qpm=1000, use_state=False)
+        limiter._state_path = state_file
         limiter.set_cooldown(3600)
         with pytest.raises(RuntimeError, match="cooldown"):
             limiter.acquire()
 
     def test_tracks_request_count(self):
-        limiter = RateLimiter(qps=100, qpm=1000, state_dir=None)
+        limiter = RateLimiter(qps=100, qpm=1000, use_state=False)
         for _ in range(5):
             limiter.acquire()
         assert limiter.request_count >= 5

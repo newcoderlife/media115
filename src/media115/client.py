@@ -11,6 +11,7 @@ from pathlib import Path
 
 import httpx
 
+from media115.cache import rate_limit_path as _rate_limit_path
 from media115._crypto import generate_m115_key, m115_encode, m115_decode
 
 # API endpoints
@@ -19,9 +20,6 @@ PRO_API = "https://proapi.115.com"
 QR_API = "https://qrcodeapi.115.com"
 PASSPORT_API = "https://passportapi.115.com"
 OPEN_API = "https://proapi.115.com"
-
-
-_STATE_FILE = ".115_rate_limit"
 
 
 def _read_state(state_path: Path) -> dict:
@@ -49,10 +47,10 @@ class RateLimiter:
     - minute_count: requests in current minute window
     """
 
-    def __init__(self, qps: float = 0.5, qpm: int = 20, state_dir: Path | None = None):
+    def __init__(self, qps: float = 0.5, qpm: int = 20, use_state: bool = True):
         self._qps = qps
         self._qpm = qpm
-        self._state_path = state_dir / _STATE_FILE if state_dir else None
+        self._state_path = _rate_limit_path() if use_state else None
         self._lock = threading.Lock()
         self.request_count = 0
 
@@ -133,9 +131,8 @@ class Cloud115Client:
             },
         )
         self._env_path = Path.cwd() / ".env"
-        state_dir = Path.cwd()
-        self._limiter = RateLimiter(qps=0.5, qpm=20, state_dir=state_dir)
-        self._download_limiter = RateLimiter(qps=0.5, qpm=20, state_dir=state_dir)
+        self._limiter = RateLimiter(qps=0.5, qpm=20)
+        self._download_limiter = RateLimiter(qps=0.5, qpm=20)
         self._mode: str = ""  # "cookie" or "openapi"
         # Cookie mode
         self._cookies: str = ""
