@@ -21,12 +21,18 @@ def scrape_movie(title: str, year: int | None, filename: str, out_dir: Path) -> 
     if not token:
         return {"status": "error", "error": "TMDB_READ_ACCESS_TOKEN not set"}
 
+    # Check not_found cache
+    cache_key = f"search_{title}_{year}"
+    if media_cache.is_not_found("tmdb", cache_key):
+        return {"status": "not_found", "query": title, "cached": True}
+
     client = TMDBClient(read_access_token=token)
     try:
         results = client.search_movie(title)
         if not results and year:
             results = client.search_movie(title.split(".")[0])
         if not results:
+            media_cache.put_not_found("tmdb", cache_key)
             return {"status": "not_found", "query": title}
 
         match = _best_match(results, year)
@@ -69,6 +75,10 @@ def scrape_tv(
     if not token:
         return {"status": "error", "error": "TMDB_READ_ACCESS_TOKEN not set"}
 
+    cache_key = f"search_{title}_{season}_{episode}"
+    if media_cache.is_not_found("tmdb", cache_key):
+        return {"status": "not_found", "query": title, "cached": True}
+
     client = TMDBClient(read_access_token=token)
     try:
         clean = re.sub(r"^\[.*?\]\s*", "", title).replace(".", " ").strip()
@@ -76,6 +86,7 @@ def scrape_tv(
         if not results:
             results = client.search_tv(clean.split()[0] if clean else title)
         if not results:
+            media_cache.put_not_found("tmdb", cache_key)
             return {"status": "not_found", "query": clean}
 
         match = results[0]
@@ -98,12 +109,16 @@ def scrape_tv(
 
 
 def scrape_av(number: str, filename: str, out_dir: Path) -> dict:
-    """Scrape AV metadata. Fallback: jav321 → javfree."""
-    # Check cache
+    """Scrape AV metadata. Fallback: jav321 → javfree. Caches not_found for 7 days."""
+    # Check success cache (permanent)
     cached = media_cache.get("av", number)
-    if cached:
+    if cached and not cached.get("_not_found"):
         _write_av_nfo(cached, filename, out_dir, cached.get("_source", "cache"))
         return {"status": "ok", "match": cached.get("title", ""), "number": number}
+
+    # Check not_found cache (7-day TTL)
+    if media_cache.is_not_found("av", number):
+        return {"status": "not_found", "number": number, "cached": True}
 
     from media115.scraper.jav321 import fetch_metadata as jav321_fetch
     from media115.scraper.javfree import fetch_metadata as javfree_fetch
@@ -116,6 +131,8 @@ def scrape_av(number: str, filename: str, out_dir: Path) -> dict:
             _write_av_nfo(meta, filename, out_dir, source)
             return {"status": "ok", "match": meta["title"], "number": number}
 
+    # All sources exhausted — cache not_found for 7 days
+    media_cache.put_not_found("av", number)
     return {"status": "not_found", "number": number}
 
 
