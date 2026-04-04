@@ -1,7 +1,7 @@
 ---
 name: auth
-description: Check 115 login status and guide QR login if needed
-version: 1.0
+description: Check 115 login status and complete QR login if needed
+version: 2.0
 ---
 
 ## Step 1: Check login status
@@ -12,23 +12,28 @@ version: 1.0
 
 ## Step 2: If already logged in
 
-Tell the user "115 已登录" and proceed.
+Tell the user "115 已登录" and proceed with their request.
 
-## Step 3: If NOT logged in
+## Step 3: If NOT logged in — generate QR (non-blocking)
 
-**DO NOT run `115-media auth` via Bash.** It is interactive and will block forever.
+```bash
+.venv/bin/python -m media115.cli auth --get-qr
+```
 
-Tell the user to run it themselves in a separate terminal:
+This prints `QR_URL=https://...` and exits immediately. Show the URL to the user:
 
-> 115 还没登录。请在终端运行：
+> 请用 115 App 扫描这个二维码登录：
+> {QR_URL}
 >
-> `.venv/bin/115-media auth`
->
-> 浏览器打开输出的链接，用 115 App 扫码。完成后告诉我。
+> 扫码完成后告诉我。
 
-## Step 4: After user confirms login
+## Step 4: After user confirms scan — complete login
 
-Verify:
+```bash
+.venv/bin/python -m media115.cli auth --wait-qr
+```
+
+This polls for scan result and saves cookies to .env. Then verify:
 
 ```bash
 .venv/bin/python -m media115.cli auth --check

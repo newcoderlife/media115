@@ -43,9 +43,14 @@ def main():
 @click.option("--check", is_flag=True, help="Only check if already logged in")
 @click.option("--renew", is_flag=True, help="Auto-renew cookies without scanning")
 @click.option("--force", is_flag=True, help="Force re-login even if already logged in")
-def auth(app, check, renew, force):
+@click.option("--get-qr", is_flag=True, help="Generate QR URL and exit (non-blocking)")
+@click.option(
+    "--wait-qr", is_flag=True, help="Wait for QR scan to complete and save cookies"
+)
+def auth(app, check, renew, force, get_qr, wait_qr):
     """Login to 115 via QR code scan. Saves cookies to .env."""
-    from media115.client import Cloud115Client
+    from media115.client import Cloud115Client, QR_API
+    import json as _json
 
     existing = _get_115_client()
 
@@ -54,6 +59,97 @@ def auth(app, check, renew, force):
             click.echo("Already logged in to 115.")
         else:
             click.echo("Not logged in to 115.")
+        return
+
+    if get_qr:
+        # Non-blocking: generate QR and save session, then exit
+        import httpx as _httpx
+
+        resp = _httpx.get(f"{QR_API}/api/1.0/{app}/1.0/token/")
+        token_data = resp.json()["data"]
+        uid = token_data["uid"]
+        qr_url = f"{QR_API}/api/1.0/web/1.0/qrcode?qrfrom=1&client=0d&uid={uid}"
+        # Save session for --wait-qr
+        session = {
+            "uid": uid,
+            "time": token_data["time"],
+            "sign": token_data["sign"],
+            "app": app,
+        }
+        qr_session_path = Path.cwd() / ".cache" / "qr_session.json"
+        qr_session_path.parent.mkdir(parents=True, exist_ok=True)
+        qr_session_path.write_text(_json.dumps(session))
+        click.echo(f"QR_URL={qr_url}")
+        return
+
+    if wait_qr:
+        # Blocking: poll for scan result, save cookies
+        import time as _time
+        import httpx as _httpx
+
+        qr_session_path = Path.cwd() / ".cache" / "qr_session.json"
+        if not qr_session_path.exists():
+            click.echo("No QR session. Run 'auth --get-qr' first.", err=True)
+            return
+        session = _json.loads(qr_session_path.read_text())
+        uid, qr_time, sign, qr_app = (
+            session["uid"],
+            session["time"],
+            session["sign"],
+            session["app"],
+        )
+
+        click.echo("Waiting for QR scan...")
+        while True:
+            try:
+                resp = _httpx.get(
+                    f"{QR_API}/get/status/",
+                    params={
+                        "uid": uid,
+                        "time": qr_time,
+                        "sign": sign,
+                        "_": int(_time.time()),
+                    },
+                    timeout=35,
+                )
+                if not resp.content:
+                    _time.sleep(1)
+                    continue
+                result = resp.json()
+            except Exception:
+                _time.sleep(1)
+                continue
+
+            status = result.get("data", {}).get("status", 0)
+            if status == 0:
+                _time.sleep(2)
+            elif status == 1:
+                click.echo("Scanned, waiting for confirmation...")
+                _time.sleep(1)
+            elif status == 2:
+                break
+            elif status == -1:
+                click.echo("QR expired. Run 'auth --get-qr' again.", err=True)
+                return
+            else:
+                _time.sleep(1)
+
+        from media115.client import PASSPORT_API
+
+        resp = _httpx.post(
+            f"{PASSPORT_API}/app/1.0/{qr_app}/1.0/login/qrcode",
+            data={"account": uid, "app": qr_app},
+        )
+        cookies = resp.json().get("data", {}).get("cookie", {})
+        if isinstance(cookies, dict):
+            cookie_str = "; ".join(f"{k}={v}" for k, v in cookies.items())
+        else:
+            cookie_str = str(cookies)
+
+        client = Cloud115Client.from_cookies(cookie_str)
+        client.save_cookies_to_env(Path.cwd() / ".env")
+        qr_session_path.unlink(missing_ok=True)
+        click.echo("Login success! Cookies saved to .env")
         return
 
     if renew:
