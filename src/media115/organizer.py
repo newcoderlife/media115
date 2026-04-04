@@ -243,7 +243,12 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
             if new_name and new_name != op["file"]:
                 client.rename(fid, new_name)
 
-            # Step 4: Update file_map cache with new filename
+            # Step 4: Upload NFO + poster if available
+            if target_folder:
+                upload_cid = created_dirs.get(target_folder) or category_cid
+                _upload_scrape_output(client, op, upload_cid)
+
+            # Step 5: Update file_map cache with new filename
             from media115 import cache as _cache
             from media115.utils import stem as _u_stem
 
@@ -261,6 +266,35 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
             print(f" error: {e}", file=sys.stderr)
 
     return results
+
+
+def _upload_scrape_output(client, op: dict, target_cid: str):
+    """Upload NFO + poster for an organized file if they exist locally."""
+    import os
+
+    scrape_dir = Path(os.getcwd()) / ".cache" / "scrape_output"
+    if not scrape_dir.exists():
+        return
+
+    # Find matching output directory (by original parent path)
+    parent = op.get("parent", "")
+    search_name = parent.replace("/", "_")
+
+    for category_dir in scrape_dir.iterdir():
+        if not category_dir.is_dir():
+            continue
+        for out_dir in category_dir.iterdir():
+            if not out_dir.is_dir():
+                continue
+            if search_name in out_dir.name:
+                # Upload all NFO and image files
+                for f in out_dir.iterdir():
+                    if f.suffix in (".nfo", ".jpg", ".png"):
+                        try:
+                            client.upload_file(f, target_cid, f.name)
+                        except Exception:
+                            pass
+                return
 
 
 def _sanitize(name: str) -> str:
