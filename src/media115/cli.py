@@ -3,6 +3,8 @@
 import os
 from pathlib import Path
 
+from media115 import cache as media_cache
+
 from media115.client import WEB_API
 
 import click
@@ -107,7 +109,6 @@ def ls(path, tree, depth):
 
 VIDEO_EXTS = {".mkv", ".mp4", ".avi", ".ts", ".rmvb", ".wmv", ".flv", ".mov", ".m4v"}
 NFO_EXT = ".nfo"
-TREE_CACHE = "tree_cache.txt"
 
 
 @main.command("export-tree")
@@ -178,7 +179,7 @@ def export_tree(dir_id):
 
     # Decode UTF-16 and save as UTF-8
     text = dl.content.decode("utf-16-le", errors="replace")
-    tree_path = Path.cwd() / TREE_CACHE
+    tree_path = media_cache.tree_cache_path()
     tree_path.write_text(text)
 
     lines = text.strip().split("\n")
@@ -193,7 +194,7 @@ def export_tree(dir_id):
 
 def _parse_tree_cache() -> list[dict]:
     """Parse tree_cache.txt into a list of file entries for scan."""
-    tree_path = Path.cwd() / TREE_CACHE
+    tree_path = media_cache.tree_cache_path()
     if not tree_path.exists():
         return []
 
@@ -250,7 +251,7 @@ def scan_tree(category):
         match_against_cases,
     )
 
-    tree_path = Path.cwd() / TREE_CACHE
+    tree_path = media_cache.tree_cache_path()
     if not tree_path.exists():
         click.echo("No tree cache. Run '115-media export-tree' first.", err=True)
         return
@@ -408,6 +409,8 @@ def _scrape_movie(title: str, year: int | None, filename: str, out_dir: Path) ->
 
     client = TMDBClient(read_access_token=token)
     query = title
+
+    # Search (no cache for search — it's cheap and results change)
     results = client.search_movie(query)
     if not results and year:
         results = client.search_movie(query.split(".")[0])
@@ -415,7 +418,6 @@ def _scrape_movie(title: str, year: int | None, filename: str, out_dir: Path) ->
     if not results:
         return {"status": "not_found", "query": query}
 
-    # Pick best match (first result, or match year)
     match = results[0]
     if year:
         for r in results:
@@ -424,8 +426,19 @@ def _scrape_movie(title: str, year: int | None, filename: str, out_dir: Path) ->
                 match = r
                 break
 
-    detail = client.movie_detail(match["id"])
-    images = client.movie_images(match["id"])
+    tmdb_id = match["id"]
+
+    # Detail + images (cached by TMDB ID)
+    cached = media_cache.get("tmdb", f"movie_{tmdb_id}")
+    if cached:
+        detail = cached["detail"]
+        images = cached["images"]
+    else:
+        detail = client.movie_detail(tmdb_id)
+        images = client.movie_images(tmdb_id)
+        media_cache.put(
+            "tmdb", f"movie_{tmdb_id}", {"detail": detail, "images": images}
+        )
 
     stem = _split_ext(filename)[0]
     metadata = {
@@ -506,14 +519,22 @@ def _scrape_av(number: str, filename: str, out_dir: Path) -> dict:
     from media115.scraper.nfo import generate_movie_nfo
     from media115.scraper.artwork import download_image
 
-    # Try jav321 → javfree → javbus fallback chain
-    meta = jav321_fetch(number)
-    source = "jav321"
-    if not meta or not meta.get("title"):
-        meta = javfree_fetch(number)
-        source = "javfree"
-    if not meta or not meta.get("title"):
-        return {"status": "not_found", "number": number}
+    # Check cache first
+    cached = media_cache.get("av", number)
+    if cached:
+        meta = cached
+        source = cached.get("_source", "cache")
+    else:
+        # Try jav321 → javfree fallback chain
+        meta = jav321_fetch(number)
+        source = "jav321"
+        if not meta or not meta.get("title"):
+            meta = javfree_fetch(number)
+            source = "javfree"
+        if not meta or not meta.get("title"):
+            return {"status": "not_found", "number": number}
+        meta["_source"] = source
+        media_cache.put("av", number, meta)
 
     stem = _split_ext(filename)[0]
     metadata = {
