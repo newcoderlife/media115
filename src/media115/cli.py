@@ -465,6 +465,22 @@ def organize(category, execute, cleanup):
         nn = _trunc(op.get("new_name") or "-", 35)
         click.echo(f"| {i:>3} | {cur:<45} | {nf:<30} | {nn:<35} |")
 
+    # Check for target conflicts
+    from collections import Counter
+
+    targets = Counter()
+    for op in renames:
+        key = (op.get("new_folder", ""), op.get("new_name", ""))
+        if key != ("", ""):
+            targets[key] += 1
+    conflicts = {k: v for k, v in targets.items() if v > 1}
+    if conflicts:
+        click.echo(f"\n⚠ {len(conflicts)} target conflicts detected:")
+        for (folder, name), count in conflicts.items():
+            click.echo(f"  {count}x → {folder}/{name}")
+        click.echo("Resolve conflicts before executing (e.g., delete duplicates).")
+        return
+
     if not execute:
         click.echo(
             f"\nDry-run complete. Use --execute to apply {len(renames)} renames."
