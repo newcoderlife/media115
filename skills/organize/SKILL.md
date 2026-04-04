@@ -32,6 +32,6 @@ After organize, old empty directories may remain. Tell the user they can delete 
 ### 5. Verify
 Re-export tree to confirm:
 ```bash
-.venv/bin/python -m media115.cli export-tree
+.venv/bin/python -m media115.cli export-tree /影音
 .venv/bin/python -m media115.cli ls /影音/$CATEGORY
 ```
