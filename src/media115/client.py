@@ -489,7 +489,7 @@ class Cloud115Client:
         result = []
         items = self.list_files_all(dir_id=dir_id)
         for item in items:
-            is_dir = "cid" in item or (not item.get("sha") and not item.get("pc"))
+            is_dir = "fid" not in item
             item["_is_dir"] = is_dir
             item["_parent_id"] = dir_id
             result.append(item)
@@ -516,7 +516,7 @@ class Cloud115Client:
             found = False
             for item in items:
                 name = item.get("fn", item.get("n", ""))
-                is_dir = "cid" in item or (not item.get("sha") and not item.get("pc"))
+                is_dir = "fid" not in item
                 if is_dir and name == part:
                     current_id = str(item.get("cid", item.get("fid", "")))
                     found = True

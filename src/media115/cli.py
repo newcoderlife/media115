@@ -94,7 +94,7 @@ def ls(path, tree, depth):
             files = client.list_files_all(dir_id=dir_id)
             for f in files:
                 name = f.get("fn", f.get("n", "?"))
-                is_dir = "cid" in f or (not f.get("sha") and not f.get("pc"))
+                is_dir = "fid" not in f
                 size = f.get("s", 0)
                 type_mark = "D" if is_dir else "F"
                 click.echo(f"  [{type_mark}] {name:40s}  {size:>12,}")
@@ -144,7 +144,7 @@ def scan(path, recursive, depth):
     nfo_set: set[str] = set()  # parent_id + basename (without ext) that have .nfo
     for item in items:
         name = item.get("fn", item.get("n", ""))
-        is_dir = item.get("_is_dir", "cid" in item)
+        is_dir = item.get("_is_dir", "fid" not in item)
         if is_dir:
             continue
         stem, ext = _split_ext(name)
@@ -361,7 +361,7 @@ def _print_tree(client, dir_id: str, label: str, depth: int, prefix: str = ""):
     dirs = []
     files = []
     for item in items:
-        is_dir = "cid" in item or (not item.get("sha") and not item.get("pc"))
+        is_dir = "fid" not in item
         if is_dir:
             dirs.append(item)
         else:
