@@ -34,127 +34,7 @@ def compute_pre_sha1(file_path: Path) -> str:
     return h.hexdigest()
 
 
-def generate_strm(strm_path: Path, pick_code: str, proxy_base: str):
-    url = f"{proxy_base.rstrip('/')}/play/{pick_code}"
-    strm_path.write_text(url + "\n")
-
-
-def process_file_to_strm(
-    video_path: Path,
-    cloud_client,
-    remote_dir_id: str,
-    proxy_base: str,
-) -> dict:
-    if video_path.suffix == ".strm":
-        return {"success": True, "skipped": True}
-
-    sha1 = compute_sha1(video_path)
-    pre_sha1 = compute_pre_sha1(video_path)
-    file_size = video_path.stat().st_size
-
-    result = cloud_client.rapid_upload(
-        dir_id=remote_dir_id,
-        filename=video_path.name,
-        file_size=file_size,
-        sha1=sha1,
-        pre_sha1=pre_sha1,
-    )
-
-    if result.get("status") != 2:
-        return {
-            "success": False,
-            "reason": "rapid_upload_failed",
-            "status": result.get("status"),
-        }
-
-    pick_code = result["data"]["pick_code"]
-    strm_path = video_path.with_suffix(".strm")
-    generate_strm(strm_path, pick_code, proxy_base)
-    video_path.unlink()
-
-    return {"success": True, "pick_code": pick_code, "strm_path": str(strm_path)}
-
-
 # ── 115 Cloud directory organization ─────────────────────────────────
-
-
-def plan_movie_rename(folder_name: str, metadata: dict | None) -> str | None:
-    """Generate Jellyfin-standard folder name for a movie.
-
-    Input:  'A.Better.Tomorrow.II.1987.BluRay.2160p...'
-    Output: '英雄本色2 (1987)' (if metadata available)
-    Or:     'A Better Tomorrow II (1987)' (parsed from filename)
-    """
-    if metadata:
-        title = metadata.get("title", "")
-        year = metadata.get("year")
-        if title and year:
-            clean = _sanitize(title)
-            return f"{clean} ({year})"
-
-    # Fallback: parse from folder name
-    m = re.match(r"^(.+?)[.\s](\d{4})[.\s]", folder_name)
-    if m:
-        title = m.group(1).replace(".", " ").strip()
-        year = m.group(2)
-        return f"{title} ({year})"
-
-    return None
-
-
-def plan_tv_rename(folder_name: str, metadata: dict | None) -> str | None:
-    """Generate Jellyfin-standard folder name for a TV show.
-
-    Input:  '沧元图.The.Demon.Hunter.S01.2026...'
-    Output: '沧元图 (2026)'
-    """
-    if metadata:
-        title = metadata.get("title", "")
-        year = (metadata.get("aired", "") or metadata.get("premiered", ""))[:4]
-        if title and year:
-            clean = _sanitize(title)
-            return f"{clean} ({year})"
-
-    # Fallback: parse
-    m = re.match(r"^(.+?)[.\s]S\d{2}", folder_name, re.IGNORECASE)
-    if m:
-        title = m.group(1).replace(".", " ").strip()
-        # Try to find year
-        year_m = re.search(r"\.(\d{4})\.", folder_name)
-        year = year_m.group(1) if year_m else ""
-        if year:
-            return f"{title} ({year})"
-        return title
-
-    return None
-
-
-def plan_av_rename(folder_name: str) -> str | None:
-    """Generate clean AV folder name.
-
-    Input:  'DANDY-992.2026.2160p.DMM.WEB-DL...'
-    Output: 'DANDY-992'
-    """
-    m = re.match(r"^([A-Z]{2,10}-\d{3,5})", folder_name, re.IGNORECASE)
-    if m:
-        return m.group(1).upper()
-    return None
-
-
-def plan_episode_rename(filename: str, show_title: str) -> str | None:
-    """Generate Jellyfin-standard episode filename.
-
-    Input:  'The.Demon.Hunter.S01E67.2026.2160p...'
-    Output: '沧元图 S01E67.mkv'
-    """
-    m = re.search(r"(S\d{2}E\d{2,3})", filename, re.IGNORECASE)
-    if m:
-        ep_tag = m.group(1).upper()
-        ext_m = re.search(r"(\.\w{2,4})$", filename)
-        ext = ext_m.group(1) if ext_m else ".mkv"
-        clean = _sanitize(show_title)
-        return f"{clean} {ep_tag}{ext}"
-    return None
 
 
 def build_organize_plan(
@@ -199,7 +79,7 @@ def build_organize_plan(
             continue
 
         media_type = scrape_info.get("type", "unknown")
-        ext_m = re.search(r"(\\.\w{2,4})$", name)
+        ext_m = re.search(r"(\.\w{2,4})$", name)
         ext = ext_m.group(1) if ext_m else ".mkv"
 
         if media_type == "movie":
