@@ -54,9 +54,10 @@ def analyze_filename(filename: str) -> AnalysisResult:
     """
     name = Path(filename).stem
 
-    # AV:番号模式 (ABC-123, FC2-PPV-1234567, 012345_678)
-    if re.search(r"^[A-Z]{2,6}-\d{3,5}$", name, re.IGNORECASE):
-        number = name.upper()
+    # AV:番号模式 (ABC-123, ABC-123.2026.2160p..., FC2-PPV-1234567, 012345_678)
+    av_match = re.match(r"^([A-Z]{2,10}-\d{3,5})", name, re.IGNORECASE)
+    if av_match:
+        number = av_match.group(1).upper()
         return AnalysisResult(
             filename=filename,
             media_type="av",
