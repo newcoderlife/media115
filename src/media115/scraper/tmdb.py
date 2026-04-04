@@ -80,6 +80,18 @@ class TMDBClient:
             params={"language": language or self._language},
         )
 
+    def movie_credits(self, movie_id: int, language: str | None = None) -> dict:
+        return self._get(
+            f"/movie/{movie_id}/credits",
+            params={"language": language or self._language},
+        )
+
+    def tv_credits(self, tv_id: int, language: str | None = None) -> dict:
+        return self._get(
+            f"/tv/{tv_id}/credits",
+            params={"language": language or self._language},
+        )
+
     @staticmethod
     def image_url(file_path: str, size: str = "original") -> str:
         return f"{IMAGE_BASE}/{size}{file_path}"
