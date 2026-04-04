@@ -2,10 +2,9 @@
 
 import pytest
 from unittest.mock import patch, MagicMock
-from pathlib import Path
 
 from media115 import cache
-from media115.scraper.scrape import scrape_movie, scrape_tv, scrape_av
+from media115.scraper.scrape import scrape_movie, scrape_av
 
 
 @pytest.fixture(autouse=True)
