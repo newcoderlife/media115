@@ -230,6 +230,17 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
             if new_name and new_name != op["file"]:
                 client.rename(fid, new_name)
 
+            # Step 4: Update file_map cache with new filename
+            from media115 import cache as _cache
+            from media115.utils import stem as _u_stem
+
+            old_stem = _u_stem(op["file"])
+            new_stem = _u_stem(new_name) if new_name else old_stem
+            if new_stem != old_stem:
+                old_data = _cache.get("file_map", old_stem)
+                if old_data:
+                    _cache.put("file_map", new_stem, old_data)
+
             results.append({**op, "status": "ok"})
         except Exception as e:
             results.append({**op, "status": "error", "error": str(e)})
