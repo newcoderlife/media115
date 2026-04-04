@@ -695,6 +695,7 @@ class Cloud115Client:
 
         # Poll status
         pick_code = None
+        file_id = None
         for _ in range(60):
             time.sleep(3)
             status = self._cookie_request(
@@ -705,6 +706,7 @@ class Cloud115Client:
             pc = status.get("data", {}).get("pick_code")
             if pc:
                 pick_code = pc
+                file_id = status.get("data", {}).get("file_id")
                 break
 
         if not pick_code:
@@ -728,6 +730,13 @@ class Cloud115Client:
         )
         if dl.status_code != 200 or len(dl.content) < 100:
             return None
+
+        # Clean up: delete the tree txt from 115
+        if file_id:
+            try:
+                self.delete([str(file_id)])
+            except Exception:
+                pass
 
         return dl.content.decode("utf-16-le", errors="replace")
 
