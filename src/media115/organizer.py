@@ -258,17 +258,32 @@ def build_organize_plan(
     return ops
 
 
-def execute_organize_plan(ops: list[dict], client) -> list[dict]:
-    """Execute rename/move operations on 115.
+def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[dict]:
+    """Execute organize operations on 115.
 
-    Uses get_dir_id (path → cid) + list_files (cid → fids).
-    Much more reliable than search-based approach.
+    Strategy: always mkdir target → move file → rename file.
+    Never rename existing directories. Clean up empty dirs after.
+
+    category_path: e.g. "影音/电影" — the parent where new folders are created.
     """
     results = []
     # Cache: original folder path → (cid, {filename: fid})
     folder_cache: dict[str, tuple[str, dict[str, str]]] = {}
-    # Track renamed folders to avoid double-rename
-    renamed_folders: set[str] = set()
+    # Cache: new folder name → cid (avoid creating same folder twice)
+    created_dirs: dict[str, str] = {}
+
+    # Get category dir cid
+    category_cid = client.get_dir_id("/" + category_path)
+    if not category_cid:
+        return [
+            {
+                **op,
+                "status": "error",
+                "error": f"category dir not found: {category_path}",
+            }
+            for op in ops
+            if op["action"] != "skip"
+        ]
 
     for op in ops:
         if op["action"] == "skip":
@@ -276,9 +291,9 @@ def execute_organize_plan(ops: list[dict], client) -> list[dict]:
             continue
 
         try:
-            parent_path = op["parent"]  # e.g. "影音/电影/A.Better.Tomorrow..."
+            parent_path = op["parent"]
 
-            # Get folder cid + file listing (cached per folder)
+            # Get file's fid from its current directory
             if parent_path not in folder_cache:
                 cid = client.get_dir_id("/" + parent_path)
                 if not cid:
@@ -296,9 +311,7 @@ def execute_organize_plan(ops: list[dict], client) -> list[dict]:
                 }
                 folder_cache[parent_path] = (cid, fid_map)
 
-            cid, fid_map = folder_cache[parent_path]
-
-            # Rename file if needed
+            _, fid_map = folder_cache[parent_path]
             fid = fid_map.get(op["file"])
             if not fid:
                 results.append(
@@ -310,27 +323,32 @@ def execute_organize_plan(ops: list[dict], client) -> list[dict]:
                 )
                 continue
 
-            if op.get("new_name") and op["new_name"] != op["file"]:
-                client.rename(fid, op["new_name"])
+            target_folder = op.get("new_folder")
+            new_name = op.get("new_name")
 
-            # Rename parent folder if needed — but NEVER rename category dirs
-            if op.get("new_folder") and parent_path not in renamed_folders:
-                # Count path depth: "影音/电影" = 2 (category dir, don't rename)
-                #                   "影音/电影/SomeMovie" = 3 (leaf dir, ok to rename)
-                path_depth = len(parent_path.split("/"))
-                if path_depth >= 3:
-                    client.rename(cid, op["new_folder"])
-                    renamed_folders.add(parent_path)
-                else:
-                    # File is directly in category dir — need mkdir + move
-                    new_dir_cid = None
-                    try:
-                        result = client.mkdir(cid, op["new_folder"])
-                        new_dir_cid = str(result.get("cid", result.get("aid", "")))
-                    except Exception:
-                        pass
-                    if new_dir_cid and fid:
-                        client.move([fid], new_dir_cid)
+            # Step 1: Ensure target directory exists
+            if target_folder:
+                if target_folder not in created_dirs:
+                    result = client.mkdir(category_cid, target_folder)
+                    new_cid = str(result.get("cid", result.get("aid", "")))
+                    if new_cid:
+                        created_dirs[target_folder] = new_cid
+                    else:
+                        # mkdir might fail if dir already exists, try get_dir_id
+                        existing = client.get_dir_id(
+                            f"/{category_path}/{target_folder}"
+                        )
+                        if existing:
+                            created_dirs[target_folder] = existing
+
+                target_cid = created_dirs.get(target_folder)
+                if target_cid:
+                    # Step 2: Move file to target directory
+                    client.move([fid], target_cid)
+
+            # Step 3: Rename file
+            if new_name and new_name != op["file"]:
+                client.rename(fid, new_name)
 
             results.append({**op, "status": "ok"})
         except Exception as e:
