@@ -357,7 +357,8 @@ def organize(category, execute):
         return
 
     click.echo(f"\nExecuting {len(renames)} renames...")
-    results = execute_organize_plan(renames, client)
+    category_path = f"影音/{category}"
+    results = execute_organize_plan(renames, client, category_path)
 
     ok = sum(1 for r in results if r["status"] == "ok")
     fail = sum(1 for r in results if r["status"] in ("error", "not_found"))
