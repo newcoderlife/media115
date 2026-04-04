@@ -1,6 +1,44 @@
 """JavBus HTML scraper for AV metadata."""
 
+import time
+
+import httpx
 from lxml import html as lxml_html
+
+JAVBUS_URL = "https://www.javbus.com"
+_MIN_INTERVAL = 2.0  # Very conservative: 1 request per 2 seconds
+_last_request: float = 0
+
+
+def fetch_metadata(number: str) -> dict | None:
+    """Fetch AV metadata from JavBus by number. Returns None if not found."""
+    global _last_request
+    elapsed = time.monotonic() - _last_request
+    if elapsed < _MIN_INTERVAL:
+        time.sleep(_MIN_INTERVAL - elapsed)
+
+    try:
+        resp = httpx.get(
+            f"{JAVBUS_URL}/{number}",
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/130.0.0.0 Safari/537.36"
+                ),
+                "Accept-Language": "zh-TW,zh;q=0.9",
+            },
+            timeout=15,
+            follow_redirects=True,
+        )
+        _last_request = time.monotonic()
+        if resp.status_code != 200:
+            return None
+        result = parse_detail_page(resp.text)
+        return result if result.get("number") else None
+    except Exception:
+        _last_request = time.monotonic()
+        return None
 
 
 def parse_detail_page(html_str: str) -> dict:

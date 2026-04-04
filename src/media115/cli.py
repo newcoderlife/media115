@@ -323,6 +323,217 @@ def scan_tree(category):
     click.echo("No API calls were made (tree cache only).")
 
 
+@main.command("batch-scrape")
+@click.argument("category")
+@click.option(
+    "--output", default="scrape_output", help="Output directory for NFO + posters"
+)
+@click.option(
+    "--limit", "max_count", default=0, type=int, help="Max files to scrape (0=all)"
+)
+def batch_scrape(category, output, max_count):
+    """Scrape metadata for a category from tree cache. Generates NFO + poster locally.
+
+    CATEGORY: AV, 电影, or 剧目
+    """
+    from media115.scraper.analyzer import analyze_filename
+
+    entries = _parse_tree_cache()
+    videos = [e for e in entries if e["is_video"]]
+    nfo_names = {
+        e["parent"] + "/" + _split_ext(e["n"])[0] for e in entries if e["is_nfo"]
+    }
+
+    videos = [v for v in videos if category in v["path"]]
+    # Skip files that already have NFO
+    videos = [
+        v for v in videos if v["parent"] + "/" + _split_ext(v["n"])[0] not in nfo_names
+    ]
+
+    if max_count > 0:
+        videos = videos[:max_count]
+
+    if not videos:
+        click.echo(f"No files to scrape in category '{category}'.")
+        return
+
+    out_dir = Path.cwd() / output / category
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    click.echo(f"Scraping {len(videos)} files in '{category}' → {out_dir}")
+
+    results = []
+    for i, item in enumerate(videos, 1):
+        name = item["n"]
+        analysis = analyze_filename(name)
+        parent = item.get("parent", "")
+        file_out = out_dir / parent.replace("/", "_")
+        file_out.mkdir(parents=True, exist_ok=True)
+
+        click.echo(f"  [{i}/{len(videos)}] {_trunc(name, 60)} ...", nl=False)
+
+        try:
+            if analysis.media_type == "av":
+                result = _scrape_av(analysis.title, name, file_out)
+            elif analysis.media_type in ("movie", "unknown"):
+                result = _scrape_movie(analysis.title, analysis.year, name, file_out)
+            elif analysis.media_type == "tv":
+                result = _scrape_tv(
+                    analysis.title, analysis.season, analysis.episode, name, file_out
+                )
+            else:
+                result = {"status": "skip", "reason": analysis.media_type}
+
+            results.append({"file": name, **result})
+            click.echo(f" {result.get('status', '?')}")
+        except Exception as e:
+            results.append({"file": name, "status": "error", "error": str(e)})
+            click.echo(f" error: {e}")
+
+    # Summary
+    ok = sum(1 for r in results if r["status"] == "ok")
+    fail = sum(1 for r in results if r["status"] in ("not_found", "error"))
+    skip = sum(1 for r in results if r["status"] == "skip")
+    click.echo(f"\nDone: {ok} scraped, {fail} failed, {skip} skipped")
+
+
+def _scrape_movie(title: str, year: int | None, filename: str, out_dir: Path) -> dict:
+    from media115.scraper.tmdb import TMDBClient
+    from media115.scraper.nfo import generate_movie_nfo
+    from media115.scraper.artwork import save_poster
+
+    token = os.environ.get("TMDB_READ_ACCESS_TOKEN", "")
+    if not token:
+        return {"status": "error", "error": "TMDB_READ_ACCESS_TOKEN not set"}
+
+    client = TMDBClient(read_access_token=token)
+    query = title
+    results = client.search_movie(query)
+    if not results and year:
+        results = client.search_movie(query.split(".")[0])
+
+    if not results:
+        return {"status": "not_found", "query": query}
+
+    # Pick best match (first result, or match year)
+    match = results[0]
+    if year:
+        for r in results:
+            r_year = (r.get("release_date", "") or "")[:4]
+            if r_year == str(year):
+                match = r
+                break
+
+    detail = client.movie_detail(match["id"])
+    images = client.movie_images(match["id"])
+
+    stem = _split_ext(filename)[0]
+    metadata = {
+        "title": detail.get("title", ""),
+        "originaltitle": detail.get("original_title", ""),
+        "year": int((detail.get("release_date", "") or "0000")[:4]),
+        "plot": detail.get("overview", ""),
+        "runtime": detail.get("runtime"),
+        "rating": detail.get("vote_average"),
+        "premiered": detail.get("release_date", ""),
+        "genres": [g["name"] for g in detail.get("genres", [])],
+        "directors": [],
+        "actors": [],
+        "uniqueids": {"tmdb": str(detail["id"])},
+    }
+    imdb_id = detail.get("imdb_id")
+    if imdb_id:
+        metadata["uniqueids"]["imdb"] = imdb_id
+
+    generate_movie_nfo(metadata, out_dir / f"{stem}.nfo")
+
+    if images.get("posters"):
+        try:
+            save_poster(
+                images["posters"][0]["file_path"], out_dir, filename="poster.jpg"
+            )
+        except Exception:
+            pass
+
+    client.close()
+    return {"status": "ok", "match": detail.get("title", ""), "tmdb_id": detail["id"]}
+
+
+def _scrape_tv(
+    title: str, season: int | None, episode: int | None, filename: str, out_dir: Path
+) -> dict:
+    from media115.scraper.tmdb import TMDBClient
+    from media115.scraper.nfo import generate_episode_nfo
+
+    token = os.environ.get("TMDB_READ_ACCESS_TOKEN", "")
+    if not token:
+        return {"status": "error", "error": "TMDB_READ_ACCESS_TOKEN not set"}
+
+    client = TMDBClient(read_access_token=token)
+    # Clean title: remove brackets and dots
+    import re
+
+    clean = re.sub(r"^\[.*?\]\s*", "", title).replace(".", " ").strip()
+    results = client.search_tv(clean)
+
+    if not results:
+        # Try first part only
+        results = client.search_tv(clean.split()[0] if clean else title)
+
+    if not results:
+        client.close()
+        return {"status": "not_found", "query": clean}
+
+    match = results[0]
+    stem = _split_ext(filename)[0]
+
+    metadata = {
+        "title": match.get("name", ""),
+        "season": season,
+        "episode": episode,
+        "aired": match.get("first_air_date", ""),
+        "uniqueids": {"tmdb": str(match["id"])},
+    }
+
+    generate_episode_nfo(metadata, out_dir / f"{stem}.nfo")
+    client.close()
+    return {"status": "ok", "match": match.get("name", ""), "tmdb_id": match["id"]}
+
+
+def _scrape_av(number: str, filename: str, out_dir: Path) -> dict:
+    from media115.scraper.javbus import fetch_metadata
+    from media115.scraper.nfo import generate_movie_nfo
+    from media115.scraper.artwork import download_image
+
+    meta = fetch_metadata(number)
+    if not meta or not meta.get("title"):
+        return {"status": "not_found", "number": number}
+
+    stem = _split_ext(filename)[0]
+    metadata = {
+        "title": meta.get("title", ""),
+        "originaltitle": meta.get("title", ""),
+        "year": int(meta["release_date"][:4]) if meta.get("release_date") else None,
+        "plot": "",
+        "runtime": int(meta["runtime"]) if meta.get("runtime") else None,
+        "genres": meta.get("genres", []),
+        "directors": [meta["director"]] if meta.get("director") else [],
+        "actors": [{"name": a} for a in meta.get("actors", [])],
+        "uniqueids": {"javbus": meta.get("number", number)},
+        "studio": meta.get("studio", ""),
+    }
+
+    generate_movie_nfo(metadata, out_dir / f"{stem}.nfo")
+
+    if meta.get("cover_url"):
+        try:
+            download_image(meta["cover_url"], out_dir / "poster.jpg")
+        except Exception:
+            pass
+
+    return {"status": "ok", "match": meta.get("title", ""), "number": number}
+
+
 @main.command()
 @click.argument("path")
 @click.option("--recursive/--no-recursive", default=True, help="Scan subdirectories")
