@@ -3,6 +3,8 @@
 import os
 from pathlib import Path
 
+from media115.client import WEB_API
+
 import click
 import yaml
 
@@ -105,6 +107,220 @@ def ls(path, tree, depth):
 
 VIDEO_EXTS = {".mkv", ".mp4", ".avi", ".ts", ".rmvb", ".wmv", ".flv", ".mov", ".m4v"}
 NFO_EXT = ".nfo"
+TREE_CACHE = "tree_cache.txt"
+
+
+@main.command("export-tree")
+@click.argument("dir_id", default="3395528155081997321")
+def export_tree(dir_id):
+    """Export 115 directory tree to local cache file. Only needs 2-3 API calls."""
+    import httpx as _httpx
+
+    client = _get_115_client()
+    if not client:
+        return
+
+    click.echo("Exporting directory tree from 115...")
+
+    # Step 1: Start export
+    resp = client._cookie_request(
+        "POST",
+        f"{WEB_API}/files/export_dir",
+        data={"file_ids": dir_id, "target": "U_1_0"},
+    )
+    export_id = resp.get("data", {}).get("export_id")
+    if not export_id:
+        click.echo(f"Export failed: {resp}", err=True)
+        return
+    click.echo(f"Export started (id={export_id}), waiting...")
+
+    # Step 2: Poll status
+    import time as _time
+
+    pick_code = None
+    for _ in range(60):
+        _time.sleep(3)
+        status = client._cookie_request(
+            "GET",
+            f"{WEB_API}/files/export_dir",
+            params={"export_id": export_id},
+        )
+        pc = status.get("data", {}).get("pick_code")
+        if pc:
+            pick_code = pc
+            break
+        click.echo("  Still exporting...")
+
+    if not pick_code:
+        click.echo("Export timed out.", err=True)
+        return
+
+    # Step 3: Download the tree file
+    cookies = client._cookies
+    cookie_dict = {}
+    for part in cookies.split(";"):
+        p = part.strip()
+        if "=" in p:
+            k, v = p.split("=", 1)
+            cookie_dict[k.strip()] = v.strip()
+
+    dl = _httpx.get(
+        "https://115.com/",
+        params={"ct": "download", "ac": "video", "pickcode": pick_code},
+        cookies=cookie_dict,
+        headers={"User-Agent": client._USER_AGENT},
+        follow_redirects=True,
+        timeout=30,
+    )
+    if dl.status_code != 200 or len(dl.content) < 100:
+        click.echo(f"Download failed: {dl.status_code}", err=True)
+        return
+
+    # Decode UTF-16 and save as UTF-8
+    text = dl.content.decode("utf-16-le", errors="replace")
+    tree_path = Path.cwd() / TREE_CACHE
+    tree_path.write_text(text)
+
+    lines = text.strip().split("\n")
+    video_count = sum(
+        1
+        for ln in lines
+        if any(ln.rstrip().lower().endswith(ext) for ext in VIDEO_EXTS)
+    )
+    click.echo(f"Tree exported: {len(lines)} entries, {video_count} video files")
+    click.echo(f"Saved to {tree_path}")
+
+
+def _parse_tree_cache() -> list[dict]:
+    """Parse tree_cache.txt into a list of file entries for scan."""
+    tree_path = Path.cwd() / TREE_CACHE
+    if not tree_path.exists():
+        return []
+
+    text = tree_path.read_text()
+    entries = []
+    path_stack: list[str] = []
+
+    for line in text.strip().split("\n"):
+        stripped = line.rstrip()
+        if "|-" not in stripped:
+            continue
+
+        # Calculate depth by counting "| " prefixes
+        depth = stripped.count("| ")
+        name = stripped.split("|-", 1)[1].strip() if "|-" in stripped else ""
+        if not name:
+            continue
+
+        # Maintain path stack
+        while len(path_stack) >= depth:
+            path_stack.pop() if path_stack else None
+        path_stack.append(name)
+
+        full_path = "/".join(path_stack)
+        stem, ext = _split_ext(name)
+        is_video = ext.lower() in VIDEO_EXTS
+        is_nfo = ext.lower() == NFO_EXT
+
+        if is_video or is_nfo:
+            parent = "/".join(path_stack[:-1]) if len(path_stack) > 1 else ""
+            entries.append(
+                {
+                    "n": name,
+                    "path": full_path,
+                    "parent": parent,
+                    "is_video": is_video,
+                    "is_nfo": is_nfo,
+                }
+            )
+
+    return entries
+
+
+@main.command("scan-tree")
+@click.argument("category", default="")
+def scan_tree(category):
+    """Scan media files from cached directory tree (no API calls).
+
+    Run 'export-tree' first. Then: scan-tree [AV|电影|剧目|里番|写真]
+    """
+    from media115.scraper.analyzer import (
+        analyze_filename,
+        load_cases,
+        match_against_cases,
+    )
+
+    tree_path = Path.cwd() / TREE_CACHE
+    if not tree_path.exists():
+        click.echo("No tree cache. Run '115-media export-tree' first.", err=True)
+        return
+
+    entries = _parse_tree_cache()
+    videos = [e for e in entries if e["is_video"]]
+    nfo_set = {
+        e["parent"] + "/" + _split_ext(e["n"])[0] for e in entries if e["is_nfo"]
+    }
+
+    if category:
+        videos = [
+            v
+            for v in videos
+            if v["path"].startswith(category) or f"/{category}/" in v["path"]
+        ]
+
+    cases_path = Path.cwd() / "tests" / "scrape_cases.json"
+    cases = load_cases(cases_path) if cases_path.exists() else []
+
+    click.echo(f"Found {len(videos)} video files (from cached tree).\n")
+    click.echo(
+        f"| {'#':>3} | {'File':<55} | {'NFO':^5} | {'Type':<8} | {'Title':<30} | {'Source':<8} | {'Action':<12} |"
+    )
+    click.echo(
+        f"|{'-' * 5}|{'-' * 57}|{'-' * 7}|{'-' * 10}|{'-' * 32}|{'-' * 10}|{'-' * 14}|"
+    )
+
+    stats = {"skip": 0, "scrape": 0, "unrecognized": 0, "known": 0}
+
+    for i, item in enumerate(videos, 1):
+        name = item["n"]
+        parent = item["parent"]
+        stem = _split_ext(name)[0]
+        has_nfo = f"{parent}/{stem}" in nfo_set
+
+        case_result = match_against_cases(name, cases)
+        if case_result:
+            nfo_mark = "\u2705" if has_nfo else "\u274c"
+            click.echo(
+                f"| {i:>3} | {_trunc(name, 55):<55} | {nfo_mark:^5} | {case_result.media_type:<8} "
+                f"| {_trunc(case_result.title, 30):<30} | {case_result.source:<8} | {'known case':<12} |"
+            )
+            stats["known"] += 1
+            continue
+
+        result = analyze_filename(name)
+        nfo_mark = "\u2705" if has_nfo else "\u274c"
+
+        if has_nfo:
+            action = "skip"
+            stats["skip"] += 1
+        elif result.media_type == "unknown":
+            action = "unrecognized"
+            stats["unrecognized"] += 1
+        else:
+            action = "scrape"
+            stats["scrape"] += 1
+
+        click.echo(
+            f"| {i:>3} | {_trunc(name, 55):<55} | {nfo_mark:^5} | {result.media_type:<8} "
+            f"| {_trunc(result.title, 30):<30} | {result.source:<8} | {action:<12} |"
+        )
+
+    click.echo(
+        f"\nSummary: {len(videos)} files — {stats['scrape']} to scrape, "
+        f"{stats['skip']} skip (has NFO), {stats['unrecognized']} unrecognized, "
+        f"{stats['known']} known cases"
+    )
+    click.echo("No API calls were made (tree cache only).")
 
 
 @main.command()
