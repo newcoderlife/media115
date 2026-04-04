@@ -165,10 +165,23 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
             if op["action"] != "skip"
         ]
 
+    import sys
+
+    total = len([o for o in ops if o["action"] != "skip"])
+    done = 0
+
     for op in ops:
         if op["action"] == "skip":
             results.append({**op, "status": "skipped"})
             continue
+
+        done += 1
+        print(
+            f"  [{done}/{total}] {op['file'][:60]} ...",
+            end="",
+            flush=True,
+            file=sys.stderr,
+        )
 
         try:
             parent_path = op["parent"]
@@ -242,8 +255,10 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
                     _cache.put("file_map", new_stem, old_data)
 
             results.append({**op, "status": "ok"})
+            print(" ok", file=sys.stderr)
         except Exception as e:
             results.append({**op, "status": "error", "error": str(e)})
+            print(f" error: {e}", file=sys.stderr)
 
     return results
 

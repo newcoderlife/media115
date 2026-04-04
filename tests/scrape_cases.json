@@ -50,5 +50,44 @@
     },
     "added": "2026-04-05",
     "note": "经典电影文件名缺少年份，按 TMDB 修正"
+  },
+  {
+    "id": "case_0005",
+    "filename": "The.Blade.1995.CC.UHD.BluRay.2160p.x265.10bit.DV.HDR.FLAC.mUHD-FRDS.mkv",
+    "expect": {
+      "type": "movie",
+      "title": "断刀客",
+      "source": "tmdb",
+      "source_id": "42845",
+      "year": 1995
+    },
+    "added": "2026-04-05",
+    "note": "用户指定修正为断刀客 tmdb:42845"
+  },
+  {
+    "id": "case_0006",
+    "filename": "Pegasus.2019.2160p.WEB-DL.H265.HDR.DDP5.1.Atmos-HHWEB.mkv",
+    "expect": {
+      "type": "movie",
+      "title": "飞驰人生",
+      "source": "tmdb",
+      "source_id": "575219",
+      "year": 2019
+    },
+    "added": "2026-04-05",
+    "note": "用户指定修正为飞驰人生 tmdb:575219"
+  },
+  {
+    "id": "case_0007",
+    "filename": "Look.Back.2024.UHD.BluRay.2160p.x265.10bit.HDR.TrueHD7.1.Atmos.mUHD-FRDS.mkv",
+    "expect": {
+      "type": "movie",
+      "title": "蓦然回首",
+      "source": "tmdb",
+      "source_id": "1244492",
+      "year": 2024
+    },
+    "added": "2026-04-05",
+    "note": "用户指定修正为蓦然回首 tmdb:1244492"
   }
 ]
