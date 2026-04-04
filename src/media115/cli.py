@@ -302,6 +302,74 @@ def batch_scrape(category, output, max_count):
 
 
 @main.command()
+@click.argument("category")
+@click.option(
+    "--execute", is_flag=True, help="Actually rename/move (default is dry-run)"
+)
+def organize(category, execute):
+    """Rename and reorganize files on 115 to Jellyfin standard.
+
+    Dry-run by default (shows plan). Use --execute to apply.
+    Reads from tree cache + scrape cache, no extra API calls for planning.
+
+    CATEGORY: AV, 电影, or 剧目
+    """
+    from media115.organizer import build_organize_plan, execute_organize_plan
+
+    tree_path = media_cache.tree_cache_path()
+    if not tree_path.exists():
+        click.echo("No tree cache. Run '115-media export-tree' first.", err=True)
+        return
+
+    entries = media_cache.parse_tree_cache(VIDEO_EXTS)
+    plan = build_organize_plan(category, entries, media_cache)
+
+    renames = [op for op in plan if op["action"] == "rename"]
+    skips = [op for op in plan if op["action"] == "skip"]
+
+    click.echo(
+        f"Organize plan for '{category}': {len(renames)} to rename, {len(skips)} unchanged\n"
+    )
+
+    if not renames:
+        click.echo("Nothing to rename.")
+        return
+
+    click.echo(
+        f"| {'#':>3} | {'Current':<45} | {'→ New Folder':<30} | {'→ New Name':<35} |"
+    )
+    click.echo(f"|{'-' * 5}|{'-' * 47}|{'-' * 32}|{'-' * 37}|")
+
+    for i, op in enumerate(renames, 1):
+        cur = _trunc(op["file"], 45)
+        nf = _trunc(op.get("new_folder") or "-", 30)
+        nn = _trunc(op.get("new_name") or "-", 35)
+        click.echo(f"| {i:>3} | {cur:<45} | {nf:<30} | {nn:<35} |")
+
+    if not execute:
+        click.echo(
+            f"\nDry-run complete. Use --execute to apply {len(renames)} renames."
+        )
+        return
+
+    client = _get_115_client()
+    if not client:
+        return
+
+    click.echo(f"\nExecuting {len(renames)} renames...")
+    results = execute_organize_plan(renames, client)
+
+    ok = sum(1 for r in results if r["status"] == "ok")
+    fail = sum(1 for r in results if r["status"] in ("error", "not_found"))
+    click.echo(f"\nDone: {ok} renamed, {fail} failed")
+    for r in results:
+        if r["status"] == "error":
+            click.echo(f"  Error: {r['file']} — {r.get('error', '?')}")
+        elif r["status"] == "not_found":
+            click.echo(f"  Not found on 115: {r['file']}")
+
+
+@main.command()
 @click.argument("path")
 @click.option("--recursive/--no-recursive", default=True, help="Scan subdirectories")
 @click.option("--depth", default=3, type=int, help="Max recursion depth")
