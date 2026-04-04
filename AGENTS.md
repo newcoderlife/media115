@@ -115,71 +115,52 @@ tests/
 
 ### Workflow: Scrape
 
-Input: a folder path containing media files (local or 115 cloud path like `/影音/电影/`).
+Input: a category (电影, AV, 剧目) or the whole /影音 directory.
 
-**Step 1 — Scan.** Run the scan command first to get an overview:
-
-```bash
-.venv/bin/python -m media115.cli scan /path/to/folder
-```
-
-Or list files and analyze manually. For each video file:
-- Check if a `.nfo` exists in the same directory. If complete (has `<uniqueid>` + poster exists), mark as "skip".
-- If `.nfo` exists but incomplete, extract `<uniqueid>` or `<title>` + `<year>` for targeted lookup.
-- If no `.nfo`, analyze the filename to determine type (movie/tv/anime/av), title, year, season, episode.
-
-**Step 2 — Plan.** Output a table:
-
-```
-| # | File | NFO | Type | Search Term | Source | Action |
-|---|------|-----|------|-------------|--------|--------|
-```
-
-Ask user to confirm or correct rows.
-
-**Step 3 — Execute.** For each row needing action, use the Python scraper:
+**Step 1 — Export tree** (if not cached recently):
 
 ```bash
-# Search
-.venv/bin/python -c "
-from media115.scraper.tmdb import TMDBClient
-import os, json
-c = TMDBClient(read_access_token=os.environ['TMDB_READ_ACCESS_TOKEN'])
-print(json.dumps(c.search_movie('QUERY')[:3], ensure_ascii=False, indent=2))
-"
-
-# Generate NFO + download poster
-.venv/bin/python -c "
-from media115.scraper.tmdb import TMDBClient
-from media115.scraper.nfo import generate_movie_nfo
-from media115.scraper.artwork import save_poster
-from pathlib import Path
-import os
-c = TMDBClient(read_access_token=os.environ['TMDB_READ_ACCESS_TOKEN'])
-d = c.movie_detail(TMDB_ID)
-imgs = c.movie_images(TMDB_ID)
-meta = {
-    'title': d['title'], 'originaltitle': d['original_title'],
-    'year': int(d['release_date'][:4]), 'plot': d['overview'],
-    'runtime': d['runtime'], 'rating': d['vote_average'],
-    'premiered': d['release_date'],
-    'genres': [g['name'] for g in d['genres']],
-    'uniqueids': {'tmdb': str(d['id']), 'imdb': d.get('imdb_id','')},
-}
-out = Path('OUTPUT_DIR')
-generate_movie_nfo(meta, out / 'movie.nfo')
-if imgs.get('posters'): save_poster(imgs['posters'][0]['file_path'], out)
-"
+.venv/bin/python -m media115.cli export-tree
 ```
 
-For Bangumi (anime), use `BangumiClient`. For JavBus (AV), use `parse_detail_page`.
+**Step 2 — Batch scrape** (CLI handles most files automatically):
 
-**Step 4 — Report.** Output results table. Ask user if any row is wrong.
+```bash
+.venv/bin/python -m media115.cli batch-scrape 电影
+.venv/bin/python -m media115.cli batch-scrape AV
+.venv/bin/python -m media115.cli batch-scrape 剧目
+```
 
-**Step 5 — Correct.** If user says a row is wrong:
-1. Re-scrape with corrected info
-2. Save the correction as a regression case (see Scrape-Fix workflow)
-3. Run regression tests
+This uses the analyzer (regex rules) + TMDB/jav321/javfree APIs with caching.
+Most files will succeed. Some will fail (`not_found` or `unknown`).
+
+**Step 3 — Agent handles failures.** Check batch-scrape output for failed files.
+For each failed file, YOU (the agent) should:
+
+1. Look at the filename and use your own judgment to determine:
+   - What is this? (movie / tv / anime / av)
+   - What's the title? (translate if needed, remove encoding info)
+   - What year?
+
+2. Search TMDB/Bangumi to find the correct match:
+   ```bash
+   .venv/bin/python -m media115.cli scrape "your search query"
+   .venv/bin/python -m media115.cli scrape "alternate query" --source bangumi
+   ```
+
+3. If multiple results, pick the best match based on year, title similarity.
+
+4. Save the correction as a regression case (see Scrape-Fix workflow).
+
+**Step 4 — Organize** (rename + move files to Jellyfin standard):
+
+```bash
+.venv/bin/python -m media115.cli organize 电影           # dry-run first
+.venv/bin/python -m media115.cli organize 电影 --execute  # apply
+```
+
+**Step 5 — Report.** Output summary: how many scraped, organized, failed.
+Ask user if any results look wrong.
 
 ### Workflow: Scrape-Fix
 
