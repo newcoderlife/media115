@@ -313,10 +313,24 @@ def execute_organize_plan(ops: list[dict], client) -> list[dict]:
             if op.get("new_name") and op["new_name"] != op["file"]:
                 client.rename(fid, op["new_name"])
 
-            # Rename parent folder if needed
+            # Rename parent folder if needed — but NEVER rename category dirs
             if op.get("new_folder") and parent_path not in renamed_folders:
-                client.rename(cid, op["new_folder"])
-                renamed_folders.add(parent_path)
+                # Count path depth: "影音/电影" = 2 (category dir, don't rename)
+                #                   "影音/电影/SomeMovie" = 3 (leaf dir, ok to rename)
+                path_depth = len(parent_path.split("/"))
+                if path_depth >= 3:
+                    client.rename(cid, op["new_folder"])
+                    renamed_folders.add(parent_path)
+                else:
+                    # File is directly in category dir — need mkdir + move
+                    new_dir_cid = None
+                    try:
+                        result = client.mkdir(cid, op["new_folder"])
+                        new_dir_cid = str(result.get("cid", result.get("aid", "")))
+                    except Exception:
+                        pass
+                    if new_dir_cid and fid:
+                        client.move([fid], new_dir_cid)
 
             results.append({**op, "status": "ok"})
         except Exception as e:
