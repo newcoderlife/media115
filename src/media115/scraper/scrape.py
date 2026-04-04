@@ -37,20 +37,49 @@ def scrape_movie(title: str, year: int | None, filename: str, out_dir: Path) -> 
 
         match = _best_match(results, year)
         tmdb_id = match["id"]
-        detail, images = _get_tmdb_detail(client, "movie", tmdb_id)
+        detail, images, credits = _get_tmdb_movie_full(client, tmdb_id)
 
+        # Build Kodi-standard metadata
+        collection = detail.get("belongs_to_collection")
         metadata = {
             "title": detail.get("title", ""),
             "originaltitle": detail.get("original_title", ""),
             "year": int((detail.get("release_date", "") or "0000")[:4]),
             "plot": detail.get("overview", ""),
+            "tagline": detail.get("tagline", ""),
             "runtime": detail.get("runtime"),
             "rating": detail.get("vote_average"),
+            "votes": detail.get("vote_count"),
             "premiered": detail.get("release_date", ""),
             "genres": [g["name"] for g in detail.get("genres", [])],
-            "directors": [],
-            "actors": [],
+            "studios": [c["name"] for c in detail.get("production_companies", [])],
+            "countries": [c["name"] for c in detail.get("production_countries", [])],
+            "set": collection["name"] if collection else None,
+            "directors": [
+                p["name"] for p in credits.get("crew", []) if p.get("job") == "Director"
+            ],
+            "credits": [
+                p["name"]
+                for p in credits.get("crew", [])
+                if p.get("job") in ("Screenplay", "Writer")
+            ],
+            "actors": [
+                {
+                    "name": a["name"],
+                    "role": a.get("character", ""),
+                    "thumb": f"https://image.tmdb.org/t/p/w185{a['profile_path']}"
+                    if a.get("profile_path")
+                    else "",
+                }
+                for a in credits.get("cast", [])[:15]
+            ],
             "uniqueids": {"tmdb": str(tmdb_id)},
+            "thumb": f"https://image.tmdb.org/t/p/original{detail['poster_path']}"
+            if detail.get("poster_path")
+            else None,
+            "fanart": f"https://image.tmdb.org/t/p/original{detail['backdrop_path']}"
+            if detail.get("backdrop_path")
+            else None,
         }
         imdb_id = detail.get("imdb_id")
         if imdb_id:
@@ -91,14 +120,25 @@ def scrape_tv(
 
         match = results[0]
         tmdb_id = match["id"]
-        detail, _ = _get_tmdb_detail(client, "tv", tmdb_id)
+        detail, _, credits = _get_tmdb_tv_full(client, tmdb_id)
 
         stem = _stem(filename)
         metadata = {
             "title": detail.get("name", match.get("name", "")),
+            "showtitle": detail.get("name", ""),
             "season": season,
             "episode": episode,
+            "plot": detail.get("overview", ""),
             "aired": detail.get("first_air_date", match.get("first_air_date", "")),
+            "rating": detail.get("vote_average"),
+            "votes": detail.get("vote_count"),
+            "directors": [
+                p["name"] for p in credits.get("crew", []) if p.get("job") == "Director"
+            ][:3],
+            "actors": [
+                {"name": a["name"], "role": a.get("character", "")}
+                for a in credits.get("cast", [])[:10]
+            ],
             "uniqueids": {"tmdb": str(tmdb_id)},
         }
         generate_episode_nfo(metadata, out_dir / f"{stem}.nfo")
@@ -139,22 +179,33 @@ def scrape_av(number: str, filename: str, out_dir: Path) -> dict:
 # ── Internal helpers ─────────────────────────────────────────────────
 
 
-def _get_tmdb_detail(client, media_type: str, tmdb_id: int) -> tuple[dict, dict]:
-    """Get TMDB detail + images with cache."""
-    cache_key = f"{media_type}_{tmdb_id}"
+def _get_tmdb_movie_full(client, tmdb_id: int) -> tuple[dict, dict, dict]:
+    """Get TMDB movie detail + images + credits with cache."""
+    cache_key = f"movie_{tmdb_id}"
     cached = media_cache.get("tmdb", cache_key)
-    if cached:
-        return cached.get("detail", {}), cached.get("images", {})
+    if cached and "credits" in cached:
+        return cached["detail"], cached.get("images", {}), cached["credits"]
 
-    if media_type == "movie":
-        detail = client.movie_detail(tmdb_id)
-        images = client.movie_images(tmdb_id)
-    else:
-        detail = client.tv_detail(tmdb_id)
-        images = {}  # TV doesn't need images per episode
+    detail = client.movie_detail(tmdb_id)
+    images = client.movie_images(tmdb_id)
+    credits = client.movie_credits(tmdb_id)
+    media_cache.put(
+        "tmdb", cache_key, {"detail": detail, "images": images, "credits": credits}
+    )
+    return detail, images, credits
 
-    media_cache.put("tmdb", cache_key, {"detail": detail, "images": images})
-    return detail, images
+
+def _get_tmdb_tv_full(client, tmdb_id: int) -> tuple[dict, dict, dict]:
+    """Get TMDB TV detail + credits with cache."""
+    cache_key = f"tv_{tmdb_id}"
+    cached = media_cache.get("tmdb", cache_key)
+    if cached and "credits" in cached:
+        return cached["detail"], {}, cached["credits"]
+
+    detail = client.tv_detail(tmdb_id)
+    credits = client.tv_credits(tmdb_id)
+    media_cache.put("tmdb", cache_key, {"detail": detail, "credits": credits})
+    return detail, {}, credits
 
 
 def _best_match(results: list[dict], year: int | None) -> dict:
