@@ -24,5 +24,31 @@
     },
     "added": "2026-04-03",
     "note": "字幕组格式动漫文件名"
+  },
+  {
+    "id": "case_0003",
+    "filename": "The Running Man 2160p BluRay Dovi HDR x265 TrueHD 7.1-MTeam.mkv",
+    "expect": {
+      "type": "movie",
+      "title": "The Running Man",
+      "source": "tmdb",
+      "source_id": "798645",
+      "year": 2025
+    },
+    "added": "2026-04-05",
+    "note": "无年份电影文件名，按 TMDB 2025 结果修正"
+  },
+  {
+    "id": "case_0004",
+    "filename": "North.by.Northwest.UHD.BluRay.2160p.x265.DV.HDR.TrueHD7.1.Atmos.mUHD-FRDS.mkv",
+    "expect": {
+      "type": "movie",
+      "title": "North by Northwest",
+      "source": "tmdb",
+      "source_id": "213",
+      "year": 1959
+    },
+    "added": "2026-04-05",
+    "note": "经典电影文件名缺少年份，按 TMDB 修正"
   }
 ]

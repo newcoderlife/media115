@@ -4,10 +4,10 @@ description: Scrape metadata for media files on 115 cloud
 version: 2.0
 ---
 
-Scrape metadata (NFO + artwork) for media files in the 115 影音 directory.
+Scrape metadata (NFO + artwork) for media files on 115 cloud.
 
 ## Input
-$ARGUMENTS — category to scrape: `电影`, `AV`, `剧目`, or `all`
+$ARGUMENTS — the 115 path to scrape, e.g. `/影音`. Ask the user if not provided.
 
 ## Steps
 
@@ -19,7 +19,7 @@ Run `/auth` first (or check inline):
 
 ### 2. Export directory tree (if not recent)
 ```bash
-.venv/bin/python -m media115.cli export-tree /影音
+.venv/bin/python -m media115.cli export-tree /PATH
 ```
 
 ### 3. Scan to see what needs scraping
