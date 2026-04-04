@@ -209,7 +209,7 @@ NFO_EXT = ".nfo"
 
 
 @main.command("export-tree")
-@click.argument("path", default="/")
+@click.argument("path")
 def export_tree(path):
     """Export 115 directory tree to local cache file. Only needs 2-3 API calls."""
     client = _get_115_client()
