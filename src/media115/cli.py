@@ -374,12 +374,14 @@ def batch_scrape(category, output, max_count):
         click.echo(f"  [{i}/{len(videos)}] {_trunc(name, 60)} ...", nl=False)
 
         try:
+            from media115.scraper.scrape import scrape_movie, scrape_tv, scrape_av
+
             if analysis.media_type == "av":
-                result = _scrape_av(analysis.title, name, file_out)
+                result = scrape_av(analysis.title, name, file_out)
             elif analysis.media_type in ("movie", "unknown"):
-                result = _scrape_movie(analysis.title, analysis.year, name, file_out)
+                result = scrape_movie(analysis.title, analysis.year, name, file_out)
             elif analysis.media_type == "tv":
-                result = _scrape_tv(
+                result = scrape_tv(
                     analysis.title, analysis.season, analysis.episode, name, file_out
                 )
             else:
@@ -396,169 +398,6 @@ def batch_scrape(category, output, max_count):
     fail = sum(1 for r in results if r["status"] in ("not_found", "error"))
     skip = sum(1 for r in results if r["status"] == "skip")
     click.echo(f"\nDone: {ok} scraped, {fail} failed, {skip} skipped")
-
-
-def _scrape_movie(title: str, year: int | None, filename: str, out_dir: Path) -> dict:
-    from media115.scraper.tmdb import TMDBClient
-    from media115.scraper.nfo import generate_movie_nfo
-    from media115.scraper.artwork import save_poster
-
-    token = os.environ.get("TMDB_READ_ACCESS_TOKEN", "")
-    if not token:
-        return {"status": "error", "error": "TMDB_READ_ACCESS_TOKEN not set"}
-
-    client = TMDBClient(read_access_token=token)
-    query = title
-
-    # Search (no cache for search — it's cheap and results change)
-    results = client.search_movie(query)
-    if not results and year:
-        results = client.search_movie(query.split(".")[0])
-
-    if not results:
-        return {"status": "not_found", "query": query}
-
-    match = results[0]
-    if year:
-        for r in results:
-            r_year = (r.get("release_date", "") or "")[:4]
-            if r_year == str(year):
-                match = r
-                break
-
-    tmdb_id = match["id"]
-
-    # Detail + images (cached by TMDB ID)
-    cached = media_cache.get("tmdb", f"movie_{tmdb_id}")
-    if cached:
-        detail = cached["detail"]
-        images = cached["images"]
-    else:
-        detail = client.movie_detail(tmdb_id)
-        images = client.movie_images(tmdb_id)
-        media_cache.put(
-            "tmdb", f"movie_{tmdb_id}", {"detail": detail, "images": images}
-        )
-
-    stem = _split_ext(filename)[0]
-    metadata = {
-        "title": detail.get("title", ""),
-        "originaltitle": detail.get("original_title", ""),
-        "year": int((detail.get("release_date", "") or "0000")[:4]),
-        "plot": detail.get("overview", ""),
-        "runtime": detail.get("runtime"),
-        "rating": detail.get("vote_average"),
-        "premiered": detail.get("release_date", ""),
-        "genres": [g["name"] for g in detail.get("genres", [])],
-        "directors": [],
-        "actors": [],
-        "uniqueids": {"tmdb": str(detail["id"])},
-    }
-    imdb_id = detail.get("imdb_id")
-    if imdb_id:
-        metadata["uniqueids"]["imdb"] = imdb_id
-
-    generate_movie_nfo(metadata, out_dir / f"{stem}.nfo")
-
-    if images.get("posters"):
-        try:
-            save_poster(
-                images["posters"][0]["file_path"], out_dir, filename="poster.jpg"
-            )
-        except Exception:
-            pass
-
-    client.close()
-    return {"status": "ok", "match": detail.get("title", ""), "tmdb_id": detail["id"]}
-
-
-def _scrape_tv(
-    title: str, season: int | None, episode: int | None, filename: str, out_dir: Path
-) -> dict:
-    from media115.scraper.tmdb import TMDBClient
-    from media115.scraper.nfo import generate_episode_nfo
-
-    token = os.environ.get("TMDB_READ_ACCESS_TOKEN", "")
-    if not token:
-        return {"status": "error", "error": "TMDB_READ_ACCESS_TOKEN not set"}
-
-    client = TMDBClient(read_access_token=token)
-    # Clean title: remove brackets and dots
-    import re
-
-    clean = re.sub(r"^\[.*?\]\s*", "", title).replace(".", " ").strip()
-    results = client.search_tv(clean)
-
-    if not results:
-        # Try first part only
-        results = client.search_tv(clean.split()[0] if clean else title)
-
-    if not results:
-        client.close()
-        return {"status": "not_found", "query": clean}
-
-    match = results[0]
-    stem = _split_ext(filename)[0]
-
-    metadata = {
-        "title": match.get("name", ""),
-        "season": season,
-        "episode": episode,
-        "aired": match.get("first_air_date", ""),
-        "uniqueids": {"tmdb": str(match["id"])},
-    }
-
-    generate_episode_nfo(metadata, out_dir / f"{stem}.nfo")
-    client.close()
-    return {"status": "ok", "match": match.get("name", ""), "tmdb_id": match["id"]}
-
-
-def _scrape_av(number: str, filename: str, out_dir: Path) -> dict:
-    from media115.scraper.jav321 import fetch_metadata as jav321_fetch
-    from media115.scraper.javfree import fetch_metadata as javfree_fetch
-    from media115.scraper.nfo import generate_movie_nfo
-    from media115.scraper.artwork import download_image
-
-    # Check cache first
-    cached = media_cache.get("av", number)
-    if cached:
-        meta = cached
-        source = cached.get("_source", "cache")
-    else:
-        # Try jav321 → javfree fallback chain
-        meta = jav321_fetch(number)
-        source = "jav321"
-        if not meta or not meta.get("title"):
-            meta = javfree_fetch(number)
-            source = "javfree"
-        if not meta or not meta.get("title"):
-            return {"status": "not_found", "number": number}
-        meta["_source"] = source
-        media_cache.put("av", number, meta)
-
-    stem = _split_ext(filename)[0]
-    metadata = {
-        "title": meta.get("title", ""),
-        "originaltitle": meta.get("title", ""),
-        "year": int(meta["release_date"][:4]) if meta.get("release_date") else None,
-        "plot": "",
-        "runtime": int(meta["runtime"]) if meta.get("runtime") else None,
-        "genres": meta.get("genres", []),
-        "directors": [meta["director"]] if meta.get("director") else [],
-        "actors": [{"name": a} for a in meta.get("actors", [])],
-        "uniqueids": {source: meta.get("number", number)},
-        "studio": meta.get("studio", ""),
-    }
-
-    generate_movie_nfo(metadata, out_dir / f"{stem}.nfo")
-
-    if meta.get("cover_url"):
-        try:
-            download_image(meta["cover_url"], out_dir / "poster.jpg")
-        except Exception:
-            pass
-
-    return {"status": "ok", "match": meta.get("title", ""), "number": number}
 
 
 @main.command()
