@@ -220,23 +220,11 @@ def export_tree(path):
     dir_id = _resolve_dir(client, path)
 
     if dir_id == "0":
-        # Root dir doesn't support export_dir — export each top-level folder
-        click.echo("Root directory: exporting each top-level folder...")
-        top_dirs = client.list_files_all(dir_id="0")
-        all_text = []
-        for d in top_dirs:
-            name = d.get("n", "")
-            cid = d.get("cid", "")
-            if not cid or "fid" in d:
-                continue
-            click.echo(f"  Exporting {name}...")
-            t = client.export_tree(str(cid))
-            if t:
-                all_text.append(t)
-        text = "\n".join(all_text) if all_text else None
-    else:
-        click.echo(f"Exporting directory tree (dir_id={dir_id})...")
-        text = client.export_tree(dir_id)
+        click.echo("Error: cannot export root directory. Specify a path like /影音", err=True)
+        return
+
+    click.echo(f"Exporting directory tree (dir_id={dir_id})...")
+    text = client.export_tree(dir_id)
 
     if not text:
         click.echo("Export failed.", err=True)
