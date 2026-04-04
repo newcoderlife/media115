@@ -95,9 +95,13 @@ def build_organize_plan(
 
         elif media_type == "av":
             number = scrape_info.get("number", "")
-            if number and number != parent_leaf:
-                op["new_folder"] = number
-                op["action"] = "rename"
+            if number:
+                new_folder = number
+                new_name = f"{number}{ext}"
+                if new_folder != parent_leaf or new_name != name:
+                    op["new_folder"] = new_folder if new_folder != parent_leaf else None
+                    op["new_name"] = new_name if new_name != name else None
+                    op["action"] = "rename"
 
         elif media_type == "tv":
             show_title = scrape_info.get("showtitle") or scrape_info.get("title", "")
