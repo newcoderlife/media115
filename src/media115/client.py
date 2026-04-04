@@ -659,6 +659,64 @@ class Cloud115Client:
                 data={"fid": ",".join(file_ids)},
             )
 
+    def export_tree(self, dir_id: str) -> str | None:
+        """Export 115 directory tree. Returns tree text (UTF-8) or None on failure.
+
+        Only uses 2-3 API calls regardless of directory size.
+        """
+        if self._mode != "cookie":
+            raise NotImplementedError("export_tree requires cookie mode")
+
+        import httpx as _httpx
+
+        # Start export
+        resp = self._cookie_request(
+            "POST",
+            f"{WEB_API}/files/export_dir",
+            data={"file_ids": dir_id, "target": "U_1_0"},
+        )
+        export_id = resp.get("data", {}).get("export_id")
+        if not export_id:
+            return None
+
+        # Poll status
+        pick_code = None
+        for _ in range(60):
+            time.sleep(3)
+            status = self._cookie_request(
+                "GET",
+                f"{WEB_API}/files/export_dir",
+                params={"export_id": export_id},
+            )
+            pc = status.get("data", {}).get("pick_code")
+            if pc:
+                pick_code = pc
+                break
+
+        if not pick_code:
+            return None
+
+        # Download the tree file
+        cookie_dict = {}
+        for part in self._cookies.split(";"):
+            p = part.strip()
+            if "=" in p:
+                k, v = p.split("=", 1)
+                cookie_dict[k.strip()] = v.strip()
+
+        dl = _httpx.get(
+            "https://115.com/",
+            params={"ct": "download", "ac": "video", "pickcode": pick_code},
+            cookies=cookie_dict,
+            headers={"User-Agent": self._USER_AGENT},
+            follow_redirects=True,
+            timeout=30,
+        )
+        if dl.status_code != 200 or len(dl.content) < 100:
+            return None
+
+        return dl.content.decode("utf-16-le", errors="replace")
+
 
 def _print_qr(content: str, image_url: str):
     """Print QR login URL for the user to open in browser."""
