@@ -126,7 +126,7 @@ Input: a category (电影, AV, 剧目) or the whole /影音 directory.
 **Step 1 — Export tree** (if not cached recently):
 
 ```bash
-.venv/bin/python -m media115.cli export-tree
+.venv/bin/python -m media115.cli export-tree /影音
 ```
 
 **Step 2 — Batch scrape** (CLI handles most files automatically):
@@ -210,7 +210,7 @@ This does: mkdir target folder → move file → rename file. Never renames exis
 
 **Step 3 — Verify:**
 ```bash
-.venv/bin/python -m media115.cli export-tree
+.venv/bin/python -m media115.cli export-tree /影音
 .venv/bin/python -m media115.cli ls /影音/$CATEGORY
 ```
 
