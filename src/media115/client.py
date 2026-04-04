@@ -673,6 +673,66 @@ class Cloud115Client:
                 data={"fid": ",".join(file_ids)},
             )
 
+    def upload_file(
+        self, local_path: Path, target_dir_id: str, filename: str = ""
+    ) -> dict | None:
+        """Upload a small file (NFO, image) to 115 via OSS.
+
+        No encryption needed. Works for files up to ~500MB.
+        """
+        if self._mode != "cookie":
+            raise NotImplementedError("upload_file requires cookie mode")
+
+        import httpx as _httpx
+
+        fname = filename or local_path.name
+        content = local_path.read_bytes()
+
+        self._limiter.acquire()
+
+        # Step 1: Init upload
+        resp = self._http.post(
+            "https://uplb.115.com/3.0/sampleinitupload.php",
+            data={"filename": fname, "target": f"U_1_{target_dir_id}"},
+            headers={"Cookie": self._cookies},
+        )
+        resp.raise_for_status()
+        init = resp.json()
+
+        # Step 2: Upload to OSS
+        self._limiter.acquire()
+        oss_resp = _httpx.post(
+            init["host"],
+            data={
+                "key": init["object"],
+                "OSSAccessKeyId": init["accessid"],
+                "policy": init["policy"],
+                "signature": init["signature"],
+                "callback": init["callback"],
+            },
+            files={"file": (fname, content)},
+            timeout=30,
+        )
+        if oss_resp.status_code == 200:
+            return oss_resp.json().get("data")
+        return None
+
+    def batch_rename(self, renames: dict[str, str]) -> dict:
+        """Rename multiple files in one API call.
+
+        renames: {file_id: new_name, ...}
+        """
+        if self._mode == "cookie":
+            data = {f"files_new_name[{fid}]": name for fid, name in renames.items()}
+            return self._cookie_request(
+                "POST", f"{WEB_API}/files/batch_rename", data=data
+            )
+        else:
+            # OpenAPI doesn't have batch_rename, fall back to individual
+            for fid, name in renames.items():
+                self.rename(fid, name)
+            return {"state": True}
+
     def export_tree(self, dir_id: str) -> str | None:
         """Export 115 directory tree. Returns tree text (UTF-8) or None on failure.
 
