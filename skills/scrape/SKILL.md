@@ -19,7 +19,7 @@ Run `/auth` first (or check inline):
 
 ### 2. Export directory tree (if not recent)
 ```bash
-.venv/bin/python -m media115.cli export-tree
+.venv/bin/python -m media115.cli export-tree /影音
 ```
 
 ### 3. Scan to see what needs scraping
