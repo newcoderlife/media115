@@ -139,20 +139,25 @@ def build_organize_plan(
 
 
 def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[dict]:
-    """Execute organize operations on 115.
+    """Execute organize operations on 115 using batch APIs.
 
-    Strategy: always mkdir target → move file → rename file.
-    Never rename existing directories. Clean up empty dirs after.
-
-    category_path: e.g. "影音/电影" — the parent where new folders are created.
+    Strategy:
+    1. Resolve all fids (batch per parent dir)
+    2. mkdir all target dirs
+    3. Batch move files grouped by target dir
+    4. Batch rename all files
+    5. Upload NFO/poster for each target dir
+    6. Update file_map cache
     """
+    import sys
+    from collections import defaultdict
+    from media115 import cache as _cache
+    from media115.utils import stem as _u_stem
+
     results = []
-    # Cache: original folder path → (cid, {filename: fid})
     folder_cache: dict[str, tuple[str, dict[str, str]]] = {}
-    # Cache: new folder name → cid (avoid creating same folder twice)
     created_dirs: dict[str, str] = {}
 
-    # Get category dir cid
     category_cid = client.get_dir_id("/" + category_path)
     if not category_cid:
         return [
@@ -165,105 +170,121 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
             if op["action"] != "skip"
         ]
 
-    import sys
-
-    total = len([o for o in ops if o["action"] != "skip"])
-    done = 0
-
+    active_ops = [op for op in ops if op["action"] != "skip"]
     for op in ops:
         if op["action"] == "skip":
             results.append({**op, "status": "skipped"})
-            continue
 
-        done += 1
-        print(
-            f"  [{done}/{total}] {op['file'][:60]} ...",
-            end="",
-            flush=True,
-            file=sys.stderr,
-        )
-
-        try:
-            parent_path = op["parent"]
-
-            # Get file's fid from its current directory
-            if parent_path not in folder_cache:
-                cid = client.get_dir_id("/" + parent_path)
-                if not cid:
-                    results.append(
-                        {
-                            **op,
-                            "status": "not_found",
-                            "error": f"dir not found: {parent_path}",
-                        }
-                    )
-                    continue
-                files = client.list_files_all(dir_id=cid)
-                fid_map = {
-                    f.get("n", ""): f.get("fid", "") for f in files if "fid" in f
-                }
-                folder_cache[parent_path] = (cid, fid_map)
-
-            _, fid_map = folder_cache[parent_path]
-            fid = fid_map.get(op["file"])
-            if not fid:
+    # Phase 1: Resolve all fids
+    print(f"  Resolving {len(active_ops)} files...", file=sys.stderr, flush=True)
+    resolved = []  # (op, fid)
+    for op in active_ops:
+        parent_path = op["parent"]
+        if parent_path not in folder_cache:
+            cid = client.get_dir_id("/" + parent_path)
+            if not cid:
                 results.append(
                     {
                         **op,
                         "status": "not_found",
-                        "error": f"file not in dir: {op['file']}",
+                        "error": f"dir not found: {parent_path}",
                     }
                 )
                 continue
+            files = client.list_files_all(dir_id=cid)
+            fid_map = {f.get("n", ""): f.get("fid", "") for f in files if "fid" in f}
+            folder_cache[parent_path] = (cid, fid_map)
 
-            target_folder = op.get("new_folder")
-            new_name = op.get("new_name")
+        _, fid_map = folder_cache[parent_path]
+        fid = fid_map.get(op["file"])
+        if not fid:
+            results.append(
+                {**op, "status": "not_found", "error": f"file not in dir: {op['file']}"}
+            )
+            continue
+        resolved.append((op, fid))
 
-            # Step 1: Ensure target directory exists
-            if target_folder:
-                if target_folder not in created_dirs:
-                    result = client.mkdir(category_cid, target_folder)
-                    new_cid = str(result.get("cid", result.get("aid", "")))
-                    if new_cid:
-                        created_dirs[target_folder] = new_cid
-                    else:
-                        # mkdir might fail if dir already exists, try get_dir_id
-                        existing = client.get_dir_id(
-                            f"/{category_path}/{target_folder}"
-                        )
-                        if existing:
-                            created_dirs[target_folder] = existing
+    print(
+        f"  Resolved {len(resolved)}/{len(active_ops)} files",
+        file=sys.stderr,
+        flush=True,
+    )
 
-                target_cid = created_dirs.get(target_folder)
-                if target_cid:
-                    # Step 2: Move file to target directory
-                    client.move([fid], target_cid)
+    # Phase 2: Create all target directories
+    target_folders = {
+        op.get("new_folder") for op, _ in resolved if op.get("new_folder")
+    }
+    print(
+        f"  Creating {len(target_folders)} directories...", file=sys.stderr, flush=True
+    )
+    for folder in target_folders:
+        if folder not in created_dirs:
+            try:
+                result = client.mkdir(category_cid, folder)
+                new_cid = str(result.get("cid", result.get("aid", "")))
+                if new_cid:
+                    created_dirs[folder] = new_cid
+                else:
+                    existing = client.get_dir_id(f"/{category_path}/{folder}")
+                    if existing:
+                        created_dirs[folder] = existing
+            except Exception:
+                existing = client.get_dir_id(f"/{category_path}/{folder}")
+                if existing:
+                    created_dirs[folder] = existing
 
-            # Step 3: Rename file
-            if new_name and new_name != op["file"]:
-                client.rename(fid, new_name)
+    # Phase 3: Batch move (grouped by target dir)
+    move_groups: dict[str, list[str]] = defaultdict(list)
+    move_op_map: dict[str, tuple[dict, str]] = {}  # fid → (op, fid)
+    for op, fid in resolved:
+        target_folder = op.get("new_folder")
+        if target_folder and target_folder in created_dirs:
+            move_groups[created_dirs[target_folder]].append(fid)
+            move_op_map[fid] = (op, fid)
 
-            # Step 4: Upload NFO + poster if available
-            if target_folder:
-                upload_cid = created_dirs.get(target_folder) or category_cid
-                _upload_scrape_output(client, op, upload_cid)
-
-            # Step 5: Update file_map cache with new filename
-            from media115 import cache as _cache
-            from media115.utils import stem as _u_stem
-
-            old_stem = _u_stem(op["file"])
-            new_stem = _u_stem(new_name) if new_name else old_stem
-            if new_stem != old_stem:
-                old_data = _cache.get("file_map", old_stem)
-                if old_data:
-                    _cache.put("file_map", new_stem, old_data)
-
-            results.append({**op, "status": "ok"})
-            print(" ok", file=sys.stderr)
+    total_moves = sum(len(fids) for fids in move_groups.values())
+    print(
+        f"  Moving {total_moves} files to {len(move_groups)} directories...",
+        file=sys.stderr,
+        flush=True,
+    )
+    for target_cid, fids in move_groups.items():
+        try:
+            client.move(fids, target_cid)
         except Exception as e:
-            results.append({**op, "status": "error", "error": str(e)})
-            print(f" error: {e}", file=sys.stderr)
+            print(f" move error: {e}", file=sys.stderr)
+
+    # Phase 4: Batch rename
+    rename_map: dict[str, str] = {}  # fid → new_name
+    for op, fid in resolved:
+        new_name = op.get("new_name")
+        if new_name and new_name != op["file"]:
+            rename_map[fid] = new_name
+
+    if rename_map:
+        print(f"  Renaming {len(rename_map)} files...", file=sys.stderr, flush=True)
+        try:
+            client.batch_rename(rename_map)
+        except Exception as e:
+            print(f" batch rename error: {e}", file=sys.stderr)
+
+    # Phase 5: Upload NFO/poster + update file_map
+    print("  Uploading NFO/poster...", file=sys.stderr, flush=True)
+    for op, fid in resolved:
+        target_folder = op.get("new_folder")
+        if target_folder and target_folder in created_dirs:
+            _upload_scrape_output(client, op, created_dirs[target_folder])
+
+        # Update file_map cache
+        new_name = op.get("new_name")
+        old_stem = _u_stem(op["file"])
+        new_stem = _u_stem(new_name) if new_name else old_stem
+        if new_stem != old_stem:
+            old_data = _cache.get("file_map", old_stem)
+            if old_data:
+                _cache.put("file_map", new_stem, old_data)
+
+        results.append({**op, "status": "ok"})
 
     return results
 
