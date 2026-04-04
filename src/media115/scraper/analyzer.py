@@ -118,6 +118,20 @@ def analyze_filename(filename: str) -> AnalysisResult:
             confidence="medium",
         )
 
+    # Movie: Title (Year) pattern — already organized files
+    paren_match = re.match(r"^(.+?)\s*\((\d{4})\)$", name)
+    if paren_match:
+        title = paren_match.group(1).strip()
+        year = int(paren_match.group(2))
+        return AnalysisResult(
+            filename=filename,
+            media_type="movie",
+            title=title,
+            year=year,
+            source="tmdb",
+            confidence="high",
+        )
+
     # Movie: Title.Year pattern
     movie_match = re.search(r"^(.+?)[.\s](\d{4})(?:[.\s]|$)", name)
     if movie_match:
