@@ -86,3 +86,49 @@ def rate_limit_path() -> Path:
 def tree_cache_path() -> Path:
     """Path to 115 directory tree cache."""
     return _cache_dir() / "tree_cache.txt"
+
+
+def parse_tree_cache(video_exts: set[str], nfo_ext: str = ".nfo") -> list[dict]:
+    """Parse tree_cache.txt into a list of file entries."""
+    from media115.utils import split_ext
+
+    path = tree_cache_path()
+    if not path.exists():
+        return []
+
+    text = path.read_text()
+    entries = []
+    path_stack: list[str] = []
+
+    for line in text.strip().split("\n"):
+        stripped = line.rstrip()
+        if "|-" not in stripped:
+            continue
+
+        depth = stripped.count("| ")
+        name = stripped.split("|-", 1)[1].strip() if "|-" in stripped else ""
+        if not name:
+            continue
+
+        while len(path_stack) >= depth:
+            path_stack.pop() if path_stack else None
+        path_stack.append(name)
+
+        full_path = "/".join(path_stack)
+        _, ext = split_ext(name)
+        is_video = ext.lower() in video_exts
+        is_nfo = ext.lower() == nfo_ext
+
+        if is_video or is_nfo:
+            parent = "/".join(path_stack[:-1]) if len(path_stack) > 1 else ""
+            entries.append(
+                {
+                    "n": name,
+                    "path": full_path,
+                    "parent": parent,
+                    "is_video": is_video,
+                    "is_nfo": is_nfo,
+                }
+            )
+
+    return entries

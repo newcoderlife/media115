@@ -10,6 +10,7 @@ from pathlib import Path
 
 from media115 import cache as media_cache
 from media115.scraper.nfo import generate_movie_nfo, generate_episode_nfo
+from media115.utils import stem as _stem
 from media115.scraper.artwork import save_poster, download_image
 
 
@@ -252,8 +253,3 @@ def _write_av_nfo(meta: dict, filename: str, out_dir: Path, source: str):
             download_image(meta["cover_url"], out_dir / "poster.jpg")
         except Exception:
             pass
-
-
-def _stem(filename: str) -> str:
-    dot = filename.rfind(".")
-    return filename[:dot] if dot != -1 else filename

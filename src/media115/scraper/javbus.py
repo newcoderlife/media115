@@ -1,120 +1,82 @@
 """JavBus HTML scraper for AV metadata."""
 
-import time
-
-import httpx
 from lxml import html as lxml_html
 
+from media115.scraper.base import ThrottledClient
+
 JAVBUS_URL = "https://www.javbus.com"
-_MIN_INTERVAL = 2.0  # Very conservative: 1 request per 2 seconds
-_last_request: float = 0
+_client = ThrottledClient()
 
 
 def fetch_metadata(number: str) -> dict | None:
-    """Fetch AV metadata from JavBus by number. Returns None if not found."""
-    global _last_request
-    elapsed = time.monotonic() - _last_request
-    if elapsed < _MIN_INTERVAL:
-        time.sleep(_MIN_INTERVAL - elapsed)
-
+    """Fetch AV metadata from JavBus by number. May be blocked by Cloudflare."""
     try:
-        resp = httpx.get(
+        resp = _client.get(
             f"{JAVBUS_URL}/{number}",
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/130.0.0.0 Safari/537.36"
-                ),
-                "Accept-Language": "zh-TW,zh;q=0.9",
-            },
-            timeout=15,
+            headers={"Accept-Language": "zh-TW,zh;q=0.9"},
             follow_redirects=True,
         )
-        _last_request = time.monotonic()
         if resp.status_code != 200:
             return None
         result = parse_detail_page(resp.text)
         return result if result.get("number") else None
     except Exception:
-        _last_request = time.monotonic()
         return None
 
 
 def parse_detail_page(html_str: str) -> dict:
+    """Parse a JavBus detail page HTML."""
     doc = lxml_html.fromstring(html_str)
-
     result = {}
 
-    # Title from h3
     title_els = doc.xpath("//h3/text()")
     result["title"] = title_els[0].strip() if title_els else ""
 
-    # Number
     number_els = doc.xpath(
         '//span[@class="header"][contains(text(), "識別碼")]/following-sibling::span[1]/text()'
     )
     if not number_els:
-        # Fallback: try color span
         number_els = doc.xpath('//span[contains(@style, "color")]/text()')
     result["number"] = number_els[0].strip() if number_els else ""
 
-    # Release date
     _extract_info_field(doc, result, "release_date", "發行日期")
 
-    # Runtime
     runtime_text = _get_info_text(doc, "長度")
-    if runtime_text:
-        # Extract digits from "120分鐘"
-        digits = "".join(c for c in runtime_text if c.isdigit())
-        result["runtime"] = digits
-    else:
-        result["runtime"] = ""
+    result["runtime"] = "".join(c for c in (runtime_text or "") if c.isdigit())
 
-    # Director
     director_els = doc.xpath('//a[contains(@href, "/director/")]/text()')
     result["director"] = director_els[0].strip() if director_els else ""
 
-    # Studio (製作商)
     studio_els = doc.xpath('//a[contains(@href, "/studio/")]/text()')
     result["studio"] = studio_els[0].strip() if studio_els else ""
 
-    # Label (發行商)
     label_els = doc.xpath('//a[contains(@href, "/label/")]/text()')
     result["label"] = label_els[0].strip() if label_els else ""
 
-    # Series
     series_els = doc.xpath('//a[contains(@href, "/series/")]/text()')
     result["series"] = series_els[0].strip() if series_els else ""
 
-    # Actors
-    actor_els = doc.xpath('//div[@class="star-name"]/a/text()')
-    result["actors"] = [a.strip() for a in actor_els]
+    result["actors"] = [
+        a.strip() for a in doc.xpath('//div[@class="star-name"]/a/text()')
+    ]
+    result["genres"] = [
+        g.strip()
+        for g in doc.xpath(
+            '//span[@class="genre"]/label/a[contains(@href, "/genre/")]/text()'
+        )
+    ]
 
-    # Genres
-    genre_els = doc.xpath(
-        '//span[@class="genre"]/label/a[contains(@href, "/genre/")]/text()'
-    )
-    result["genres"] = [g.strip() for g in genre_els]
-
-    # Cover image
     cover_els = doc.xpath('//a[@class="bigImage"]/@href')
     result["cover_url"] = cover_els[0] if cover_els else ""
-
-    # Screenshots
-    screenshot_els = doc.xpath("//div[@id='sample-waterfall']/a/@href")
-    result["screenshots"] = screenshot_els
+    result["screenshots"] = doc.xpath("//div[@id='sample-waterfall']/a/@href")
 
     return result
 
 
 def _get_info_text(doc, label: str) -> str | None:
-    """Extract text after a header span like '發行日期:'."""
-    # The text is a sibling text node of the parent <p>
     p_els = doc.xpath(f'//span[@class="header"][contains(text(), "{label}")]/parent::p')
     if p_els:
         full_text = p_els[0].text_content()
-        # Remove the label part
         parts = (
             full_text.split(":", 1) if ":" in full_text else full_text.split("：", 1)
         )
