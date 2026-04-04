@@ -524,6 +524,20 @@ class Cloud115Client:
                 )
         return current_id
 
+    def get_dir_id(self, path: str) -> str | None:
+        """Get directory ID by absolute path. One API call, very reliable."""
+        if self._mode == "cookie":
+            result = self._cookie_request(
+                "GET",
+                f"{WEB_API}/files/getid",
+                params={"path": path},
+            )
+            if result.get("state"):
+                return str(result.get("id", ""))
+            return None
+        else:
+            return self.resolve_path(path)
+
     def search(self, keyword: str, dir_id: str = "0") -> list[dict]:
         if self._mode == "cookie":
             result = self._cookie_request(
