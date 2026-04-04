@@ -14,4 +14,4 @@ build/
 .coverage
 htmlcov/
 .DS_Store
-debug.md
+debug.mdscrape_output/
