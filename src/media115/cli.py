@@ -501,11 +501,17 @@ def _scrape_tv(
 
 
 def _scrape_av(number: str, filename: str, out_dir: Path) -> dict:
-    from media115.scraper.javbus import fetch_metadata
+    from media115.scraper.javbus import fetch_metadata as javbus_fetch
+    from media115.scraper.jav321 import fetch_metadata as jav321_fetch
     from media115.scraper.nfo import generate_movie_nfo
     from media115.scraper.artwork import download_image
 
-    meta = fetch_metadata(number)
+    # Try jav321 first (no Cloudflare), fall back to javbus
+    meta = jav321_fetch(number)
+    source = "jav321"
+    if not meta or not meta.get("title"):
+        meta = javbus_fetch(number)
+        source = "javbus"
     if not meta or not meta.get("title"):
         return {"status": "not_found", "number": number}
 
@@ -519,7 +525,7 @@ def _scrape_av(number: str, filename: str, out_dir: Path) -> dict:
         "genres": meta.get("genres", []),
         "directors": [meta["director"]] if meta.get("director") else [],
         "actors": [{"name": a} for a in meta.get("actors", [])],
-        "uniqueids": {"javbus": meta.get("number", number)},
+        "uniqueids": {source: meta.get("number", number)},
         "studio": meta.get("studio", ""),
     }
 
