@@ -51,18 +51,21 @@ Only ask the user to configure keys that are missing or empty. If all keys are p
 
 ### 115 Login
 
-**IMPORTANT**: The `115-media auth` command is INTERACTIVE — it prints a URL and waits for the user to scan a QR code. You CANNOT run it via Bash tool (it will block forever).
+When 115 login is needed, use the two-step non-blocking flow:
 
-When 115 login is needed, tell the user to run it themselves:
-
-> "115 还没登录。请在终端运行以下命令，然后用 115 App 扫码：
->
-> `.venv/bin/115-media auth`
->
-> 扫码完成后告诉我，我继续操作。"
-
-Do NOT attempt to run `115-media auth` yourself. Wait for the user to confirm login is done, then verify with:
 ```bash
+# Step 1: Generate QR URL (returns immediately)
+.venv/bin/python -m media115.cli auth --get-qr
+# Output: QR_URL=https://...
+```
+
+Show the QR_URL to the user and ask them to scan with 115 App.
+
+```bash
+# Step 2: After user confirms scan, complete login
+.venv/bin/python -m media115.cli auth --wait-qr
+
+# Step 3: Verify
 .venv/bin/python -m media115.cli auth --check
 ```
 
@@ -92,7 +95,9 @@ tests/
 ## CLI Reference
 
 ```bash
-.venv/bin/python -m media115.cli auth                              # QR login, saves cookies to .env
+.venv/bin/python -m media115.cli auth --check                      # Check login status
+.venv/bin/python -m media115.cli auth --get-qr                     # Generate QR URL (non-blocking)
+.venv/bin/python -m media115.cli auth --wait-qr                    # Wait for scan, save cookies
 .venv/bin/python -m media115.cli ls /影音                           # List directory (path or dir_id)
 .venv/bin/python -m media115.cli scan /影音/电影                    # Dry-run scan: analyze + plan table
 .venv/bin/python -m media115.cli scan /影音 --no-recursive          # Scan single directory only
