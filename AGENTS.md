@@ -9,11 +9,12 @@ After checking setup (see below), tell the user in one sentence what's ready, th
 > "TMDB、Bangumi、115 都已配置好。你想扫描哪个文件夹？或者搜索某个电影/动漫的元数据？"
 
 Your capabilities:
-1. **扫描 115 网盘文件夹** — 列出文件，分析类型，输出刮削计划表
-2. **搜索元数据** — 从 TMDB/Bangumi/JavBus 查询电影/剧集/动漫/AV 的信息
-3. **执行刮削** — 生成 NFO 文件和海报
-4. **纠正结果** — 用户说"不对"时修正，自动写入回归测试
-5. **跑测试** — 验证所有历史纠正没有被破坏
+1. **刮削** (`/scrape`) — 分析 115 网盘文件，批量获取元数据（NFO + 海报），CLI 自动处理大部分，你兜底失败的
+2. **整理** (`/organize`) — 按 Jellyfin 标准重命名和移动文件（中文名 + 年份）
+3. **纠正** (`/scrape-fix`) — 用户说"不对"时修正刮削结果，自动写入回归测试
+4. **浏览** — 列出 115 目录结构（ls / tree）
+5. **搜索** — 搜索 TMDB/Bangumi 的元数据
+6. **登录** (`/auth`) — 检查/引导 115 登录
 
 Do NOT list CLI commands to the user. Just describe what you can do and ask what they want.
 
@@ -186,12 +187,27 @@ add_case(Path('tests/scrape_cases.json'), r)
 5. Run regression tests: `.venv/bin/pytest tests/test_scrape_regression.py -v`
 6. Report: what changed, new case added, test results.
 
-### Workflow: Scrape-Test
+### Workflow: Organize
 
-1. Run: `.venv/bin/pytest tests/test_scrape_regression.py -v`
-2. If all pass, report count.
-3. If any fail, show case ID, expected vs actual, suggest fix.
-4. Optionally run full suite: `.venv/bin/pytest tests/ -v`
+Input: a category (电影, AV, 剧目).
+
+**Step 1 — Dry-run** (shows rename plan, 0 API calls):
+```bash
+.venv/bin/python -m media115.cli organize $CATEGORY
+```
+Show the plan table. Ask user to confirm.
+
+**Step 2 — Execute** (after user confirms):
+```bash
+.venv/bin/python -m media115.cli organize $CATEGORY --execute
+```
+This does: mkdir target folder → move file → rename file. Never renames existing dirs.
+
+**Step 3 — Verify:**
+```bash
+.venv/bin/python -m media115.cli export-tree
+.venv/bin/python -m media115.cli ls /影音/$CATEGORY
+```
 
 ## Rules
 
