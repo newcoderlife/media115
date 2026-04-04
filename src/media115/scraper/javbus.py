@@ -5,13 +5,20 @@ from lxml import html as lxml_html
 from media115.scraper.base import ThrottledClient
 
 JAVBUS_URL = "https://www.javbus.com"
-_client = ThrottledClient()
+_client: ThrottledClient | None = None
+
+
+def _get_client() -> ThrottledClient:
+    global _client
+    if _client is None:
+        _client = ThrottledClient()
+    return _client
 
 
 def fetch_metadata(number: str) -> dict | None:
     """Fetch AV metadata from JavBus by number. May be blocked by Cloudflare."""
     try:
-        resp = _client.get(
+        resp = _get_client().get(
             f"{JAVBUS_URL}/{number}",
             headers={"Accept-Language": "zh-TW,zh;q=0.9"},
             follow_redirects=True,

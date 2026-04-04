@@ -3,7 +3,6 @@
 import json
 import time
 
-import pytest
 
 from media115 import cache
 
