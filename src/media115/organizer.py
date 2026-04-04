@@ -283,13 +283,16 @@ def _find_tmdb_tv_cache(cache_module, title: str) -> dict | None:
 
 
 def execute_organize_plan(ops: list[dict], client) -> list[dict]:
-    """Execute rename/move operations on 115. Uses search to find fids.
+    """Execute rename/move operations on 115.
 
-    Each file: search(filename) → fid → rename → move if needed.
+    Uses get_dir_id (path → cid) + list_files (cid → fids).
+    Much more reliable than search-based approach.
     """
     results = []
-    # Cache created directories: new_folder_name → cid
-    dir_cache: dict[str, str] = {}
+    # Cache: original folder path → (cid, {filename: fid})
+    folder_cache: dict[str, tuple[str, dict[str, str]]] = {}
+    # Track renamed folders to avoid double-rename
+    renamed_folders: set[str] = set()
 
     for op in ops:
         if op["action"] == "skip":
@@ -297,35 +300,47 @@ def execute_organize_plan(ops: list[dict], client) -> list[dict]:
             continue
 
         try:
-            # Find the file on 115 by searching its name
-            search_results = client.search(op["file"])
-            fid = None
-            for sr in search_results:
-                if sr.get("n") == op["file"] and "fid" in sr:
-                    fid = sr["fid"]
-                    break
+            parent_path = op["parent"]  # e.g. "影音/电影/A.Better.Tomorrow..."
 
-            if not fid:
-                results.append({**op, "status": "not_found"})
-                continue
+            # Get folder cid + file listing (cached per folder)
+            if parent_path not in folder_cache:
+                cid = client.get_dir_id("/" + parent_path)
+                if not cid:
+                    results.append(
+                        {
+                            **op,
+                            "status": "not_found",
+                            "error": f"dir not found: {parent_path}",
+                        }
+                    )
+                    continue
+                files = client.list_files_all(dir_id=cid)
+                fid_map = {
+                    f.get("n", ""): f.get("fid", "") for f in files if "fid" in f
+                }
+                folder_cache[parent_path] = (cid, fid_map)
+
+            cid, fid_map = folder_cache[parent_path]
 
             # Rename file if needed
+            fid = fid_map.get(op["file"])
+            if not fid:
+                results.append(
+                    {
+                        **op,
+                        "status": "not_found",
+                        "error": f"file not in dir: {op['file']}",
+                    }
+                )
+                continue
+
             if op.get("new_name") and op["new_name"] != op["file"]:
                 client.rename(fid, op["new_name"])
 
             # Rename parent folder if needed
-            if op.get("new_folder"):
-                parent_name = (
-                    op["parent"].split("/")[-1] if "/" in op["parent"] else op["parent"]
-                )
-                if op["new_folder"] != parent_name and parent_name not in dir_cache:
-                    # Find parent folder's cid
-                    parent_results = client.search(parent_name)
-                    for pr in parent_results:
-                        if pr.get("n") == parent_name and "fid" not in pr:
-                            client.rename(str(pr.get("cid", "")), op["new_folder"])
-                            dir_cache[parent_name] = op["new_folder"]
-                            break
+            if op.get("new_folder") and parent_path not in renamed_folders:
+                client.rename(cid, op["new_folder"])
+                renamed_folders.add(parent_path)
 
             results.append({**op, "status": "ok"})
         except Exception as e:
