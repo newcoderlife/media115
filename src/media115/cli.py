@@ -209,14 +209,16 @@ NFO_EXT = ".nfo"
 
 
 @main.command("export-tree")
-@click.argument("dir_id", default="3395528155081997321")
-def export_tree(dir_id):
+@click.argument("path", default="/影音")
+def export_tree(path):
     """Export 115 directory tree to local cache file. Only needs 2-3 API calls."""
     client = _get_115_client()
     if not client:
         return
 
-    click.echo("Exporting directory tree from 115...")
+    click.echo(f"Resolving {path}...")
+    dir_id = _resolve_dir(client, path)
+    click.echo(f"Exporting directory tree (dir_id={dir_id})...")
     text = client.export_tree(dir_id)
     if not text:
         click.echo("Export failed.", err=True)
