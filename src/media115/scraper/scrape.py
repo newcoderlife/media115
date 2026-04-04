@@ -90,6 +90,19 @@ def scrape_movie(title: str, year: int | None, filename: str, out_dir: Path) -> 
         generate_movie_nfo(metadata, out_dir / f"{stem}.nfo")
         _save_tmdb_poster(images, out_dir)
 
+        # Save filename → scrape result mapping for organize
+        media_cache.put(
+            "file_map",
+            _stem(filename),
+            {
+                "type": "movie",
+                "title": detail.get("title", ""),
+                "originaltitle": detail.get("original_title", ""),
+                "year": metadata["year"],
+                "tmdb_id": tmdb_id,
+            },
+        )
+
         return {"status": "ok", "match": detail.get("title", ""), "tmdb_id": tmdb_id}
     finally:
         client.close()
@@ -144,6 +157,20 @@ def scrape_tv(
         }
         generate_episode_nfo(metadata, out_dir / f"{stem}.nfo")
 
+        media_cache.put(
+            "file_map",
+            _stem(filename),
+            {
+                "type": "tv",
+                "title": metadata["title"],
+                "showtitle": metadata["showtitle"],
+                "year": (detail.get("first_air_date", "") or "")[:4],
+                "season": season,
+                "episode": episode,
+                "tmdb_id": tmdb_id,
+            },
+        )
+
         return {"status": "ok", "match": metadata["title"], "tmdb_id": tmdb_id}
     finally:
         client.close()
@@ -155,6 +182,15 @@ def scrape_av(number: str, filename: str, out_dir: Path) -> dict:
     cached = media_cache.get("av", number)
     if cached and not cached.get("_not_found"):
         _write_av_nfo(cached, filename, out_dir, cached.get("_source", "cache"))
+        media_cache.put(
+            "file_map",
+            _stem(filename),
+            {
+                "type": "av",
+                "number": number,
+                "title": cached.get("title", ""),
+            },
+        )
         return {"status": "ok", "match": cached.get("title", ""), "number": number}
 
     # Check not_found cache (7-day TTL)
