@@ -220,7 +220,9 @@ def export_tree(path):
     dir_id = _resolve_dir(client, path)
 
     if dir_id == "0":
-        click.echo("Error: cannot export root directory. Specify a path like /影音", err=True)
+        click.echo(
+            "Error: cannot export root directory. Specify a path like /影音", err=True
+        )
         return
 
     click.echo(f"Exporting directory tree (dir_id={dir_id})...")
@@ -332,7 +334,9 @@ def scan_tree(category):
 @main.command("batch-scrape")
 @click.argument("category")
 @click.option(
-    "--output", default="scrape_output", help="Output directory for NFO + posters"
+    "--output",
+    default=".cache/scrape_output",
+    help="Output directory for NFO + posters",
 )
 @click.option(
     "--limit", "max_count", default=0, type=int, help="Max files to scrape (0=all)"
@@ -404,13 +408,24 @@ def batch_scrape(category, output, max_count):
     skip = sum(1 for r in results if r["status"] == "skip")
     click.echo(f"\nDone: {ok} scraped, {fail} failed, {skip} skipped")
 
+    # Save scrape log
+    import json as _json
+    import time as _time
+
+    log_dir = Path.cwd() / ".cache" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / f"scrape_{category}_{int(_time.time())}.json"
+    log_file.write_text(_json.dumps(results, ensure_ascii=False, indent=2))
+    click.echo(f"Log saved to {log_file}")
+
 
 @main.command()
 @click.argument("category")
 @click.option(
     "--execute", is_flag=True, help="Actually rename/move (default is dry-run)"
 )
-def organize(category, execute):
+@click.option("--cleanup", is_flag=True, help="Delete empty directories after organize")
+def organize(category, execute, cleanup):
     """Rename and reorganize files on 115 to Jellyfin standard.
 
     Dry-run by default (shows plan). Use --execute to apply.
@@ -472,6 +487,49 @@ def organize(category, execute):
             click.echo(f"  Error: {r['file']} — {r.get('error', '?')}")
         elif r["status"] == "not_found":
             click.echo(f"  Not found on 115: {r['file']}")
+
+    # Save operation log
+    import json as _json
+    import time as _time
+
+    log_dir = Path.cwd() / ".cache" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / f"organize_{category}_{int(_time.time())}.json"
+    log_entries = []
+    for r in results:
+        log_entries.append(
+            {
+                "original_file": r.get("file", ""),
+                "original_path": r.get("parent", ""),
+                "new_folder": r.get("new_folder", ""),
+                "new_name": r.get("new_name", ""),
+                "status": r.get("status", ""),
+                "error": r.get("error", ""),
+            }
+        )
+    log_file.write_text(_json.dumps(log_entries, ensure_ascii=False, indent=2))
+    click.echo(f"Log saved to {log_file}")
+
+    if cleanup and ok > 0:
+        click.echo("\nCleaning up empty directories...")
+        category_cid = client.get_dir_id(f"/影音/{category}")
+        if category_cid:
+            items = client.list_files_all(dir_id=category_cid)
+            empty_dirs = [
+                item
+                for item in items
+                if "fid" not in item  # is directory
+                and not client.list_files(dir_id=str(item.get("cid", "")), limit=1)
+            ]
+            for d in empty_dirs:
+                name = d.get("n", "")
+                cid = str(d.get("cid", ""))
+                try:
+                    client.delete([cid])
+                    click.echo(f"  Deleted empty dir: {name}")
+                except Exception as e:
+                    click.echo(f"  Failed to delete {name}: {e}")
+            click.echo(f"Cleaned up {len(empty_dirs)} empty directories")
 
 
 @main.command()
