@@ -160,126 +160,102 @@ def plan_episode_rename(filename: str, show_title: str) -> str | None:
 def build_organize_plan(
     category: str, tree_entries: list[dict], cache_module
 ) -> list[dict]:
-    """Build a rename/move plan from tree entries + cached metadata. Zero API calls.
+    """Build a rename/move plan from file_map cache (written by batch-scrape).
 
-    Returns list of operations:
-    [{"file": "original.mkv", "path": "影音/AV/...", "parent": "...",
-      "new_folder": "DANDY-992", "new_name": "DANDY-992.mkv", "action": "rename"}]
+    Uses scrape results for correct title/year, not filename parsing.
+    Zero API calls.
     """
-    from media115.scraper.analyzer import analyze_filename
+    from media115.utils import stem as _u_stem
 
     ops = []
-    # Group videos by parent directory
     videos = [e for e in tree_entries if e["is_video"] and category in e["path"]]
 
     for item in videos:
         name = item["n"]
         parent = item["parent"]
-        analysis = analyze_filename(name)
+        parent_leaf = parent.split("/")[-1] if "/" in parent else parent
+
+        # Look up scrape result by filename stem
+        scrape_info = cache_module.get("file_map", _u_stem(name))
+
         op = {
             "file": name,
             "path": item["path"],
             "parent": parent,
-            "type": analysis.media_type,
+            "type": scrape_info.get("type", "unknown") if scrape_info else "unknown",
             "action": "skip",
             "new_folder": None,
             "new_name": None,
             "reason": "",
         }
 
-        if analysis.media_type == "movie":
-            meta = _find_tmdb_cache(cache_module, analysis.title, analysis.year)
-            new_folder = plan_movie_rename(
-                parent.split("/")[-1] if "/" in parent else parent, meta
-            )
-            if new_folder and new_folder != parent.split("/")[-1]:
-                ext_m = re.search(r"(\.\w{2,4})$", name)
-                ext = ext_m.group(1) if ext_m else ".mkv"
-                op["new_folder"] = new_folder
-                op["new_name"] = f"{new_folder}{ext}"
+        if not scrape_info:
+            # Check if already in standard format: "Title (Year).ext"
+            if re.match(r".+\(\d{4}\)\.\w{2,4}$", name):
+                op["reason"] = "already in standard format"
+            else:
+                op["reason"] = "no scrape result cached"
+            ops.append(op)
+            continue
+
+        media_type = scrape_info.get("type", "unknown")
+        ext_m = re.search(r"(\\.\w{2,4})$", name)
+        ext = ext_m.group(1) if ext_m else ".mkv"
+
+        if media_type == "movie":
+            title = scrape_info.get("title", "")
+            year = scrape_info.get("year")
+            if title and year:
+                new_folder = f"{_sanitize(title)} ({year})"
+                new_name = f"{_sanitize(title)} ({year}){ext}"
+                if new_folder != parent_leaf or new_name != name:
+                    op["new_folder"] = new_folder
+                    op["new_name"] = new_name
+                    op["action"] = "rename"
+
+        elif media_type == "av":
+            number = scrape_info.get("number", "")
+            if number and number != parent_leaf:
+                op["new_folder"] = number
                 op["action"] = "rename"
 
-        elif analysis.media_type == "av":
-            new_folder = plan_av_rename(
-                parent.split("/")[-1] if "/" in parent else name
-            )
-            if new_folder:
-                ext_m = re.search(r"(\.\w{2,4})$", name)
-                ext = ext_m.group(1) if ext_m else ".mkv"
-                # Keep original filename for multi-part (Part1, Part2)
-                op["new_folder"] = new_folder
-                op["action"] = (
-                    "rename"
-                    if new_folder != (parent.split("/")[-1] if "/" in parent else "")
-                    else "skip"
-                )
+        elif media_type == "tv":
+            show_title = scrape_info.get("showtitle") or scrape_info.get("title", "")
+            year = scrape_info.get("year", "")
+            season = scrape_info.get("season")
+            episode = scrape_info.get("episode")
 
-        elif analysis.media_type == "tv":
-            meta = _find_tmdb_tv_cache(cache_module, analysis.title)
-            show_title = meta.get("title", analysis.title) if meta else analysis.title
-            new_folder = plan_tv_rename(
-                parent.split("/")[-1] if "/" in parent else parent, meta
-            )
-            new_name = plan_episode_rename(name, show_title)
-            if new_folder or new_name:
+            new_folder = None
+            if show_title and year:
+                new_folder = f"{_sanitize(show_title)} ({year})"
+            elif show_title:
+                new_folder = _sanitize(show_title)
+
+            new_name = None
+            if show_title and season is not None and episode is not None:
+                new_name = f"{_sanitize(show_title)} S{int(season):02d}E{int(episode):02d}{ext}"
+
+            needs_rename = False
+            if new_folder and new_folder != parent_leaf:
+                needs_rename = True
+            else:
+                new_folder = None  # already correct
+            if new_name and new_name != name:
+                needs_rename = True
+            else:
+                new_name = None
+
+            if needs_rename:
                 op["new_folder"] = new_folder
                 op["new_name"] = new_name
                 op["action"] = "rename"
 
-        if op["action"] == "skip":
-            op["reason"] = "no change needed or unrecognized"
+        if op["action"] == "skip" and not op["reason"]:
+            op["reason"] = "already correct"
 
         ops.append(op)
 
     return ops
-
-
-def _find_tmdb_cache(cache_module, title: str, year: int | None) -> dict | None:
-    """Search tmdb cache for a movie by title/year match."""
-    import os
-
-    cache_dir = Path(os.getcwd()) / ".cache" / "scrape" / "tmdb"
-    if not cache_dir.exists():
-        return None
-    for f in cache_dir.glob("movie_*.json"):
-        import json
-
-        try:
-            data = json.loads(f.read_text())
-            detail = data.get("detail", {})
-            if detail.get("title") and title.lower() in detail["title"].lower():
-                return detail
-            if (
-                detail.get("original_title")
-                and title.lower() in detail["original_title"].lower()
-            ):
-                return detail
-        except Exception:
-            continue
-    return None
-
-
-def _find_tmdb_tv_cache(cache_module, title: str) -> dict | None:
-    """Search tmdb cache for a TV show by title match."""
-    import os
-
-    cache_dir = Path(os.getcwd()) / ".cache" / "scrape" / "tmdb"
-    if not cache_dir.exists():
-        return None
-    for f in cache_dir.glob("tv_*.json"):
-        import json
-
-        try:
-            data = json.loads(f.read_text())
-            detail = data.get("detail", {})
-            if (
-                detail.get("name")
-                and title.lower().replace(".", " ") in detail["name"].lower()
-            ):
-                return detail
-        except Exception:
-            continue
-    return None
 
 
 def execute_organize_plan(ops: list[dict], client) -> list[dict]:
