@@ -81,8 +81,10 @@ def analyze_filename(filename: str) -> AnalysisResult:
         episode = int(ep_match.group(2))
         # Extract title (everything before SxxExx)
         title = name[: ep_match.start()].strip().rstrip(".-_ ")
-        # Guess anime vs tv: subtitle group brackets suggest anime
-        if re.search(r"^\[", name):
+        # Guess anime vs tv: [EnglishSubGroup] suggests anime,
+        # but [中文名] is a Chinese drama title, not a sub group
+        bracket_match = re.match(r"^\[([^\]]+)\]", name)
+        if bracket_match and not re.search(r"[\u4e00-\u9fff]", bracket_match.group(1)):
             return AnalysisResult(
                 filename=filename,
                 media_type="anime",
