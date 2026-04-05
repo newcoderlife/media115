@@ -261,13 +261,14 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
 
     # Phase 3: Batch move (grouped by target dir)
     move_groups: dict[str, list[str]] = defaultdict(list)
-    move_op_map: dict[str, tuple[dict, str]] = {}  # fid → (op, fid)
+    move_fid_to_op: dict[str, dict] = {}  # fid → op
     for op, fid in resolved:
         target_folder = op.get("new_folder")
         if target_folder and target_folder in created_dirs:
             move_groups[created_dirs[target_folder]].append(fid)
-            move_op_map[fid] = (op, fid)
+            move_fid_to_op[fid] = op
 
+    failed_fids: set[str] = set()
     total_moves = sum(len(fids) for fids in move_groups.values())
     print(
         f"  Moving {total_moves} files to {len(move_groups)} directories...",
@@ -278,11 +279,14 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
         try:
             client.move(fids, target_cid)
         except Exception as e:
-            print(f" move error: {e}", file=sys.stderr)
+            print(f"  Move failed: {e}", file=sys.stderr)
+            failed_fids.update(fids)
 
     # Phase 4: Batch rename
     rename_map: dict[str, str] = {}  # fid → new_name
     for op, fid in resolved:
+        if fid in failed_fids:
+            continue
         new_name = op.get("new_name")
         if new_name and new_name != op["file"]:
             rename_map[fid] = new_name
@@ -292,7 +296,8 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
         try:
             client.batch_rename(rename_map)
         except Exception as e:
-            print(f" batch rename error: {e}", file=sys.stderr)
+            print(f"  Rename failed: {e}", file=sys.stderr)
+            failed_fids.update(rename_map.keys())
 
     # Phase 5: Upload NFO/poster + update file_map
     print("  Uploading NFO/poster...", file=sys.stderr, flush=True)
@@ -321,7 +326,10 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
             if old_data:
                 _cache.put("file_map", new_stem, old_data)
 
-        results.append({**op, "status": "ok"})
+        if fid in failed_fids:
+            results.append({**op, "status": "error", "error": "move or rename failed"})
+        else:
+            results.append({**op, "status": "ok"})
 
     # Phase 6: Delete old source directories (now empty or metadata-only)
     source_dirs = set()

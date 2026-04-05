@@ -136,14 +136,32 @@ def scrape_tv(
         tmdb_id = match["id"]
         detail, _, credits = _get_tmdb_tv_full(client, tmdb_id)
 
+        # Try to get episode-level metadata from season detail
+        ep_plot = detail.get("overview", "")
+        ep_aired = detail.get("first_air_date", match.get("first_air_date", ""))
+        ep_title = detail.get("name", match.get("name", ""))
+        if season and episode:
+            try:
+                season_data = client.season_detail(tmdb_id, season)
+                for ep in season_data.get("episodes", []):
+                    if ep.get("episode_number") == episode:
+                        ep_plot = ep.get("overview") or ep_plot
+                        ep_aired = ep.get("air_date") or ep_aired
+                        ep_name = ep.get("name", "")
+                        if ep_name:
+                            ep_title = ep_name
+                        break
+            except Exception:
+                pass  # Fall back to series-level data
+
         stem = _stem(filename)
         metadata = {
-            "title": detail.get("name", match.get("name", "")),
+            "title": ep_title,
             "showtitle": detail.get("name", ""),
             "season": season,
             "episode": episode,
-            "plot": detail.get("overview", ""),
-            "aired": detail.get("first_air_date", match.get("first_air_date", "")),
+            "plot": ep_plot,
+            "aired": ep_aired,
             "rating": detail.get("vote_average"),
             "votes": detail.get("vote_count"),
             "directors": [
@@ -206,6 +224,11 @@ def scrape_av(number: str, filename: str, out_dir: Path) -> dict:
             meta["_source"] = source
             media_cache.put("av", number, meta)
             _write_av_nfo(meta, filename, out_dir, source)
+            media_cache.put(
+                "file_map",
+                _stem(filename),
+                {"type": "av", "number": number, "title": meta["title"]},
+            )
             return {"status": "ok", "match": meta["title"], "number": number}
 
     # All sources exhausted — cache not_found for 7 days
