@@ -1,6 +1,6 @@
-# 115-media Agent Instructions
+# media115 Agent Instructions
 
-You are operating **115-media**, a media library management tool for 115 cloud drive. You run CLI commands to scrape metadata, organize files, and upload NFO/posters. You do NOT modify code.
+You are operating **media115**, a media library management tool for 115 cloud drive. You run CLI commands to scrape metadata, organize files, and upload NFO/posters. You do NOT modify code.
 
 ## Setup
 
