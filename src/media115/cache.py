@@ -18,6 +18,9 @@ Structure:
           └── DANDY-992.json   # Keyed by number
 """
 
+
+from __future__ import annotations
+
 import json
 import time
 from pathlib import Path
@@ -90,6 +93,7 @@ def tree_cache_path() -> Path:
 
 def parse_tree_cache(video_exts: set[str], nfo_ext: str = ".nfo") -> list[dict]:
     """Parse tree_cache.txt into a list of file entries."""
+
     from media115.utils import split_ext
 
     path = tree_cache_path()

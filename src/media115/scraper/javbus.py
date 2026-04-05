@@ -1,5 +1,8 @@
 """JavBus HTML scraper for AV metadata."""
 
+
+from __future__ import annotations
+
 from lxml import html as lxml_html
 
 from media115.scraper.base import ThrottledClient
@@ -33,6 +36,7 @@ def fetch_metadata(number: str) -> dict | None:
 
 def parse_detail_page(html_str: str) -> dict:
     """Parse a JavBus detail page HTML."""
+
     doc = lxml_html.fromstring(html_str)
     result = {}
 

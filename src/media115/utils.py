@@ -1,5 +1,8 @@
 """Shared utility functions."""
 
+
+from __future__ import annotations
+
 import os
 from pathlib import Path
 
@@ -26,6 +29,7 @@ def trunc(s: str, maxlen: int) -> str:
 
 def load_env(env_path: Path | None = None):
     """Load .env file into os.environ (doesn't override existing)."""
+
     path = env_path or Path.cwd() / ".env"
     if not path.exists():
         return
