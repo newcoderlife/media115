@@ -1,11 +1,12 @@
 """Scan command and path resolution tests (all mocked)."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 from click.testing import CliRunner
 
-from media115.client import Cloud115Client
 from media115.cli import main
+from media115.client import Cloud115Client
 
 
 @pytest.fixture

@@ -1,6 +1,6 @@
 """Analyzer tests: heuristic analysis + rule matching."""
 
-from media115.scraper.analyzer import analyze_filename, AnalysisResult
+from media115.scraper.analyzer import AnalysisResult, analyze_filename
 
 
 class TestAnalyzeMovie:

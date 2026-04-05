@@ -1,11 +1,12 @@
 """Bangumi API scraper tests. Hits real Bangumi API (read-only, free)."""
 
 import os
+
 import pytest
 
-pytestmark = pytest.mark.live
-
 from media115.scraper.bangumi import BangumiClient
+
+pytestmark = pytest.mark.live
 
 
 @pytest.fixture

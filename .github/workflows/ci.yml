@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - name: Lint
+        run: ruff check src/ tests/
+      - name: Test (offline)
+        run: pytest -m "not live" -o "addopts=" --cov=media115 --cov-report=xml -q
+      - name: Upload coverage
+        if: github.ref == 'refs/heads/master'
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false

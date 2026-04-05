@@ -998,7 +998,7 @@ def upload(file_path, remote_dir):
     try:
         result = client.upload_file(path, remote_dir)
         if result:
-            click.echo(f"  Upload success!")
+            click.echo("  Upload success!")
         else:
             click.echo("  Upload failed (no response)")
     except NotImplementedError:

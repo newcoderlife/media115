@@ -4,14 +4,15 @@ All scrapers go through this module. Cache is checked first;
 on miss, the appropriate provider is called and result is cached.
 """
 
+import contextlib
 import os
 import re
 from pathlib import Path
 
 from media115 import cache as media_cache
-from media115.scraper.nfo import generate_movie_nfo, generate_episode_nfo, generate_tvshow_nfo
+from media115.scraper.artwork import download_image, save_poster
+from media115.scraper.nfo import generate_episode_nfo, generate_movie_nfo, generate_tvshow_nfo
 from media115.utils import stem as _stem
-from media115.scraper.artwork import save_poster, download_image
 
 
 def scrape_movie(title: str, year: int | None, filename: str, out_dir: Path) -> dict:
@@ -323,12 +324,10 @@ def _best_match(results: list[dict], year: int | None) -> dict:
 def _save_tmdb_poster(images: dict, out_dir: Path):
     """Download first poster from TMDB images."""
     if images.get("posters"):
-        try:
+        with contextlib.suppress(Exception):
             save_poster(
                 images["posters"][0]["file_path"], out_dir, filename="poster.jpg"
             )
-        except Exception:
-            pass
 
 
 def _write_av_nfo(meta: dict, filename: str, out_dir: Path, source: str):
@@ -349,7 +348,5 @@ def _write_av_nfo(meta: dict, filename: str, out_dir: Path, source: str):
     generate_movie_nfo(metadata, out_dir / f"{stem}.nfo")
 
     if meta.get("cover_url"):
-        try:
+        with contextlib.suppress(Exception):
             download_image(meta["cover_url"], out_dir / "poster.jpg")
-        except Exception:
-            pass

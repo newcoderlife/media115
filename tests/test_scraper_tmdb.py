@@ -1,11 +1,12 @@
 """TMDB scraper tests. Hits real TMDB API (read-only, free)."""
 
 import os
+
 import pytest
 
-pytestmark = pytest.mark.live
-
 from media115.scraper.tmdb import TMDBClient
+
+pytestmark = pytest.mark.live
 
 
 @pytest.fixture

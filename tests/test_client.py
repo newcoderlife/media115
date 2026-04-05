@@ -1,7 +1,8 @@
 """115 client tests. Covers both cookie and OpenAPI modes (all mocked)."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from media115.client import Cloud115Client, RateLimiter
 
