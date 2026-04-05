@@ -1,5 +1,8 @@
 """JAV321 scraper for AV metadata. No Cloudflare, POST-based search."""
 
+
+from __future__ import annotations
+
 from lxml import html as lxml_html
 
 from media115.scraper.base import ThrottledClient
@@ -10,6 +13,7 @@ _client = ThrottledClient()
 
 def fetch_metadata(number: str) -> dict | None:
     """Fetch AV metadata from JAV321 by number."""
+
     try:
         resp = _client.post(
             f"{BASE_URL}/search",

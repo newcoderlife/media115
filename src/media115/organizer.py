@@ -1,5 +1,9 @@
 """File organizer: SHA1 hashing, rapid upload, STRM generation, 115 rename."""
 
+
+
+from __future__ import annotations
+
 import contextlib
 import hashlib
 import re

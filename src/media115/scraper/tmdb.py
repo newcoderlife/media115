@@ -1,5 +1,9 @@
 """TMDB API client for movie/TV metadata."""
 
+
+
+from __future__ import annotations
+
 import time
 
 import httpx

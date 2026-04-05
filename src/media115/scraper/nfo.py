@@ -4,6 +4,9 @@ Follows the Kodi NFO standard for maximum compatibility with
 Jellyfin, Infuse, and Kodi itself.
 """
 
+
+from __future__ import annotations
+
 from pathlib import Path
 
 from lxml import etree

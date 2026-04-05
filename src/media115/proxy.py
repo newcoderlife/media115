@@ -1,5 +1,8 @@
 """strm-proxy: Jellyfin reverse proxy with STRM 302 redirect."""
 
+
+from __future__ import annotations
+
 import re
 import time
 from contextlib import asynccontextmanager
@@ -38,6 +41,7 @@ def create_app(jellyfin_url: str, cloud115_client) -> FastAPI:
         Used by STRM files: the path is the full 115 path like
         影音/电影/满江红 (2023)/满江红 (2023).mkv
         """
+
         decoded_path = unquote(file_path)
         if not decoded_path.startswith("/"):
             decoded_path = "/" + decoded_path

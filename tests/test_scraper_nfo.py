@@ -3,7 +3,12 @@
 import pytest
 from lxml import etree
 
-from media115.scraper.nfo import generate_episode_nfo, generate_movie_nfo, parse_nfo
+from media115.scraper.nfo import (
+    generate_episode_nfo,
+    generate_movie_nfo,
+    generate_tvshow_nfo,
+    parse_nfo,
+)
 
 
 @pytest.fixture
@@ -153,3 +158,118 @@ class TestParseNFO:
         nfo_path.write_text("<movie><title>Test</title><plot>a & b</plot></movie>")
         parsed = parse_nfo(nfo_path)
         assert parsed["title"] == "Test"
+
+
+@pytest.fixture
+def tvshow_metadata():
+    return {
+        "title": "Breaking Bad",
+        "originaltitle": "Breaking Bad",
+        "showtitle": "Breaking Bad",
+        "year": 2008,
+        "plot": "A chemistry teacher diagnosed with cancer turns to cooking meth.",
+        "premiered": "2008-01-20",
+        "rating": 9.5,
+        "votes": 8000,
+        "status": "Ended",
+        "genres": ["Drama", "Crime"],
+        "studios": ["AMC"],
+        "tags": ["crime", "drugs"],
+        "actors": [
+            {"name": "Bryan Cranston", "role": "Walter White", "thumb": "https://example.com/bc.jpg"},
+            {"name": "Aaron Paul", "role": "Jesse Pinkman", "thumb": ""},
+        ],
+        "uniqueids": {"tmdb": "1396", "imdb": "tt0903747"},
+        "thumb": "https://image.tmdb.org/t/p/original/poster.jpg",
+        "fanart": "https://image.tmdb.org/t/p/original/fanart.jpg",
+    }
+
+
+class TestGenerateTvshowNFO:
+    def test_generate_tvshow_nfo(self, tvshow_metadata, tmp_path):
+        """Full metadata produces valid XML with all expected elements."""
+        nfo_path = tmp_path / "tvshow.nfo"
+        generate_tvshow_nfo(tvshow_metadata, nfo_path)
+        assert nfo_path.exists()
+
+        tree = etree.parse(str(nfo_path))
+        root = tree.getroot()
+        assert root.tag == "tvshow"
+
+        # Core fields
+        assert root.findtext("title") == "Breaking Bad"
+        assert root.findtext("showtitle") == "Breaking Bad"
+        assert root.findtext("originaltitle") == "Breaking Bad"
+        assert root.findtext("year") == "2008"
+        assert root.findtext("plot") is not None
+        assert "chemistry teacher" in root.findtext("plot")
+        assert root.findtext("rating") == "9.5"
+        assert root.findtext("votes") == "8000"
+        assert root.findtext("premiered") == "2008-01-20"
+        assert root.findtext("status") == "Ended"
+
+        # Studios
+        studios = [el.text for el in root.findall("studio")]
+        assert "AMC" in studios
+
+        # Genres
+        genres = [el.text for el in root.findall("genre")]
+        assert "Drama" in genres
+        assert "Crime" in genres
+
+        # Tags
+        tags = [el.text for el in root.findall("tag")]
+        assert "crime" in tags
+        assert "drugs" in tags
+
+        # Actors
+        actors = root.findall("actor")
+        assert len(actors) == 2
+        assert actors[0].findtext("name") == "Bryan Cranston"
+        assert actors[0].findtext("role") == "Walter White"
+        assert actors[0].findtext("thumb") == "https://example.com/bc.jpg"
+
+        # Unique IDs
+        uids = {el.get("type"): el.text for el in root.findall("uniqueid")}
+        assert uids["tmdb"] == "1396"
+        assert uids["imdb"] == "tt0903747"
+
+        # Thumb / fanart
+        thumb_el = root.find("thumb[@aspect='poster']")
+        assert thumb_el is not None
+        assert "poster.jpg" in thumb_el.text
+        fanart_el = root.find("fanart")
+        assert fanart_el is not None
+        assert fanart_el.findtext("thumb") is not None
+
+    def test_generate_tvshow_nfo_minimal(self, tmp_path):
+        """Only title and year -- should not crash, should produce valid XML."""
+        minimal = {"title": "Minimal Show", "year": 2025}
+        nfo_path = tmp_path / "tvshow.nfo"
+        generate_tvshow_nfo(minimal, nfo_path)
+        assert nfo_path.exists()
+
+        tree = etree.parse(str(nfo_path))
+        root = tree.getroot()
+        assert root.tag == "tvshow"
+        assert root.findtext("title") == "Minimal Show"
+        assert root.findtext("year") == "2025"
+        # showtitle falls back to title when not provided
+        assert root.findtext("showtitle") == "Minimal Show"
+
+    def test_parse_tvshow_nfo(self, tvshow_metadata, tmp_path):
+        """Generate tvshow.nfo then parse it back -- round-trip fidelity."""
+        nfo_path = tmp_path / "tvshow.nfo"
+        generate_tvshow_nfo(tvshow_metadata, nfo_path)
+        parsed = parse_nfo(nfo_path)
+
+        assert parsed["title"] == "Breaking Bad"
+        assert parsed["showtitle"] == "Breaking Bad"
+        assert parsed["year"] == "2008"
+        assert parsed["status"] == "Ended"
+        assert parsed["uniqueids"]["tmdb"] == "1396"
+        assert parsed["uniqueids"]["imdb"] == "tt0903747"
+        assert "Drama" in parsed["genres"]
+        assert "Crime" in parsed["genres"]
+        assert len(parsed["actors"]) == 2
+        assert parsed["actors"][0]["name"] == "Bryan Cranston"

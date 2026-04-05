@@ -6,6 +6,9 @@ This module provides the logic that LLM skills call. It handles:
 3. Falling back to heuristic analysis for unknown files
 """
 
+
+from __future__ import annotations
+
 import datetime
 import json
 import re
@@ -156,6 +159,7 @@ def analyze_filename(filename: str) -> AnalysisResult:
 
 def add_case(cases_path: Path, result: AnalysisResult, correction: dict | None = None):
     """Add a verified/corrected result as a new test case."""
+
     cases = load_cases(cases_path)
 
     expect = correction or {}

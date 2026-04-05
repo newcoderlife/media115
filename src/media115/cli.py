@@ -1,5 +1,8 @@
 """CLI entry point for media115."""
 
+
+from __future__ import annotations
+
 import os
 from pathlib import Path
 
