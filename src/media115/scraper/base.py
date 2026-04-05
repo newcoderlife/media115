@@ -1,6 +1,5 @@
 """Base scraper with shared HTTP client and rate limiting."""
 
-
 from __future__ import annotations
 
 import time
@@ -19,9 +18,7 @@ DEFAULT_TIMEOUT = 15
 class ThrottledClient:
     """HTTP client with per-instance rate limiting."""
 
-    def __init__(
-        self, interval: float = DEFAULT_INTERVAL, timeout: int = DEFAULT_TIMEOUT
-    ):
+    def __init__(self, interval: float = DEFAULT_INTERVAL, timeout: int = DEFAULT_TIMEOUT):
         self._interval = interval
         self._last_request: float = 0
         self._http = httpx.Client(

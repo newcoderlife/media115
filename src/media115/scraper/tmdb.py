@@ -1,7 +1,5 @@
 """TMDB API client for movie/TV metadata."""
 
-
-
 from __future__ import annotations
 
 import time
@@ -76,9 +74,7 @@ class TMDBClient:
             params={"language": language or self._language},
         )
 
-    def season_detail(
-        self, tv_id: int, season_number: int, language: str | None = None
-    ) -> dict:
+    def season_detail(self, tv_id: int, season_number: int, language: str | None = None) -> dict:
         return self._get(
             f"/tv/{tv_id}/season/{season_number}",
             params={"language": language or self._language},

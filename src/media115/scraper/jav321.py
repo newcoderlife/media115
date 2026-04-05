@@ -1,6 +1,5 @@
 """JAV321 scraper for AV metadata. No Cloudflare, POST-based search."""
 
-
 from __future__ import annotations
 
 from lxml import html as lxml_html
@@ -48,28 +47,20 @@ def _parse_detail(html_str: str, original_number: str) -> dict | None:
     info_div = doc.xpath('//div[@class="col-md-9"]')
     if info_div:
         info_text = info_div[0].text_content()
-        result["release_date"] = _extract_field(
-            info_text, "配信開始日", "發行日期", "发行日期"
-        )
-        result["runtime"] = _extract_digits(
-            _extract_field(info_text, "収録時間", "長度")
-        )
+        result["release_date"] = _extract_field(info_text, "配信開始日", "發行日期", "发行日期")
+        result["runtime"] = _extract_digits(_extract_field(info_text, "収録時間", "長度"))
         result["studio"] = _extract_field(info_text, "メーカー", "製作商")
         result["label"] = _extract_field(info_text, "レーベル", "發行商")
         result["series"] = _extract_field(info_text, "シリーズ", "系列")
 
     result["actors"] = [
         a.strip()
-        for a in doc.xpath(
-            '//div[@class="col-md-9"]//a[contains(@href, "/star/")]/text()'
-        )
+        for a in doc.xpath('//div[@class="col-md-9"]//a[contains(@href, "/star/")]/text()')
         if a.strip()
     ]
     result["genres"] = [
         g.strip()
-        for g in doc.xpath(
-            '//div[@class="col-md-9"]//a[contains(@href, "/genre/")]/text()'
-        )
+        for g in doc.xpath('//div[@class="col-md-9"]//a[contains(@href, "/genre/")]/text()')
         if g.strip()
     ]
 

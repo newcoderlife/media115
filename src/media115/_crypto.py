@@ -5,7 +5,6 @@ Only implements the M115 channel (RSA + XOR) used by the download endpoint.
 EC115 channel (ECDH + AES + LZ4, used by upload) is NOT included here.
 """
 
-
 from __future__ import annotations
 
 import base64

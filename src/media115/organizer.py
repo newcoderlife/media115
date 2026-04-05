@@ -1,7 +1,5 @@
 """File organizer: SHA1 hashing, rapid upload, STRM generation, 115 rename."""
 
-
-
 from __future__ import annotations
 
 import contextlib
@@ -42,9 +40,7 @@ def compute_pre_sha1(file_path: Path) -> str:
 # ── 115 Cloud directory organization ─────────────────────────────────
 
 
-def build_organize_plan(
-    category: str, tree_entries: list[dict], cache_module
-) -> list[dict]:
+def build_organize_plan(category: str, tree_entries: list[dict], cache_module) -> list[dict]:
     """Build a rename/move plan from file_map cache (written by batch-scrape).
 
     Uses scrape results for correct title/year, not filename parsing.
@@ -207,9 +203,7 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
         parent_path = op["parent"]
         if parent_path not in folder_cache:
             # Try to resolve from pre-fetched subdir list
-            parent_leaf = (
-                parent_path.split("/")[-1] if "/" in parent_path else parent_path
-            )
+            parent_leaf = parent_path.split("/")[-1] if "/" in parent_path else parent_path
             cid = subdir_cids.get(parent_leaf)
             if not cid:
                 cid = client.get_dir_id("/" + parent_path)
@@ -242,12 +236,8 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
     )
 
     # Phase 2: Create all target directories
-    target_folders = {
-        op.get("new_folder") for op, _ in resolved if op.get("new_folder")
-    }
-    print(
-        f"  Creating {len(target_folders)} directories...", file=sys.stderr, flush=True
-    )
+    target_folders = {op.get("new_folder") for op, _ in resolved if op.get("new_folder")}
+    print(f"  Creating {len(target_folders)} directories...", file=sys.stderr, flush=True)
     for folder in target_folders:
         if folder not in created_dirs:
             try:
@@ -320,9 +310,7 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
             upload_cid = subdir_cids.get(parent_leaf)
 
         if upload_cid:
-            _upload_scrape_output(
-                client, op, upload_cid, op.get("new_name")
-            )
+            _upload_scrape_output(client, op, upload_cid, op.get("new_name"))
 
         # Update file_map cache
         new_name = op.get("new_name")
@@ -363,8 +351,7 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
             # Check if dir still has video files
             contents = client.list_files_all(dir_id=cid)
             has_video = any(
-                "fid" in f
-                and re.search(r"\.(mkv|mp4|avi|ts|rmvb|flv|wmv)$", f.get("n", ""), re.I)
+                "fid" in f and re.search(r"\.(mkv|mp4|avi|ts|rmvb|flv|wmv)$", f.get("n", ""), re.I)
                 for f in contents
             )
             if not has_video:
@@ -377,9 +364,7 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
     return results
 
 
-def _upload_scrape_output(
-    client, op: dict, target_cid: str, new_video_name: str | None = None
-):
+def _upload_scrape_output(client, op: dict, target_cid: str, new_video_name: str | None = None):
     """Upload NFO + poster for an organized file if they exist locally.
 
     NFO is renamed to match the new video filename so Jellyfin can pair them.

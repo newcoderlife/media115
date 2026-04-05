@@ -1,6 +1,5 @@
 """CLI entry point for media115."""
 
-
 from __future__ import annotations
 
 import os
@@ -92,9 +91,7 @@ def main():
 @click.option("--renew", is_flag=True, help="Auto-renew cookies without scanning")
 @click.option("--force", is_flag=True, help="Force re-login even if already logged in")
 @click.option("--get-qr", is_flag=True, help="Generate QR URL and exit (non-blocking)")
-@click.option(
-    "--wait-qr", is_flag=True, help="Wait for QR scan to complete and save cookies"
-)
+@click.option("--wait-qr", is_flag=True, help="Wait for QR scan to complete and save cookies")
 def auth(app, check, renew, force, get_qr, wait_qr):
     """Login to 115 via QR code scan. Saves cookies to .env."""
     import json as _json
@@ -204,18 +201,14 @@ def auth(app, check, renew, force, get_qr, wait_qr):
 
     if renew:
         if not existing:
-            click.echo(
-                "No existing cookies to renew. Run 'media115 auth' first.", err=True
-            )
+            click.echo("No existing cookies to renew. Run 'media115 auth' first.", err=True)
             return
         if existing.renew_cookies(app=app):
             env_path = Path.cwd() / ".env"
             existing.save_cookies_to_env(env_path)
             click.echo("Cookies renewed and saved.")
         else:
-            click.echo(
-                "Cookie renewal failed. Run 'media115 auth' to re-login.", err=True
-            )
+            click.echo("Cookie renewal failed. Run 'media115 auth' to re-login.", err=True)
         return
 
     if not force and existing and existing.check_login():
@@ -270,9 +263,7 @@ def export_tree(path):
     dir_id = _resolve_dir(client, path)
 
     if dir_id == "0":
-        click.echo(
-            "Error: cannot export root directory. Specify a path like /影音", err=True
-        )
+        click.echo("Error: cannot export root directory. Specify a path like /影音", err=True)
         return
 
     click.echo(f"Exporting directory tree (dir_id={dir_id})...")
@@ -287,9 +278,7 @@ def export_tree(path):
 
     lines = text.strip().split("\n")
     video_count = sum(
-        1
-        for ln in lines
-        if any(ln.rstrip().lower().endswith(ext) for ext in VIDEO_EXTS)
+        1 for ln in lines if any(ln.rstrip().lower().endswith(ext) for ext in VIDEO_EXTS)
     )
     click.echo(f"Tree exported: {len(lines)} entries, {video_count} video files")
     click.echo(f"Saved to {tree_path}")
@@ -318,15 +307,11 @@ def scan_tree(category, show_all):
 
     entries = media_cache.parse_tree_cache(VIDEO_EXTS)
     videos = [e for e in entries if e["is_video"]]
-    nfo_set = {
-        e["parent"] + "/" + _split_ext(e["n"])[0] for e in entries if e["is_nfo"]
-    }
+    nfo_set = {e["parent"] + "/" + _split_ext(e["n"])[0] for e in entries if e["is_nfo"]}
 
     if category:
         videos = [
-            v
-            for v in videos
-            if v["path"].startswith(category) or f"/{category}/" in v["path"]
+            v for v in videos if v["path"].startswith(category) or f"/{category}/" in v["path"]
         ]
 
     cases_path = Path.cwd() / "tests" / "scrape_cases.json"
@@ -336,9 +321,7 @@ def scan_tree(category, show_all):
     click.echo(
         f"| {'#':>3} | {'File':<55} | {'NFO':^5} | {'Type':<8} | {'Title':<30} | {'Source':<8} | {'Action':<12} |"
     )
-    click.echo(
-        f"|{'-' * 5}|{'-' * 57}|{'-' * 7}|{'-' * 10}|{'-' * 32}|{'-' * 10}|{'-' * 14}|"
-    )
+    click.echo(f"|{'-' * 5}|{'-' * 57}|{'-' * 7}|{'-' * 10}|{'-' * 32}|{'-' * 10}|{'-' * 14}|")
 
     stats = {"skip": 0, "scrape": 0, "unrecognized": 0, "known": 0}
 
@@ -433,7 +416,11 @@ def scan_tree(category, show_all):
 
     if anomalies:
         click.echo(f"\nAnomalies found: {len(anomalies)}")
-        labels = {"naming": "Non-standard name", "dup_nfo": "Duplicate NFO", "residual": "Residual dir"}
+        labels = {
+            "naming": "Non-standard name",
+            "dup_nfo": "Duplicate NFO",
+            "residual": "Residual dir",
+        }
         for atype, parent, detail in anomalies:
             click.echo(f"  [{labels[atype]}] {parent}")
             click.echo(f"    {detail}")
@@ -448,12 +435,8 @@ def scan_tree(category, show_all):
     default=".cache/scrape_output",
     help="Output directory for NFO + posters",
 )
-@click.option(
-    "--limit", "max_count", default=0, type=int, help="Max files to scrape (0=all)"
-)
-@click.option(
-    "--force", is_flag=True, help="Re-scrape even if NFO already exists on 115"
-)
+@click.option("--limit", "max_count", default=0, type=int, help="Max files to scrape (0=all)")
+@click.option("--force", is_flag=True, help="Re-scrape even if NFO already exists on 115")
 def batch_scrape(category, output, max_count, force):
     """Scrape metadata for a category from tree cache. Generates NFO + poster locally.
 
@@ -467,17 +450,9 @@ def batch_scrape(category, output, max_count, force):
     videos = [v for v in videos if category in v["path"]]
 
     if not force:
-        nfo_names = {
-            e["parent"] + "/" + _split_ext(e["n"])[0]
-            for e in entries
-            if e["is_nfo"]
-        }
+        nfo_names = {e["parent"] + "/" + _split_ext(e["n"])[0] for e in entries if e["is_nfo"]}
         # Skip files that already have NFO
-        videos = [
-            v
-            for v in videos
-            if v["parent"] + "/" + _split_ext(v["n"])[0] not in nfo_names
-        ]
+        videos = [v for v in videos if v["parent"] + "/" + _split_ext(v["n"])[0] not in nfo_names]
 
     if max_count > 0:
         videos = videos[:max_count]
@@ -511,9 +486,7 @@ def batch_scrape(category, output, max_count, force):
                 result = scrape_movie(analysis.title, analysis.year, name, file_out)
             elif analysis.media_type in ("tv", "anime"):
                 season = analysis.season if analysis.season is not None else 1
-                result = scrape_tv(
-                    analysis.title, season, analysis.episode, name, file_out
-                )
+                result = scrape_tv(analysis.title, season, analysis.episode, name, file_out)
             else:
                 result = {"status": "skip", "reason": analysis.media_type}
 
@@ -551,9 +524,7 @@ def batch_scrape(category, output, max_count, force):
 
 @main.command()
 @click.argument("category")
-@click.option(
-    "--execute", is_flag=True, help="Actually rename/move (default is dry-run)"
-)
+@click.option("--execute", is_flag=True, help="Actually rename/move (default is dry-run)")
 @click.option("--cleanup", is_flag=True, help="Delete empty directories after organize")
 def organize(category, execute, cleanup):
     """Rename and reorganize files on 115 to Jellyfin standard.
@@ -584,9 +555,7 @@ def organize(category, execute, cleanup):
         click.echo("Nothing to rename.")
         return
 
-    click.echo(
-        f"| {'#':>3} | {'Current':<40} | {'→ New Name':<30} | {'Source':>10} |"
-    )
+    click.echo(f"| {'#':>3} | {'Current':<40} | {'→ New Name':<30} | {'Source':>10} |")
     click.echo(f"|{'-' * 5}|{'-' * 42}|{'-' * 32}|{'-' * 12}|")
 
     for i, op in enumerate(renames, 1):
@@ -613,9 +582,7 @@ def organize(category, execute, cleanup):
         return
 
     if not execute:
-        click.echo(
-            f"\nDry-run complete. Use --execute to apply {len(renames)} renames."
-        )
+        click.echo(f"\nDry-run complete. Use --execute to apply {len(renames)} renames.")
         return
 
     client = _get_115_client()
@@ -699,9 +666,7 @@ def upload_nfo(category):
 
     scrape_dir = Path.cwd() / ".cache" / "scrape_output" / category
     if not scrape_dir.exists():
-        click.echo(
-            f"No scrape output for '{category}'. Run batch-scrape first.", err=True
-        )
+        click.echo(f"No scrape output for '{category}'. Run batch-scrape first.", err=True)
         return
 
     client = _get_115_client()
@@ -738,9 +703,7 @@ def upload_nfo(category):
     for out_dir in sorted(scrape_dir.iterdir()):
         if not out_dir.is_dir():
             continue
-        files_to_upload = [
-            f for f in out_dir.iterdir() if f.suffix in (".nfo", ".jpg", ".png")
-        ]
+        files_to_upload = [f for f in out_dir.iterdir() if f.suffix in (".nfo", ".jpg", ".png")]
         if not files_to_upload:
             continue
 
@@ -843,9 +806,7 @@ def scan(path, recursive, depth):
             videos.append(item)
 
     # Load regression cases
-    cases_path = (
-        Path(__file__).resolve().parent.parent.parent / "tests" / "scrape_cases.json"
-    )
+    cases_path = Path(__file__).resolve().parent.parent.parent / "tests" / "scrape_cases.json"
     cases = load_cases(cases_path) if cases_path.exists() else []
 
     # Analyze each video
@@ -853,9 +814,7 @@ def scan(path, recursive, depth):
     click.echo(
         f"| {'#':>3} | {'File':<50} | {'NFO':^5} | {'Type':<6} | {'Title':<30} | {'Source':<8} | {'Action':<12} |"
     )
-    click.echo(
-        f"|{'-' * 5}|{'-' * 52}|{'-' * 7}|{'-' * 8}|{'-' * 32}|{'-' * 10}|{'-' * 14}|"
-    )
+    click.echo(f"|{'-' * 5}|{'-' * 52}|{'-' * 7}|{'-' * 8}|{'-' * 32}|{'-' * 10}|{'-' * 14}|")
 
     for i, item in enumerate(videos, 1):
         name = item.get("fn", item.get("n", ""))
@@ -950,7 +909,9 @@ def strm(path, output, host, port):
     videos = [e for e in entries if e["is_video"]]
 
     # Filter to videos under the given path
-    matched = [v for v in videos if v["path"].startswith(filter_path + "/") or v["path"] == filter_path]
+    matched = [
+        v for v in videos if v["path"].startswith(filter_path + "/") or v["path"] == filter_path
+    ]
 
     if not matched:
         click.echo(f"No video files found under '{path}' in tree cache.")
@@ -965,7 +926,7 @@ def strm(path, output, host, port):
         full_115_path = item["path"]
         # Path relative to the filter path, for local directory structure
         if full_115_path.startswith(filter_path + "/"):
-            rel_path = full_115_path[len(filter_path) + 1:]
+            rel_path = full_115_path[len(filter_path) + 1 :]
         else:
             rel_path = full_115_path
 
@@ -1012,9 +973,7 @@ def upload(file_path, remote_dir):
 
 @main.command()
 @click.argument("query")
-@click.option(
-    "--source", default="tmdb", type=click.Choice(["tmdb", "bangumi", "javbus"])
-)
+@click.option("--source", default="tmdb", type=click.Choice(["tmdb", "bangumi", "javbus"]))
 @click.option("--language", default="zh-CN")
 def scrape(query, source, language):
     """Search metadata from a source."""

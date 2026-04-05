@@ -16,9 +16,7 @@ def _isolate_cache(tmp_path, monkeypatch):
 class TestScrapeMovie:
     def test_success(self, tmp_path):
         mock_client = MagicMock()
-        mock_client.search_movie.return_value = [
-            {"id": 603, "release_date": "1999-03-31"}
-        ]
+        mock_client.search_movie.return_value = [{"id": 603, "release_date": "1999-03-31"}]
         mock_client.movie_detail.return_value = {
             "title": "The Matrix",
             "original_title": "The Matrix",
@@ -40,9 +38,7 @@ class TestScrapeMovie:
         mock_client.movie_images.return_value = {"posters": [{"file_path": "/p.jpg"}]}
         mock_client.movie_credits.return_value = {
             "crew": [{"name": "Lana Wachowski", "job": "Director"}],
-            "cast": [
-                {"name": "Keanu Reeves", "character": "Neo", "profile_path": "/k.jpg"}
-            ],
+            "cast": [{"name": "Keanu Reeves", "character": "Neo", "profile_path": "/k.jpg"}],
         }
         mock_client.close = MagicMock()
 

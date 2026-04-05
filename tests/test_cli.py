@@ -222,14 +222,16 @@ class TestBatchScrape:
                 "number": "DANDY-992",
             }
 
-            with patch(
-                "media115.scraper.scrape.scrape_av", return_value=mock_result
-            ), patch(
-                "media115.scraper.scrape.scrape_movie",
-                return_value={"status": "ok", "match": "Test Movie", "tmdb_id": 123},
-            ), patch(
-                "media115.scraper.scrape.scrape_tv",
-                return_value={"status": "ok", "match": "Test TV", "tmdb_id": 456},
+            with (
+                patch("media115.scraper.scrape.scrape_av", return_value=mock_result),
+                patch(
+                    "media115.scraper.scrape.scrape_movie",
+                    return_value={"status": "ok", "match": "Test Movie", "tmdb_id": 123},
+                ),
+                patch(
+                    "media115.scraper.scrape.scrape_tv",
+                    return_value={"status": "ok", "match": "Test TV", "tmdb_id": 456},
+                ),
             ):
                 result = runner.invoke(main, ["batch-scrape", "AV"])
 
@@ -261,9 +263,7 @@ class TestBatchScrape:
                 "number": "ABC-123",
             }
 
-            with patch(
-                "media115.scraper.scrape.scrape_av", return_value=mock_result
-            ):
+            with patch("media115.scraper.scrape.scrape_av", return_value=mock_result):
                 # Without --force: ABC-123 has NFO so only DANDY-992 processed
                 result_normal = runner.invoke(main, ["batch-scrape", "AV"])
                 # With --force: both files processed
@@ -281,21 +281,21 @@ class TestBatchScrape:
 
             mock_result = {"status": "ok", "match": "Test", "number": "TEST-001"}
 
-            with patch(
-                "media115.scraper.scrape.scrape_av", return_value=mock_result
-            ), patch(
-                "media115.scraper.scrape.scrape_movie",
-                return_value={"status": "ok", "match": "M", "tmdb_id": 1},
-            ), patch(
-                "media115.scraper.scrape.scrape_tv",
-                return_value={"status": "ok", "match": "T", "tmdb_id": 1},
+            with (
+                patch("media115.scraper.scrape.scrape_av", return_value=mock_result),
+                patch(
+                    "media115.scraper.scrape.scrape_movie",
+                    return_value={"status": "ok", "match": "M", "tmdb_id": 1},
+                ),
+                patch(
+                    "media115.scraper.scrape.scrape_tv",
+                    return_value={"status": "ok", "match": "T", "tmdb_id": 1},
+                ),
             ):
                 # Use "AV" category (paths are "AV/..." in parsed tree)
                 # --force so NFO-existing files are included (2 AV files)
                 # --limit 1 to cap at 1
-                result = runner.invoke(
-                    main, ["batch-scrape", "AV", "--force", "--limit", "1"]
-                )
+                result = runner.invoke(main, ["batch-scrape", "AV", "--force", "--limit", "1"])
 
         assert result.exit_code == 0
         assert "Scraping 1 files" in result.output
@@ -312,9 +312,7 @@ class TestBatchScrape:
                 "number": "DANDY-992",
             }
 
-            with patch(
-                "media115.scraper.scrape.scrape_av", return_value=mock_result
-            ):
+            with patch("media115.scraper.scrape.scrape_av", return_value=mock_result):
                 result = runner.invoke(main, ["batch-scrape", "AV"])
 
             assert result.exit_code == 0
@@ -365,9 +363,7 @@ class TestOrganize:
             _write_env()
             _write_tree()
 
-            with patch(
-                "media115.organizer.build_organize_plan", return_value=plan
-            ):
+            with patch("media115.organizer.build_organize_plan", return_value=plan):
                 result = runner.invoke(main, ["organize", "AV"])
 
         assert result.exit_code == 0
@@ -401,9 +397,7 @@ class TestOrganize:
             _write_env()
             _write_tree()
 
-            with patch(
-                "media115.organizer.build_organize_plan", return_value=plan
-            ):
+            with patch("media115.organizer.build_organize_plan", return_value=plan):
                 result = runner.invoke(main, ["organize", "AV"])
 
         assert result.exit_code == 0
@@ -440,9 +434,7 @@ class TestOrganize:
             _write_env()
             _write_tree()
 
-            with patch(
-                "media115.organizer.build_organize_plan", return_value=plan
-            ):
+            with patch("media115.organizer.build_organize_plan", return_value=plan):
                 result = runner.invoke(main, ["organize", "电影"])
 
         assert result.exit_code == 0
@@ -568,9 +560,7 @@ class TestUpload:
         test_file.write_bytes(b"\x00" * 100)
 
         with patch("media115.cli._get_115_client", return_value=mock_client):
-            result = runner.invoke(
-                main, ["upload", str(test_file), "--remote-dir", "99999"]
-            )
+            result = runner.invoke(main, ["upload", str(test_file), "--remote-dir", "99999"])
 
         assert result.exit_code == 0
         call_args = mock_client.upload_file.call_args
@@ -714,9 +704,7 @@ class TestStrm:
     def test_strm_no_tree_cache(self, runner):
         with runner.isolated_filesystem():
             _write_env()
-            result = runner.invoke(
-                main, ["strm", "电影", "--output", "./strm_out"]
-            )
+            result = runner.invoke(main, ["strm", "电影", "--output", "./strm_out"])
         assert "No tree cache" in result.output
 
     def test_strm_no_matching_videos(self, runner):
@@ -734,9 +722,7 @@ class TestStrm:
         with runner.isolated_filesystem():
             _write_env()
             _write_tree()
-            result = runner.invoke(
-                main, ["strm", "电影", "--output", "./strm_out"]
-            )
+            result = runner.invoke(main, ["strm", "电影", "--output", "./strm_out"])
 
         assert result.exit_code == 0
         strm_files = list(Path("strm_out").rglob("*.strm"))
@@ -750,9 +736,7 @@ class TestStrm:
         with runner.isolated_filesystem():
             _write_env()
             _write_tree()
-            result = runner.invoke(
-                main, ["strm", "电影", "--output", "./strm_out"]
-            )
+            result = runner.invoke(main, ["strm", "电影", "--output", "./strm_out"])
 
         assert result.exit_code == 0
         strm_files = list(Path("strm_out").rglob("*.strm"))
@@ -769,9 +753,7 @@ class TestScrapeCommand:
             # Write env without TMDB token
             Path(".env").write_text("DUMMY_KEY=1\n")
             with patch.dict(os.environ, {"TMDB_READ_ACCESS_TOKEN": ""}, clear=False):
-                result = runner.invoke(
-                    main, ["scrape", "The Matrix", "--source", "tmdb"]
-                )
+                result = runner.invoke(main, ["scrape", "The Matrix", "--source", "tmdb"])
         assert "TMDB_READ_ACCESS_TOKEN" in result.output or result.exit_code == 0
 
     def test_scrape_javbus(self, runner):
@@ -838,9 +820,7 @@ class TestBatchScrapeMovieTV:
             _write_env()
             _write_tree(content=tree)
 
-            with patch(
-                "media115.scraper.scrape.scrape_movie", return_value=mock_movie
-            ):
+            with patch("media115.scraper.scrape.scrape_movie", return_value=mock_movie):
                 result = runner.invoke(main, ["batch-scrape", "电影"])
 
         assert result.exit_code == 0
@@ -864,9 +844,7 @@ class TestBatchScrapeMovieTV:
             _write_env()
             _write_tree(content=tree)
 
-            with patch(
-                "media115.scraper.scrape.scrape_tv", return_value=mock_tv
-            ):
+            with patch("media115.scraper.scrape.scrape_tv", return_value=mock_tv):
                 result = runner.invoke(main, ["batch-scrape", "剧目"])
 
         assert result.exit_code == 0
@@ -885,9 +863,7 @@ class TestBatchScrapeMovieTV:
             _write_env()
             _write_tree(content=tree)
 
-            with patch(
-                "media115.scraper.scrape.scrape_movie", return_value=mock_result
-            ):
+            with patch("media115.scraper.scrape.scrape_movie", return_value=mock_result):
                 result = runner.invoke(main, ["batch-scrape", "电影"])
 
         assert result.exit_code == 0
@@ -908,9 +884,7 @@ class TestBatchScrapeMovieTV:
             _write_env()
             _write_tree(content=tree)
 
-            with patch(
-                "media115.scraper.scrape.scrape_movie", return_value=mock_result
-            ):
+            with patch("media115.scraper.scrape.scrape_movie", return_value=mock_result):
                 result = runner.invoke(main, ["batch-scrape", "other"])
 
         assert result.exit_code == 0
@@ -945,13 +919,13 @@ class TestOrganizeExecute:
             _write_env()
             _write_tree()
 
-            with patch(
-                "media115.organizer.build_organize_plan", return_value=plan
-            ), patch(
-                "media115.organizer.execute_organize_plan",
-                return_value=mock_exec_results,
-            ), patch(
-                "media115.cli._get_115_client", return_value=mock_client
+            with (
+                patch("media115.organizer.build_organize_plan", return_value=plan),
+                patch(
+                    "media115.organizer.execute_organize_plan",
+                    return_value=mock_exec_results,
+                ),
+                patch("media115.cli._get_115_client", return_value=mock_client),
             ):
                 result = runner.invoke(main, ["organize", "AV", "--execute"])
 
@@ -978,10 +952,9 @@ class TestOrganizeExecute:
             _write_env()
             _write_tree()
 
-            with patch(
-                "media115.organizer.build_organize_plan", return_value=plan
-            ), patch(
-                "media115.cli._get_115_client", return_value=None
+            with (
+                patch("media115.organizer.build_organize_plan", return_value=plan),
+                patch("media115.cli._get_115_client", return_value=None),
             ):
                 result = runner.invoke(main, ["organize", "AV", "--execute"])
 
@@ -1024,13 +997,13 @@ class TestOrganizeExecute:
             _write_env()
             _write_tree()
 
-            with patch(
-                "media115.organizer.build_organize_plan", return_value=plan
-            ), patch(
-                "media115.organizer.execute_organize_plan",
-                return_value=mock_exec_results,
-            ), patch(
-                "media115.cli._get_115_client", return_value=mock_client
+            with (
+                patch("media115.organizer.build_organize_plan", return_value=plan),
+                patch(
+                    "media115.organizer.execute_organize_plan",
+                    return_value=mock_exec_results,
+                ),
+                patch("media115.cli._get_115_client", return_value=mock_client),
             ):
                 result = runner.invoke(main, ["organize", "AV", "--execute"])
 
@@ -1064,13 +1037,13 @@ class TestOrganizeExecute:
             _write_env()
             _write_tree()
 
-            with patch(
-                "media115.organizer.build_organize_plan", return_value=plan
-            ), patch(
-                "media115.organizer.execute_organize_plan",
-                return_value=mock_exec_results,
-            ), patch(
-                "media115.cli._get_115_client", return_value=mock_client
+            with (
+                patch("media115.organizer.build_organize_plan", return_value=plan),
+                patch(
+                    "media115.organizer.execute_organize_plan",
+                    return_value=mock_exec_results,
+                ),
+                patch("media115.cli._get_115_client", return_value=mock_client),
             ):
                 result = runner.invoke(main, ["organize", "AV", "--execute"])
 
@@ -1141,12 +1114,8 @@ class TestScrapeCommandMocked:
         with runner.isolated_filesystem():
             _write_env()
             with patch.dict(os.environ, {"TMDB_READ_ACCESS_TOKEN": "fake_token"}):
-                with patch(
-                    "media115.scraper.tmdb.TMDBClient", return_value=mock_tmdb
-                ):
-                    result = runner.invoke(
-                        main, ["scrape", "The Matrix", "--source", "tmdb"]
-                    )
+                with patch("media115.scraper.tmdb.TMDBClient", return_value=mock_tmdb):
+                    result = runner.invoke(main, ["scrape", "The Matrix", "--source", "tmdb"])
 
         assert result.exit_code == 0
         assert "603" in result.output
@@ -1161,12 +1130,8 @@ class TestScrapeCommandMocked:
         with runner.isolated_filesystem():
             _write_env()
             with patch.dict(os.environ, {"TMDB_READ_ACCESS_TOKEN": "fake_token"}):
-                with patch(
-                    "media115.scraper.tmdb.TMDBClient", return_value=mock_tmdb
-                ):
-                    result = runner.invoke(
-                        main, ["scrape", "xyznonexistent", "--source", "tmdb"]
-                    )
+                with patch("media115.scraper.tmdb.TMDBClient", return_value=mock_tmdb):
+                    result = runner.invoke(main, ["scrape", "xyznonexistent", "--source", "tmdb"])
 
         assert result.exit_code == 0
         assert "No results" in result.output
@@ -1182,12 +1147,8 @@ class TestScrapeCommandMocked:
         with runner.isolated_filesystem():
             _write_env()
             with patch.dict(os.environ, {"TMDB_READ_ACCESS_TOKEN": "fake_token"}):
-                with patch(
-                    "media115.scraper.tmdb.TMDBClient", return_value=mock_tmdb
-                ):
-                    result = runner.invoke(
-                        main, ["scrape", "Breaking Bad", "--source", "tmdb"]
-                    )
+                with patch("media115.scraper.tmdb.TMDBClient", return_value=mock_tmdb):
+                    result = runner.invoke(main, ["scrape", "Breaking Bad", "--source", "tmdb"])
 
         assert result.exit_code == 0
         assert "1396" in result.output
@@ -1207,9 +1168,7 @@ class TestScrapeCommandMocked:
                     "media115.scraper.bangumi.BangumiClient",
                     return_value=mock_bangumi,
                 ):
-                    result = runner.invoke(
-                        main, ["scrape", "孤独摇滚", "--source", "bangumi"]
-                    )
+                    result = runner.invoke(main, ["scrape", "孤独摇滚", "--source", "bangumi"])
 
         assert result.exit_code == 0
         assert "328609" in result.output
@@ -1269,10 +1228,7 @@ class TestConfigLoading:
         from media115.cli import _load_config
 
         with runner.isolated_filesystem():
-            Path("config.yaml").write_text(
-                'root: "/custom"\n'
-                'jellyfin_url: "http://myhost:8096"\n'
-            )
+            Path("config.yaml").write_text('root: "/custom"\njellyfin_url: "http://myhost:8096"\n')
             config = _load_config()
 
         assert config["root"] == "/custom"
@@ -1293,10 +1249,7 @@ class TestConfigLoading:
         from media115.cli import _load_config
 
         with runner.isolated_filesystem():
-            Path("config.yaml").write_text(
-                "strm_proxy:\n"
-                "  host: myhost\n"
-            )
+            Path("config.yaml").write_text("strm_proxy:\n  host: myhost\n")
             config = _load_config()
 
         # "host" overridden but "port" preserved from defaults
@@ -1309,17 +1262,13 @@ class TestLoadEnv:
 
     def test_load_env_sets_vars(self, runner):
         with runner.isolated_filesystem():
-            Path(".env").write_text(
-                "TEST_VAR_1=hello\n"
-                "# comment line\n"
-                "\n"
-                "TEST_VAR_2='world'\n"
-            )
+            Path(".env").write_text("TEST_VAR_1=hello\n# comment line\n\nTEST_VAR_2='world'\n")
             # Remove the vars if set
             os.environ.pop("TEST_VAR_1", None)
             os.environ.pop("TEST_VAR_2", None)
 
             from media115.cli import _load_env
+
             _load_env()
 
             assert os.environ.get("TEST_VAR_1") == "hello"
@@ -1339,6 +1288,7 @@ class TestGetClient:
                 mock_from.return_value = MagicMock()
                 with patch.dict(os.environ, {"CLOUD_115_COOKIES": "test_cookie"}):
                     from media115.cli import _get_115_client
+
                     client = _get_115_client()
                 assert client is not None
                 mock_from.assert_called_once_with("test_cookie")
@@ -1350,6 +1300,7 @@ class TestGetClient:
             clear=False,
         ):
             from media115.cli import _get_115_client
+
             client = _get_115_client()
         assert client is None
 
@@ -1368,6 +1319,7 @@ class TestGetClient:
                 },
             ):
                 from media115.cli import _get_115_client
+
                 client = _get_115_client()
             assert client is not None
             mock_from.assert_called_once_with(
