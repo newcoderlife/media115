@@ -1,0 +1,31 @@
+# 115 media library configuration
+root: /影音                    # Root directory on 115
+
+categories:
+  电影:
+    type: movie
+    naming: "{title} ({year})"        # Folder and file naming pattern
+    sources: [tmdb]
+  剧目:
+    type: tv
+    naming: "{title} ({year})"        # Folder naming
+    episode_naming: "{title} S{season:02d}E{episode:02d}"  # Episode file naming
+    sources: [tmdb, bangumi]
+  AV:
+    type: av
+    naming: "{number}"                # Folder and file naming
+    sources: [jav321, javfree]
+
+# Rate limiting (115 API)
+rate_limit:
+  qps: 0.5
+  qpm: 20
+  cooldown_seconds: 3600
+
+# Jellyfin integration
+jellyfin_url: http://localhost:8096
+
+# STRM proxy settings
+strm_proxy:
+  host: localhost
+  port: 9000
