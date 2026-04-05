@@ -67,7 +67,12 @@ def build_organize_plan(
             "new_folder": None,
             "new_name": None,
             "reason": "",
+            "source_id": "",
         }
+
+        if scrape_info:
+            sid = scrape_info.get("tmdb_id", scrape_info.get("number", ""))
+            op["source_id"] = str(sid) if sid else ""
 
         if not scrape_info:
             # Check if already in standard format: "Title (Year).ext"

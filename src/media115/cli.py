@@ -462,7 +462,13 @@ def batch_scrape(category, output, max_count, force):
                 result = {"status": "skip", "reason": analysis.media_type}
 
             results.append({"file": name, **result})
-            click.echo(f" {result.get('status', '?')}")
+            status = result.get("status", "?")
+            match_info = result.get("match", "")
+            source_id = result.get("tmdb_id", result.get("number", ""))
+            if status == "ok" and match_info:
+                click.echo(f" → {match_info} ({source_id})")
+            else:
+                click.echo(f" {status}")
         except Exception as e:
             results.append({"file": name, "status": "error", "error": str(e)})
             click.echo(f" error: {e}")
@@ -520,15 +526,16 @@ def organize(category, execute, cleanup):
         return
 
     click.echo(
-        f"| {'#':>3} | {'Current':<45} | {'→ New Folder':<30} | {'→ New Name':<35} |"
+        f"| {'#':>3} | {'Current':<40} | {'→ New Name':<30} | {'Source':>10} |"
     )
-    click.echo(f"|{'-' * 5}|{'-' * 47}|{'-' * 32}|{'-' * 37}|")
+    click.echo(f"|{'-' * 5}|{'-' * 42}|{'-' * 32}|{'-' * 12}|")
 
     for i, op in enumerate(renames, 1):
-        cur = _trunc(op["file"], 45)
-        nf = _trunc(op.get("new_folder") or "-", 30)
-        nn = _trunc(op.get("new_name") or "-", 35)
-        click.echo(f"| {i:>3} | {cur:<45} | {nf:<30} | {nn:<35} |")
+        cur = _trunc(op["file"], 40)
+        nn = _trunc(op.get("new_name") or op.get("new_folder") or "-", 30)
+        sid = op.get("source_id", "")
+        src = f"tmdb:{sid}" if op.get("type") in ("movie", "tv") and sid else sid
+        click.echo(f"| {i:>3} | {cur:<40} | {nn:<30} | {src:>10} |")
 
     # Check for target conflicts
     from collections import Counter
