@@ -1,4 +1,4 @@
-# 115-media
+# media115
 
 115 网盘媒体库管理工具：LLM 驱动刮削、秒传上传、STRM 化、302 直链播放。
 
@@ -6,7 +6,7 @@
 
 ```bash
 # 1. 安装
-git clone <repo-url> && cd 115-media
+git clone <repo-url> && cd media115
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
@@ -18,15 +18,15 @@ cp .env.example .env && chmod 600 .env
 .venv/bin/pytest tests/ -v   # 离线测试应全部通过（TMDB/Bangumi live 测试需要网络+token）
 
 # 4. 试用：搜索电影元数据
-115-media scrape "The Matrix"
+media115 scrape "The Matrix"
 
 # 5. 试用：搜索动漫
-115-media scrape "孤独摇滚" --source bangumi
+media115 scrape "孤独摇滚" --source bangumi
 
 # 6.（可选）登录 115 网盘
-115-media auth               # 浏览器打开链接，手机扫码，cookie 自动保存到 .env
-115-media ls /               # 列出网盘根目录
-115-media scan /影音          # 扫描文件夹，输出刮削计划表
+media115 auth               # 浏览器打开链接，手机扫码，cookie 自动保存到 .env
+media115 ls /               # 列出网盘根目录
+media115 scan /影音          # 扫描文件夹，输出刮削计划表
 ```
 
 ## 115 网盘认证
@@ -35,16 +35,16 @@ cp .env.example .env && chmod 600 .env
 
 | 模式 | 认证方式 | 是否需要审批 | 适用场景 |
 |------|---------|------------|---------|
-| **Cookie（推荐）** | `115-media auth` 扫码登录 | 不需要 | 立即可用 |
+| **Cookie（推荐）** | `media115 auth` 扫码登录 | 不需要 | 立即可用 |
 | OpenAPI | App ID + Secret | 需要在 open.115.com 审批 | 官方方式 |
 
 ```bash
 # Cookie 模式：扫码登录
-115-media auth                    # 打印 URL，浏览器打开扫码
+media115 auth                    # 打印 URL，浏览器打开扫码
 # 登录成功后 cookie 自动保存到 .env 的 CLOUD_115_COOKIES 字段
 
 # 检查是否已登录
-115-media auth --check
+media115 auth --check
 
 # OpenAPI 模式：在 .env 中配置
 CLOUD_115_APP_ID=your_app_id
@@ -92,18 +92,18 @@ Agent: 修正 → 写入回归测试 case → 跑 pytest 验证
 
 ```bash
 # 搜索元数据
-115-media scrape "The Matrix"                     # TMDB（默认）
-115-media scrape "孤独摇滚" --source bangumi       # Bangumi
-115-media scrape "ABC-123"                          # AV（自动识别）
+media115 scrape "The Matrix"                     # TMDB（默认）
+media115 scrape "孤独摇滚" --source bangumi       # Bangumi
+media115 scrape "ABC-123"                          # AV（自动识别）
 
 # 115 网盘操作（需要先 auth）
-115-media auth                                     # 扫码登录
-115-media auth --check                             # 检查登录状态
-115-media ls /                                     # 列出根目录
-115-media ls /影音/电影                             # 列出子目录
-115-media scan /影音                               # 扫描并输出刮削计划表
-115-media upload movie.mkv --remote-dir 12345      # 上传文件（cookie 模式）
-115-media serve --port 9000                        # 启动 strm-proxy
+media115 auth                                     # 扫码登录
+media115 auth --check                             # 检查登录状态
+media115 ls /                                     # 列出根目录
+media115 ls /影音/电影                             # 列出子目录
+media115 scan /影音                               # 扫描并输出刮削计划表
+media115 upload movie.mkv --remote-dir 12345      # 上传文件（cookie 模式）
+media115 serve --port 9000                        # 启动 strm-proxy
 ```
 
 ### 方式三：Python API

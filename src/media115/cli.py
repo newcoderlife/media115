@@ -1,4 +1,4 @@
-"""CLI entry point for 115-media."""
+"""CLI entry point for media115."""
 
 import os
 from pathlib import Path
@@ -79,7 +79,7 @@ def _load_config() -> dict:
 
 @click.group()
 def main():
-    """115-media: Media library management with 115 cloud."""
+    """media115: Media library management with 115 cloud."""
     _load_env()
 
 
@@ -202,7 +202,7 @@ def auth(app, check, renew, force, get_qr, wait_qr):
     if renew:
         if not existing:
             click.echo(
-                "No existing cookies to renew. Run '115-media auth' first.", err=True
+                "No existing cookies to renew. Run 'media115 auth' first.", err=True
             )
             return
         if existing.renew_cookies(app=app):
@@ -211,7 +211,7 @@ def auth(app, check, renew, force, get_qr, wait_qr):
             click.echo("Cookies renewed and saved.")
         else:
             click.echo(
-                "Cookie renewal failed. Run '115-media auth' to re-login.", err=True
+                "Cookie renewal failed. Run 'media115 auth' to re-login.", err=True
             )
         return
 
@@ -310,7 +310,7 @@ def scan_tree(category, show_all):
 
     tree_path = media_cache.tree_cache_path()
     if not tree_path.exists():
-        click.echo("No tree cache. Run '115-media export-tree' first.", err=True)
+        click.echo("No tree cache. Run 'media115 export-tree' first.", err=True)
         return
 
     entries = media_cache.parse_tree_cache(VIDEO_EXTS)
@@ -564,7 +564,7 @@ def organize(category, execute, cleanup):
 
     tree_path = media_cache.tree_cache_path()
     if not tree_path.exists():
-        click.echo("No tree cache. Run '115-media export-tree' first.", err=True)
+        click.echo("No tree cache. Run 'media115 export-tree' first.", err=True)
         return
 
     entries = media_cache.parse_tree_cache(VIDEO_EXTS)
@@ -926,7 +926,7 @@ def strm(path, output, host, port):
     contains a redirect URL through the strm-proxy.
 
     Example:
-        115-media strm /影音/电影 --output ./strm/
+        media115 strm /影音/电影 --output ./strm/
     """
     from urllib.parse import quote
 
@@ -937,7 +937,7 @@ def strm(path, output, host, port):
 
     tree_path = media_cache.tree_cache_path()
     if not tree_path.exists():
-        click.echo("No tree cache. Run '115-media export-tree' first.", err=True)
+        click.echo("No tree cache. Run 'media115 export-tree' first.", err=True)
         return
 
     # Normalize the filter path (strip leading/trailing slashes)
@@ -951,7 +951,7 @@ def strm(path, output, host, port):
 
     if not matched:
         click.echo(f"No video files found under '{path}' in tree cache.")
-        click.echo("Run '115-media export-tree' to refresh the cache.")
+        click.echo("Run 'media115 export-tree' to refresh the cache.")
         return
 
     out_dir = Path(output)
@@ -979,7 +979,7 @@ def strm(path, output, host, port):
 
     click.echo(f"Generated {created} .strm files in {out_dir}")
     click.echo(f"Proxy URL base: {base_url}/redirect/...")
-    click.echo(f"\nMake sure the strm-proxy is running: 115-media serve --port {proxy_port}")
+    click.echo(f"\nMake sure the strm-proxy is running: media115 serve --port {proxy_port}")
 
 
 @main.command()
@@ -1073,7 +1073,7 @@ def _get_115_client():
         )
 
     click.echo(
-        "Warning: No 115 credentials. Use '115-media auth' to login or set CLOUD_115_COOKIES.",
+        "Warning: No 115 credentials. Use 'media115 auth' to login or set CLOUD_115_COOKIES.",
         err=True,
     )
     return None

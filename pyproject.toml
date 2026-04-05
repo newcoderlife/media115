@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
-"115-media" = "media115.cli:main"
+"media115" = "media115.cli:main"
 
 [build-system]
 requires = ["setuptools>=68.0"]
