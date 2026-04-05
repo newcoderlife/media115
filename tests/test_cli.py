@@ -22,7 +22,7 @@ class TestCLI:
     def test_help(self, runner):
         result = runner.invoke(main, ["--help"])
         assert result.exit_code == 0
-        assert "115-media" in result.output
+        assert "media115" in result.output
 
     def test_auth_help(self, runner):
         result = runner.invoke(main, ["auth", "--help"])
