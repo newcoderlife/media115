@@ -6,8 +6,9 @@ cases still produce the correct result.
 """
 
 import json
-import pytest
 from pathlib import Path
+
+import pytest
 
 from media115.scraper.analyzer import (
     analyze_filename,

@@ -3,7 +3,7 @@
 import pytest
 from lxml import etree
 
-from media115.scraper.nfo import generate_movie_nfo, generate_episode_nfo, parse_nfo
+from media115.scraper.nfo import generate_episode_nfo, generate_movie_nfo, parse_nfo
 
 
 @pytest.fixture

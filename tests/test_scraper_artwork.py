@@ -2,9 +2,9 @@
 
 import pytest
 
-pytestmark = pytest.mark.live
-
 from media115.scraper.artwork import download_image, save_poster
+
+pytestmark = pytest.mark.live
 
 
 class TestDownloadImage:

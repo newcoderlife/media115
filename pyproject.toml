@@ -23,7 +23,22 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-xdist"]
+dev = ["pytest", "pytest-xdist", "pytest-cov", "ruff"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 99
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["E501", "SIM108", "SIM117"]
+
+[tool.coverage.run]
+source = ["media115"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
