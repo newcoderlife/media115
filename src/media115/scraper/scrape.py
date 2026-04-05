@@ -45,7 +45,7 @@ def scrape_movie(title: str, year: int | None, filename: str, out_dir: Path) -> 
         metadata = {
             "title": detail.get("title", ""),
             "originaltitle": detail.get("original_title", ""),
-            "year": int((detail.get("release_date", "") or "0000")[:4]),
+            "year": int((detail.get("release_date", "") or "0000")[:4]) or year or 0,
             "plot": detail.get("overview", ""),
             "tagline": detail.get("tagline", ""),
             "runtime": detail.get("runtime"),
