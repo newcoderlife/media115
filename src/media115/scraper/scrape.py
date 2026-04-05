@@ -4,6 +4,9 @@ All scrapers go through this module. Cache is checked first;
 on miss, the appropriate provider is called and result is cached.
 """
 
+
+from __future__ import annotations
+
 import contextlib
 import os
 import re
@@ -332,6 +335,7 @@ def _save_tmdb_poster(images: dict, out_dir: Path):
 
 def _write_av_nfo(meta: dict, filename: str, out_dir: Path, source: str):
     """Generate NFO + download cover for AV."""
+
     stem = _stem(filename)
     metadata = {
         "title": meta.get("title", ""),

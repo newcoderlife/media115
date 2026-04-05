@@ -1,5 +1,8 @@
 """JavFree scraper for AV metadata. Simple, no anti-bot."""
 
+
+from __future__ import annotations
+
 from lxml import html as lxml_html
 
 from media115.scraper.base import ThrottledClient
@@ -10,6 +13,7 @@ _client = ThrottledClient()
 
 def fetch_metadata(number: str) -> dict | None:
     """Fetch AV metadata from JavFree by number."""
+
     try:
         resp = _client.get(f"{BASE_URL}/{number.lower()}/", follow_redirects=True)
         if resp.status_code != 200 or len(resp.content) < 1000:

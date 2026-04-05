@@ -4,6 +4,9 @@ Cookie mode: works immediately, no approval needed. Based on py115/p115client.
 OpenAPI mode: requires approved app_id/app_secret from open.115.com.
 """
 
+
+from __future__ import annotations
+
 import contextlib
 import json
 import sys
@@ -170,7 +173,7 @@ class Cloud115Client:
     # ── Factory methods ──────────────────────────────────────────────
 
     @classmethod
-    def from_cookies(cls, cookies: str) -> "Cloud115Client":
+    def from_cookies(cls, cookies: str) -> Cloud115Client:
         """Create client from cookie string (UID=...; CID=...; SEID=...)."""
         client = cls()
         client._mode = "cookie"
@@ -183,7 +186,7 @@ class Cloud115Client:
         return client
 
     @classmethod
-    def from_cookie_file(cls, path: Path) -> "Cloud115Client":
+    def from_cookie_file(cls, path: Path) -> Cloud115Client:
         """Load cookies from a text file."""
         return cls.from_cookies(path.read_text().strip())
 
@@ -194,7 +197,7 @@ class Cloud115Client:
         app_secret: str,
         access_token: str = "",
         refresh_token: str = "",
-    ) -> "Cloud115Client":
+    ) -> Cloud115Client:
         """Create client using OpenAPI credentials."""
         client = cls()
         client._mode = "openapi"
@@ -207,7 +210,7 @@ class Cloud115Client:
     # ── QR code login ────────────────────────────────────────────────
 
     @classmethod
-    def qr_login(cls, app: str = "tv") -> "Cloud115Client":
+    def qr_login(cls, app: str = "tv") -> Cloud115Client:
         """Interactive QR code login. Returns a client with fresh cookies."""
         http = httpx.Client(timeout=35)
 
@@ -370,7 +373,7 @@ class Cloud115Client:
         url: str,
         params: dict | None = None,
         data: dict | None = None,
-        limiter: "RateLimiter | None" = None,
+        limiter: RateLimiter | None = None,
     ) -> dict:
         (limiter or self._limiter).acquire()
         max_retries = 3
@@ -827,4 +830,5 @@ class Cloud115Client:
 
 def _print_qr(content: str, image_url: str):
     """Print QR login URL for the user to open in browser."""
+
     print(f"Scan QR: {image_url}")
