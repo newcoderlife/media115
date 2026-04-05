@@ -3,13 +3,12 @@
 import os
 from pathlib import Path
 
-from media115 import cache as media_cache
-
-
 import click
-
-from media115.utils import split_ext as _split_ext, trunc as _trunc
 import yaml
+
+from media115 import cache as media_cache
+from media115.utils import split_ext as _split_ext
+from media115.utils import trunc as _trunc
 
 
 def _load_env():
@@ -49,8 +48,9 @@ def main():
 )
 def auth(app, check, renew, force, get_qr, wait_qr):
     """Login to 115 via QR code scan. Saves cookies to .env."""
-    from media115.client import Cloud115Client, QR_API
     import json as _json
+
+    from media115.client import QR_API, Cloud115Client
 
     existing = _get_115_client()
 
@@ -85,6 +85,7 @@ def auth(app, check, renew, force, get_qr, wait_qr):
     if wait_qr:
         # Blocking: poll for scan result, save cookies
         import time as _time
+
         import httpx as _httpx
 
         qr_session_path = Path.cwd() / ".cache" / "qr_session.json"
@@ -328,7 +329,62 @@ def scan_tree(category):
         f"{stats['skip']} skip (has NFO), {stats['unrecognized']} unrecognized, "
         f"{stats['known']} known cases"
     )
-    click.echo("No API calls were made (tree cache only).")
+
+    # --- Anomaly detection ---
+    import re as _re
+    from collections import Counter
+
+    all_entries = entries  # includes both video and nfo
+    if category:
+        all_entries = [
+            e
+            for e in all_entries
+            if e["path"].startswith(category) or f"/{category}/" in e["path"]
+        ]
+
+    anomalies = []
+
+    # 1. Non-standard naming: has NFO but parent dir doesn't match convention
+    std_movie_tv = _re.compile(r"^.+ \(\d{4}\)$")
+    std_av = _re.compile(r"^[A-Za-z]+-\d+$")
+    for v in videos:
+        parent = v["parent"]
+        parent_leaf = parent.split("/")[-1] if "/" in parent else parent
+        stem = _split_ext(v["n"])[0]
+        has_nfo = f"{parent}/{stem}" in nfo_set
+        if not has_nfo:
+            continue
+        # Determine expected pattern from category path
+        if "/AV/" in v["path"] or v["path"].startswith("AV/"):
+            if not std_av.match(parent_leaf):
+                anomalies.append(("naming", v["parent"], v["n"]))
+        else:
+            if not std_movie_tv.match(parent_leaf):
+                anomalies.append(("naming", v["parent"], v["n"]))
+
+    # 2. Duplicate NFOs: same NFO filename appears >1 time in same directory
+    nfo_keys = [e["parent"] + "/" + e["n"] for e in all_entries if e["is_nfo"]]
+    nfo_parents = [e["parent"] for e in all_entries if e["is_nfo"]]
+    for key, count in Counter(nfo_keys).items():
+        if count > 1:
+            parent = key.rsplit("/", 1)[0]
+            nfo_name = key.rsplit("/", 1)[1]
+            anomalies.append(("dup_nfo", parent, f"{nfo_name} x{count}"))
+
+    # 3. Residual directories: have NFO but no video file
+    video_parents = {v["parent"] for v in videos}
+    nfo_only_parents = set(nfo_parents) - video_parents
+    for parent in sorted(nfo_only_parents):
+        anomalies.append(("residual", parent, "NFO only, no video"))
+
+    if anomalies:
+        click.echo(f"\nAnomalies found: {len(anomalies)}")
+        labels = {"naming": "Non-standard name", "dup_nfo": "Duplicate NFO", "residual": "Residual dir"}
+        for atype, parent, detail in anomalies:
+            click.echo(f"  [{labels[atype]}] {parent}")
+            click.echo(f"    {detail}")
+
+    click.echo("\nNo API calls were made (tree cache only).")
 
 
 @main.command("batch-scrape")
@@ -341,7 +397,10 @@ def scan_tree(category):
 @click.option(
     "--limit", "max_count", default=0, type=int, help="Max files to scrape (0=all)"
 )
-def batch_scrape(category, output, max_count):
+@click.option(
+    "--force", is_flag=True, help="Re-scrape even if NFO already exists on 115"
+)
+def batch_scrape(category, output, max_count, force):
     """Scrape metadata for a category from tree cache. Generates NFO + poster locally.
 
     CATEGORY: AV, 电影, or 剧目
@@ -350,15 +409,21 @@ def batch_scrape(category, output, max_count):
 
     entries = media_cache.parse_tree_cache(VIDEO_EXTS)
     videos = [e for e in entries if e["is_video"]]
-    nfo_names = {
-        e["parent"] + "/" + _split_ext(e["n"])[0] for e in entries if e["is_nfo"]
-    }
 
     videos = [v for v in videos if category in v["path"]]
-    # Skip files that already have NFO
-    videos = [
-        v for v in videos if v["parent"] + "/" + _split_ext(v["n"])[0] not in nfo_names
-    ]
+
+    if not force:
+        nfo_names = {
+            e["parent"] + "/" + _split_ext(e["n"])[0]
+            for e in entries
+            if e["is_nfo"]
+        }
+        # Skip files that already have NFO
+        videos = [
+            v
+            for v in videos
+            if v["parent"] + "/" + _split_ext(v["n"])[0] not in nfo_names
+        ]
 
     if max_count > 0:
         videos = videos[:max_count]
@@ -383,7 +448,7 @@ def batch_scrape(category, output, max_count):
         click.echo(f"  [{i}/{len(videos)}] {_trunc(name, 60)} ...", nl=False)
 
         try:
-            from media115.scraper.scrape import scrape_movie, scrape_tv, scrape_av
+            from media115.scraper.scrape import scrape_av, scrape_movie, scrape_tv
 
             if analysis.media_type == "av":
                 result = scrape_av(analysis.title, name, file_out)
@@ -526,6 +591,12 @@ def organize(category, execute, cleanup):
     log_file.write_text(_json.dumps(log_entries, ensure_ascii=False, indent=2))
     click.echo(f"Log saved to {log_file}")
 
+    if ok > 0:
+        click.echo(
+            "\nTree cache is now stale. Run 'export-tree /影音' to refresh.",
+            err=True,
+        )
+
     if cleanup and ok > 0:
         click.echo("\nCleaning up empty directories...")
         category_cid = client.get_dir_id(f"/影音/{category}")
@@ -546,6 +617,115 @@ def organize(category, execute, cleanup):
                 except Exception as e:
                     click.echo(f"  Failed to delete {name}: {e}")
             click.echo(f"Cleaned up {len(empty_dirs)} empty directories")
+
+
+@main.command("upload-nfo")
+@click.argument("category")
+def upload_nfo(category):
+    """Upload NFO/poster from local scrape_output to 115 directories.
+
+    Matches scrape_output dirs to 115 cloud directories and uploads
+    .nfo, .jpg, .png files. Skips dirs that already have NFO files.
+
+    CATEGORY: AV, 电影, or 剧目
+    """
+    import sys
+
+    scrape_dir = Path.cwd() / ".cache" / "scrape_output" / category
+    if not scrape_dir.exists():
+        click.echo(
+            f"No scrape output for '{category}'. Run batch-scrape first.", err=True
+        )
+        return
+
+    client = _get_115_client()
+    if not client:
+        return
+
+    category_path = f"影音/{category}"
+    category_cid = client.get_dir_id("/" + category_path)
+    if not category_cid:
+        click.echo(f"Category dir not found: {category_path}", err=True)
+        return
+
+    # List all subdirs on 115 under category
+    print(f"  Listing 115 dirs under {category_path}...", file=sys.stderr, flush=True)
+    cloud_dirs = client.list_files_all(dir_id=category_cid)
+    dir_map = {}  # dirname → cid
+    for item in cloud_dirs:
+        if "fid" not in item:  # is directory
+            dir_map[item.get("n", "")] = str(item.get("cid", ""))
+
+    # Check which dirs already have NFO using tree cache (0 API calls)
+    tree_entries = media_cache.parse_tree_cache(VIDEO_EXTS)
+    dirs_with_nfo = set()
+    for e in tree_entries:
+        if e["is_nfo"] and category_path in e["parent"]:
+            # Extract leaf dir name from parent path like "影音/电影/Title (Year)"
+            leaf = e["parent"].split("/")[-1] if "/" in e["parent"] else e["parent"]
+            dirs_with_nfo.add(leaf)
+
+    # Collect upload tasks: (local_file, target_cid, remote_name)
+    tasks = []
+    skipped = 0
+    already_has = 0
+    for out_dir in sorted(scrape_dir.iterdir()):
+        if not out_dir.is_dir():
+            continue
+        files_to_upload = [
+            f for f in out_dir.iterdir() if f.suffix in (".nfo", ".jpg", ".png")
+        ]
+        if not files_to_upload:
+            continue
+
+        # Match to 115 dir: scrape_output dir is named like "影音_电影_Title (Year)"
+        # The 115 dir name is just "Title (Year)"
+        parts = out_dir.name.split("_", 2)  # ["影音", "电影", "Title (Year)"]
+        target_name = parts[-1] if len(parts) >= 3 else out_dir.name
+
+        target_cid = dir_map.get(target_name)
+        if not target_cid:
+            skipped += 1
+            continue
+
+        if target_name in dirs_with_nfo:
+            already_has += 1
+            continue
+
+        for f in files_to_upload:
+            remote_name = f.name
+            # For AV, rename NFO to match video: "番号.nfo" instead of long original name
+            if category == "AV" and f.suffix == ".nfo":
+                remote_name = f"{target_name}.nfo"
+            tasks.append((f, target_cid, remote_name))
+
+    click.echo(
+        f"Found {len(tasks)} files to upload "
+        f"({already_has} dirs already have NFO, {skipped} dirs not matched on 115)"
+    )
+
+    if not tasks:
+        click.echo("Nothing to upload.")
+        return
+
+    uploaded = 0
+    errors = 0
+    for i, (local_file, target_cid, remote_name) in enumerate(tasks, 1):
+        print(
+            f"\r  [{i}/{len(tasks)}] {remote_name[:50]}...",
+            end="",
+            file=sys.stderr,
+            flush=True,
+        )
+        try:
+            client.upload_file(local_file, target_cid, remote_name)
+            uploaded += 1
+        except Exception as e:
+            errors += 1
+            print(f" error: {e}", file=sys.stderr)
+
+    print("", file=sys.stderr)
+    click.echo(f"\nDone: {uploaded} uploaded, {errors} errors, {skipped} dirs skipped")
 
 
 @main.command()
@@ -651,6 +831,7 @@ def scan(path, recursive, depth):
 def serve(host, port):
     """Start the strm-proxy server."""
     import uvicorn
+
     from media115.proxy import create_app
 
     config = _load_config()
@@ -671,7 +852,7 @@ def serve(host, port):
 @click.option("--remote-dir", default="0", help="115 remote directory ID")
 def upload(file_path, remote_dir):
     """Upload a file to 115 via rapid upload."""
-    from media115.organizer import compute_sha1, compute_pre_sha1
+    from media115.organizer import compute_pre_sha1, compute_sha1
 
     path = Path(file_path)
     click.echo(f"Computing SHA1 for {path.name}...")
