@@ -244,14 +244,17 @@ def export_tree(path):
     )
     click.echo(f"Tree exported: {len(lines)} entries, {video_count} video files")
     click.echo(f"Saved to {tree_path}")
+    click.echo("\nNext: run 'scan-tree <category>' to preview what needs scraping.")
 
 
 @main.command("scan-tree")
 @click.argument("category", default="")
-def scan_tree(category):
+@click.option("--all", "show_all", is_flag=True, help="Show all files, not just actionable ones")
+def scan_tree(category, show_all):
     """Scan media files from cached directory tree (no API calls).
 
     Run 'export-tree' first. Then: scan-tree [AV|电影|剧目|里番|写真]
+    Default: only show files needing action. Use --all to show everything.
     """
     from media115.scraper.analyzer import (
         analyze_filename,
@@ -299,10 +302,11 @@ def scan_tree(category):
         case_result = match_against_cases(name, cases)
         if case_result:
             nfo_mark = "\u2705" if has_nfo else "\u274c"
-            click.echo(
-                f"| {i:>3} | {_trunc(name, 55):<55} | {nfo_mark:^5} | {case_result.media_type:<8} "
-                f"| {_trunc(case_result.title, 30):<30} | {case_result.source:<8} | {'known case':<12} |"
-            )
+            if show_all or not has_nfo:
+                click.echo(
+                    f"| {i:>3} | {_trunc(name, 55):<55} | {nfo_mark:^5} | {case_result.media_type:<8} "
+                    f"| {_trunc(case_result.title, 30):<30} | {case_result.source:<8} | {'known case':<12} |"
+                )
             stats["known"] += 1
             continue
 
@@ -319,10 +323,11 @@ def scan_tree(category):
             action = "scrape"
             stats["scrape"] += 1
 
-        click.echo(
-            f"| {i:>3} | {_trunc(name, 55):<55} | {nfo_mark:^5} | {result.media_type:<8} "
-            f"| {_trunc(result.title, 30):<30} | {result.source:<8} | {action:<12} |"
-        )
+        if show_all or action != "skip":
+            click.echo(
+                f"| {i:>3} | {_trunc(name, 55):<55} | {nfo_mark:^5} | {result.media_type:<8} "
+                f"| {_trunc(result.title, 30):<30} | {result.source:<8} | {action:<12} |"
+            )
 
     click.echo(
         f"\nSummary: {len(videos)} files — {stats['scrape']} to scrape, "
@@ -454,7 +459,7 @@ def batch_scrape(category, output, max_count, force):
                 result = scrape_av(analysis.title, name, file_out)
             elif analysis.media_type in ("movie", "unknown"):
                 result = scrape_movie(analysis.title, analysis.year, name, file_out)
-            elif analysis.media_type == "tv":
+            elif analysis.media_type in ("tv", "anime"):
                 result = scrape_tv(
                     analysis.title, analysis.season, analysis.episode, name, file_out
                 )
@@ -488,6 +493,9 @@ def batch_scrape(category, output, max_count, force):
     log_file = log_dir / f"scrape_{category}_{int(_time.time())}.json"
     log_file.write_text(_json.dumps(results, ensure_ascii=False, indent=2))
     click.echo(f"Log saved to {log_file}")
+
+    if ok > 0:
+        click.echo(f"\nNext: run 'organize {category}' to preview rename plan.")
 
 
 @main.command()
