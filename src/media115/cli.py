@@ -890,7 +890,7 @@ def scan(path, recursive, depth):
 
 
 @main.command()
-@click.option("--host", default="0.0.0.0")
+@click.option("--host", default="127.0.0.1")
 @click.option("--port", default=9000, type=int)
 def serve(host, port):
     """Start the strm-proxy server."""
