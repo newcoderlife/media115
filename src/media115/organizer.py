@@ -299,15 +299,17 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
             print(f"  Rename failed: {e}", file=sys.stderr)
             failed_fids.update(rename_map.keys())
 
-    # Phase 5: Upload NFO/poster + update file_map
+    # Phase 5: Upload NFO/poster + update file_map (skip failed files)
     print("  Uploading NFO/poster...", file=sys.stderr, flush=True)
     for op, fid in resolved:
+        if fid in failed_fids:
+            results.append({**op, "status": "error", "error": "move or rename failed"})
+            continue
+
         target_folder = op.get("new_folder")
         if target_folder and target_folder in created_dirs:
-            # File was moved to a new directory
             upload_cid = created_dirs[target_folder]
         else:
-            # File was only renamed in-place — upload to its current directory
             parent = op["parent"]
             parent_leaf = parent.split("/")[-1] if "/" in parent else parent
             upload_cid = subdir_cids.get(parent_leaf)
@@ -326,10 +328,7 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
             if old_data:
                 _cache.put("file_map", new_stem, old_data)
 
-        if fid in failed_fids:
-            results.append({**op, "status": "error", "error": "move or rename failed"})
-        else:
-            results.append({**op, "status": "ok"})
+        results.append({**op, "status": "ok"})
 
     # Phase 6: Delete old source directories (now empty or metadata-only)
     source_dirs = set()
@@ -404,7 +403,7 @@ def _upload_scrape_output(
         for out_dir in category_dir.iterdir():
             if not out_dir.is_dir():
                 continue
-            if search_name in out_dir.name:
+            if out_dir.name == search_name:
                 for f in out_dir.iterdir():
                     if f.suffix in (".nfo", ".jpg", ".png"):
                         # Rename NFO to match video; keep image names as-is

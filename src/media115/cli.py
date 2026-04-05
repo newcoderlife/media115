@@ -460,8 +460,9 @@ def batch_scrape(category, output, max_count, force):
             elif analysis.media_type in ("movie", "unknown"):
                 result = scrape_movie(analysis.title, analysis.year, name, file_out)
             elif analysis.media_type in ("tv", "anime"):
+                season = analysis.season if analysis.season is not None else 1
                 result = scrape_tv(
-                    analysis.title, analysis.season, analysis.episode, name, file_out
+                    analysis.title, season, analysis.episode, name, file_out
                 )
             else:
                 result = {"status": "skip", "reason": analysis.media_type}
@@ -866,34 +867,25 @@ def serve(host, port):
 @click.argument("file_path", type=click.Path(exists=True))
 @click.option("--remote-dir", default="0", help="115 remote directory ID")
 def upload(file_path, remote_dir):
-    """Upload a file to 115 via rapid upload."""
-    from media115.organizer import compute_pre_sha1, compute_sha1
-
+    """Upload a file to 115 (cookie mode, OSS upload)."""
     path = Path(file_path)
-    click.echo(f"Computing SHA1 for {path.name}...")
-    sha1 = compute_sha1(path)
-    pre_sha1 = compute_pre_sha1(path)
     file_size = path.stat().st_size
-
-    click.echo(f"  SHA1: {sha1}")
-    click.echo(f"  Pre-SHA1: {pre_sha1}")
-    click.echo(f"  Size: {file_size:,} bytes")
+    click.echo(f"Uploading {path.name} ({file_size:,} bytes)...")
 
     client = _get_115_client()
     if not client:
         return
 
-    result = client.rapid_upload(
-        dir_id=remote_dir,
-        filename=path.name,
-        file_size=file_size,
-        sha1=sha1,
-        pre_sha1=pre_sha1,
-    )
-    if result.get("status") == 2:
-        click.echo(f"  Rapid upload success! pick_code={result['data']['pick_code']}")
-    else:
-        click.echo(f"  Rapid upload failed (status={result.get('status')})")
+    try:
+        result = client.upload_file(path, remote_dir)
+        if result:
+            click.echo(f"  Upload success!")
+        else:
+            click.echo("  Upload failed (no response)")
+    except NotImplementedError:
+        click.echo("  Error: upload requires cookie mode. Run 'auth' first.", err=True)
+    except Exception as e:
+        click.echo(f"  Upload failed: {e}", err=True)
 
 
 @main.command()
