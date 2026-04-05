@@ -23,7 +23,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [project.optional-dependencies]
-dev = ["pytest-xdist"]
+dev = ["pytest", "pytest-xdist"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
