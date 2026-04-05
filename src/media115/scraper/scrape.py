@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 from media115 import cache as media_cache
-from media115.scraper.nfo import generate_movie_nfo, generate_episode_nfo
+from media115.scraper.nfo import generate_movie_nfo, generate_episode_nfo, generate_tvshow_nfo
 from media115.utils import stem as _stem
 from media115.scraper.artwork import save_poster, download_image
 
@@ -174,6 +174,47 @@ def scrape_tv(
             "uniqueids": {"tmdb": str(tmdb_id)},
         }
         generate_episode_nfo(metadata, out_dir / f"{stem}.nfo")
+
+        # Generate tvshow.nfo once per show (skip if already exists)
+        tvshow_nfo_path = out_dir / "tvshow.nfo"
+        if not tvshow_nfo_path.exists():
+            tvshow_metadata = {
+                "title": detail.get("name", ""),
+                "originaltitle": detail.get("original_name", ""),
+                "showtitle": detail.get("name", ""),
+                "year": int((detail.get("first_air_date", "") or "0000")[:4]) or None,
+                "plot": detail.get("overview", ""),
+                "premiered": detail.get("first_air_date", ""),
+                "rating": detail.get("vote_average"),
+                "votes": detail.get("vote_count"),
+                "status": detail.get("status"),
+                "genres": [g["name"] for g in detail.get("genres", [])],
+                "studios": [
+                    c["name"] for c in detail.get("production_companies", [])
+                    if c.get("name")
+                ],
+                "tags": [
+                    k["name"] for k in detail.get("keywords", {}).get("results", [])
+                ] if isinstance(detail.get("keywords"), dict) else [],
+                "actors": [
+                    {
+                        "name": a["name"],
+                        "role": a.get("character", ""),
+                        "thumb": f"https://image.tmdb.org/t/p/w185{a['profile_path']}"
+                        if a.get("profile_path")
+                        else "",
+                    }
+                    for a in credits.get("cast", [])[:15]
+                ],
+                "uniqueids": {"tmdb": str(tmdb_id)},
+                "thumb": f"https://image.tmdb.org/t/p/original{detail['poster_path']}"
+                if detail.get("poster_path")
+                else None,
+                "fanart": f"https://image.tmdb.org/t/p/original{detail['backdrop_path']}"
+                if detail.get("backdrop_path")
+                else None,
+            }
+            generate_tvshow_nfo(tvshow_metadata, tvshow_nfo_path)
 
         media_cache.put(
             "file_map",
