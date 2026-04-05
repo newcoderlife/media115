@@ -5,6 +5,7 @@ OpenAPI mode: requires approved app_id/app_secret from open.115.com.
 """
 
 import json
+import sys
 import time
 import threading
 from pathlib import Path
@@ -70,9 +71,12 @@ class RateLimiter:
             # Check cooldown (429 ban)
             cooldown_until = state.get("cooldown_until", 0)
             if now < cooldown_until:
+                remaining = int(cooldown_until - now)
+                mins, secs = divmod(remaining, 60)
+                until_str = time.strftime("%H:%M", time.localtime(cooldown_until))
                 raise RuntimeError(
-                    f"115 API is in cooldown for {int(cooldown_until - now)}s more. "
-                    f"Try again later."
+                    f"Rate limit cooldown: {mins}m{secs:02d}s remaining "
+                    f"(until {until_str})"
                 )
 
             # Check QPS
@@ -107,9 +111,18 @@ class RateLimiter:
     def set_cooldown(self, seconds: float):
         """Set a global cooldown, persisted for cross-process enforcement."""
         if self._state_path:
+            until = time.time() + seconds
             state = _read_state(self._state_path)
-            state["cooldown_until"] = time.time() + seconds
+            state["cooldown_until"] = until
             _write_state(self._state_path, state)
+            mins, secs = divmod(int(seconds), 60)
+            hours, mins = divmod(mins, 60)
+            until_str = time.strftime("%H:%M", time.localtime(until))
+            dur = f"{hours}h" if hours else f"{mins}m{secs:02d}s"
+            print(
+                f"  429 received: entering {dur} cooldown (until {until_str})",
+                file=sys.stderr, flush=True,
+            )
 
 
 class Cloud115Client:

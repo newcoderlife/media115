@@ -24,11 +24,57 @@ def _load_env():
         os.environ.setdefault(key.strip(), val)
 
 
+_DEFAULT_CONFIG = {
+    "root": "/影音",
+    "categories": {
+        "电影": {
+            "type": "movie",
+            "naming": "{title} ({year})",
+            "sources": ["tmdb"],
+        },
+        "剧目": {
+            "type": "tv",
+            "naming": "{title} ({year})",
+            "episode_naming": "{title} S{season:02d}E{episode:02d}",
+            "sources": ["tmdb", "bangumi"],
+        },
+        "AV": {
+            "type": "av",
+            "naming": "{number}",
+            "sources": ["jav321", "javfree"],
+        },
+    },
+    "rate_limit": {
+        "qps": 0.5,
+        "qpm": 20,
+        "cooldown_seconds": 3600,
+    },
+    "jellyfin_url": "http://localhost:8096",
+    "strm_proxy": {
+        "host": "localhost",
+        "port": 9000,
+    },
+}
+
+
 def _load_config() -> dict:
+    """Load config.yaml from project root, merged with defaults.
+
+    Looks for config.yaml in the current working directory.
+    Missing keys fall back to _DEFAULT_CONFIG.
+    """
     config_path = Path.cwd() / "config.yaml"
     if config_path.exists():
-        return yaml.safe_load(config_path.read_text()) or {}
-    return {}
+        user_config = yaml.safe_load(config_path.read_text()) or {}
+        # Shallow merge: top-level keys from user override defaults
+        merged = dict(_DEFAULT_CONFIG)
+        for key, val in user_config.items():
+            if isinstance(val, dict) and isinstance(merged.get(key), dict):
+                merged[key] = {**merged[key], **val}
+            else:
+                merged[key] = val
+        return merged
+    return dict(_DEFAULT_CONFIG)
 
 
 @click.group()
@@ -450,7 +496,8 @@ def batch_scrape(category, output, max_count, force):
         file_out = out_dir / parent.replace("/", "_")
         file_out.mkdir(parents=True, exist_ok=True)
 
-        click.echo(f"  [{i}/{len(videos)}] {_trunc(name, 60)} ...", nl=False)
+        pct = 100 * i // len(videos)
+        click.echo(f"  [{i}/{len(videos)} {pct}%] {_trunc(name, 60)} ...", nl=False)
 
         try:
             from media115.scraper.scrape import scrape_av, scrape_movie, scrape_tv
@@ -727,8 +774,9 @@ def upload_nfo(category):
     uploaded = 0
     errors = 0
     for i, (local_file, target_cid, remote_name) in enumerate(tasks, 1):
+        pct = 100 * i // len(tasks)
         print(
-            f"\r  [{i}/{len(tasks)}] {remote_name[:50]}...",
+            f"\r  [{i}/{len(tasks)} {pct}%] {remote_name[:50]}...",
             end="",
             file=sys.stderr,
             flush=True,
@@ -861,6 +909,77 @@ def serve(host, port):
     click.echo(f"Starting strm-proxy on {host}:{port}")
     click.echo(f"Jellyfin upstream: {jellyfin_url}")
     uvicorn.run(app, host=host, port=port)
+
+
+@main.command()
+@click.argument("path")
+@click.option("--output", "-o", required=True, help="Output directory for .strm files")
+@click.option("--host", default=None, help="Proxy host (default: from config.yaml)")
+@click.option("--port", default=None, type=int, help="Proxy port (default: from config.yaml)")
+def strm(path, output, host, port):
+    """Generate .strm files for Jellyfin from the tree cache.
+
+    PATH: 115 cloud path like /影音/电影
+
+    Reads tree_cache.txt and generates one .strm file per video file,
+    mirroring the 115 directory structure under OUTPUT. Each .strm file
+    contains a redirect URL through the strm-proxy.
+
+    Example:
+        115-media strm /影音/电影 --output ./strm/
+    """
+    from urllib.parse import quote
+
+    config = _load_config()
+    proxy_host = host or config.get("strm_proxy", {}).get("host", "localhost")
+    proxy_port = port or config.get("strm_proxy", {}).get("port", 9000)
+    base_url = f"http://{proxy_host}:{proxy_port}"
+
+    tree_path = media_cache.tree_cache_path()
+    if not tree_path.exists():
+        click.echo("No tree cache. Run '115-media export-tree' first.", err=True)
+        return
+
+    # Normalize the filter path (strip leading/trailing slashes)
+    filter_path = path.strip("/")
+
+    entries = media_cache.parse_tree_cache(VIDEO_EXTS)
+    videos = [e for e in entries if e["is_video"]]
+
+    # Filter to videos under the given path
+    matched = [v for v in videos if v["path"].startswith(filter_path + "/") or v["path"] == filter_path]
+
+    if not matched:
+        click.echo(f"No video files found under '{path}' in tree cache.")
+        click.echo("Run '115-media export-tree' to refresh the cache.")
+        return
+
+    out_dir = Path(output)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    created = 0
+    for item in matched:
+        full_115_path = item["path"]
+        # Path relative to the filter path, for local directory structure
+        if full_115_path.startswith(filter_path + "/"):
+            rel_path = full_115_path[len(filter_path) + 1:]
+        else:
+            rel_path = full_115_path
+
+        # Create .strm file mirroring directory structure
+        strm_file = out_dir / (rel_path + ".strm")
+        strm_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # URL-encode the full 115 path for the redirect endpoint
+        encoded_path = quote(full_115_path, safe="")
+        strm_url = f"{base_url}/redirect/{encoded_path}"
+
+        strm_file.write_text(strm_url + "\n")
+        created += 1
+
+    click.echo(f"Generated {created} .strm files in {out_dir}")
+    click.echo(f"Proxy URL base: {base_url}/redirect/...")
+    click.echo(f"\nMake sure the strm-proxy is running: 115-media serve --port {proxy_port}")
 
 
 @main.command()
