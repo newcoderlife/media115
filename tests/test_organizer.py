@@ -5,8 +5,8 @@ import hashlib
 import pytest
 
 from media115.organizer import (
-    compute_sha1,
     compute_pre_sha1,
+    compute_sha1,
 )
 
 
@@ -386,8 +386,8 @@ class TestScrapeAvWritesFileMap:
 
     def test_first_scrape_writes_file_map(self, tmp_path, monkeypatch):
         """Fresh scrape via jav321 writes file_map cache entry."""
-        from media115.scraper import scrape as scrape_mod
         from media115 import cache as real_cache
+        from media115.scraper import scrape as scrape_mod
 
         # Point cache dir to tmp_path so we don't pollute the real cache
         monkeypatch.setattr(real_cache, "CACHE_DIR", str(tmp_path / ".cache"))
@@ -436,8 +436,8 @@ class TestScrapeAvWritesFileMap:
 
     def test_cache_hit_writes_file_map(self, tmp_path, monkeypatch):
         """When AV metadata is already cached, file_map is still written."""
-        from media115.scraper import scrape as scrape_mod
         from media115 import cache as real_cache
+        from media115.scraper import scrape as scrape_mod
 
         monkeypatch.setattr(real_cache, "CACHE_DIR", str(tmp_path / ".cache"))
 
@@ -469,8 +469,8 @@ class TestScrapeAvWritesFileMap:
 
     def test_fallback_to_javfree(self, tmp_path, monkeypatch):
         """When jav321 returns nothing, javfree is tried and file_map written."""
-        from media115.scraper import scrape as scrape_mod
         from media115 import cache as real_cache
+        from media115.scraper import scrape as scrape_mod
 
         monkeypatch.setattr(real_cache, "CACHE_DIR", str(tmp_path / ".cache"))
 

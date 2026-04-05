@@ -1,5 +1,6 @@
 """File organizer: SHA1 hashing, rapid upload, STRM generation, 115 rename."""
 
+import contextlib
 import hashlib
 import re
 from pathlib import Path
@@ -332,7 +333,7 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
 
     # Phase 6: Delete old source directories (now empty or metadata-only)
     source_dirs = set()
-    for op, fid in resolved:
+    for op, _fid in resolved:
         if op.get("new_folder"):
             parent = op["parent"]
             parent_leaf = parent.split("/")[-1] if "/" in parent else parent
@@ -388,10 +389,7 @@ def _upload_scrape_output(
         return
 
     # Compute the NFO name that matches the new video
-    if new_video_name:
-        nfo_name = split_ext(new_video_name)[0] + ".nfo"
-    else:
-        nfo_name = None
+    nfo_name = split_ext(new_video_name)[0] + ".nfo" if new_video_name else None
 
     # Find matching output directory (by original parent path)
     parent = op.get("parent", "")
@@ -408,10 +406,8 @@ def _upload_scrape_output(
                     if f.suffix in (".nfo", ".jpg", ".png"):
                         # Rename NFO to match video; keep image names as-is
                         remote_name = nfo_name if f.suffix == ".nfo" and nfo_name else f.name
-                        try:
+                        with contextlib.suppress(Exception):
                             client.upload_file(f, target_cid, remote_name)
-                        except Exception:
-                            pass
                 return
 
 

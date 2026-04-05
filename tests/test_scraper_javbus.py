@@ -1,7 +1,8 @@
 """JavBus scraper tests. Uses HTML fixtures, no network."""
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 from media115.scraper.javbus import parse_detail_page
 

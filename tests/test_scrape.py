@@ -1,10 +1,11 @@
 """Scrape orchestration tests (mock all external APIs)."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from media115 import cache
-from media115.scraper.scrape import scrape_movie, scrape_av
+from media115.scraper.scrape import scrape_av, scrape_movie
 
 
 @pytest.fixture(autouse=True)

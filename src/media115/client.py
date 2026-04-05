@@ -4,16 +4,17 @@ Cookie mode: works immediately, no approval needed. Based on py115/p115client.
 OpenAPI mode: requires approved app_id/app_secret from open.115.com.
 """
 
+import contextlib
 import json
 import sys
-import time
 import threading
+import time
 from pathlib import Path
 
 import httpx
 
+from media115._crypto import generate_m115_key, m115_decode, m115_encode
 from media115.cache import rate_limit_path as _rate_limit_path
-from media115._crypto import generate_m115_key, m115_encode, m115_decode
 
 # API endpoints
 WEB_API = "https://webapi.115.com"
@@ -392,15 +393,14 @@ class Cloud115Client:
             self._limiter.set_cooldown(3600)
             self._download_limiter.set_cooldown(3600)
             raise RuntimeError("115 API rate limit hit (429). Cooling down for 1 hour.")
-        if resp.status_code == 405:
-            if self.renew_cookies():
-                resp = self._http.request(
-                    method,
-                    url,
-                    params=params,
-                    data=data,
-                    headers={"Cookie": self._cookies},
-                )
+        if resp.status_code == 405 and self.renew_cookies():
+            resp = self._http.request(
+                method,
+                url,
+                params=params,
+                data=data,
+                headers={"Cookie": self._cookies},
+            )
         resp.raise_for_status()
         result = resp.json()
         if isinstance(result, dict) and "errNo" in result:
@@ -819,10 +819,8 @@ class Cloud115Client:
 
         # Clean up: delete the tree txt from 115
         if file_id:
-            try:
+            with contextlib.suppress(Exception):
                 self.delete([str(file_id)])
-            except Exception:
-                pass
 
         return dl.content.decode("utf-16-le", errors="replace")
 
