@@ -155,3 +155,11 @@ tests/                     # 单元测试 + 回归用例
 | AV | jav321 + javfree | 无需 | HTML 刮削，双源 fallback |
 
 > **注意**：CLI 必须在项目根目录运行（依赖 `.env` 和 `.cache/`）。
+
+## Credits
+
+- [py115](https://github.com/deadblue/py115) — M115 加密实现（RSA + XOR）的主要参考
+- [p115client](https://github.com/ChenyangGao/p115client) — 115 API 调用模式参考（cookie 认证、文件列表、目录导出）
+- [TMDB](https://www.themoviedb.org/) — 电影/剧集元数据 API
+- [Bangumi](https://bgm.tv/) — 动漫元数据 API
+- [Kodi Wiki](https://kodi.wiki/view/NFO_files) — NFO 文件格式规范
