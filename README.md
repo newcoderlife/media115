@@ -94,7 +94,7 @@ Agent: 修正 → 写入回归测试 case → 跑 pytest 验证
 # 搜索元数据
 115-media scrape "The Matrix"                     # TMDB（默认）
 115-media scrape "孤独摇滚" --source bangumi       # Bangumi
-115-media scrape "ABC-123" --source javbus         # JavBus
+115-media scrape "ABC-123"                          # AV（自动识别）
 
 # 115 网盘操作（需要先 auth）
 115-media auth                                     # 扫码登录
@@ -140,7 +140,7 @@ tests/                     # 单元测试 + 回归用例
 
 ```bash
 .venv/bin/pytest tests/ -v                          # 全部测试
-.venv/bin/pytest tests/ -v -k "not live"            # 离线测试（不需要网络）
+.venv/bin/pytest tests/ -v -m "not live"            # 离线测试（不需要网络）
 .venv/bin/pytest tests/test_scrape_regression.py -v  # 刮削回归
 ```
 

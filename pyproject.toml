@@ -28,3 +28,4 @@ dev = ["pytest", "pytest-xdist"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-n auto"
+markers = ["live: tests that require network access (TMDB, Bangumi, CDN)"]
