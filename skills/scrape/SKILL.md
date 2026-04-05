@@ -1,46 +1,47 @@
 ---
 name: scrape
-description: Scrape metadata for media files on 115 cloud
-version: 2.0
+description: Batch scrape metadata for a category, agent handles failures
+version: 4.0
 ---
 
-Scrape metadata (NFO + artwork) for media files on 115 cloud.
+Scrape metadata (NFO + poster) for media files on 115 cloud.
 
 ## Input
-$ARGUMENTS — the 115 path to scrape, e.g. `/影音`. Ask the user if not provided.
+$ARGUMENTS — category: `电影`, `AV`, or `剧目`. Ask the user if not provided.
+
+## Preconditions
+- 115 must be logged in (`/auth`)
+- Tree cache must exist. If not, run `/sync-tree` first.
 
 ## Steps
 
-### 1. Ensure login
-Run `/auth` first (or check inline):
-```bash
-.venv/bin/python -m media115.cli auth --check
-```
-
-### 2. Export directory tree (if not recent)
-```bash
-.venv/bin/python -m media115.cli export-tree /PATH
-```
-
-### 3. Scan to see what needs scraping
+### 1. Check if --force is needed
+Run `/scan` first. If it shows **"Non-standard name" anomalies**, you MUST use `--force`:
 ```bash
 .venv/bin/python -m media115.cli scan-tree $CATEGORY
 ```
-Report the summary to the user.
 
-### 4. Batch scrape (CLI handles most files)
+**Why:** Without `--force`, batch-scrape skips files that already have NFOs on 115. Those files get NO file_map entry, so organize will silently skip them later. This is the #1 source of "organize did nothing" bugs.
+
+### 2. Batch scrape
 ```bash
+# Normal: only scrape files without NFO
 .venv/bin/python -m media115.cli batch-scrape $CATEGORY
-```
-This uses regex analyzer + TMDB/jav321/javfree with caching.
 
-### 5. Handle failures (YOUR job as agent)
+# If anomalies detected: re-scrape ALL files including those with NFO
+.venv/bin/python -m media115.cli batch-scrape $CATEGORY --force
+```
+
+### 3. Handle failures (YOUR job as agent)
 Check batch-scrape output for `not_found` or `error` files.
+
 For each failed file:
 1. Look at the filename, use YOUR judgment to determine title/type/year
 2. Search: `.venv/bin/python -m media115.cli scrape "your search query"`
-3. If multiple results, pick the best match
-4. Save as regression case via `/scrape-fix`
+3. Try alternate queries, sources (`--source bangumi` for anime)
+4. If multiple results, pick the best match
+5. Save as regression case via `/scrape-fix`
 
-### 6. Report
-Output summary table: how many scraped, how many failed, how many agent-fixed.
+### 4. Report
+Output summary: how many scraped, how many failed, how many agent-fixed.
+Ask user if they want to proceed to `/organize`.
