@@ -36,7 +36,9 @@ media115 scan /影音          # 扫描文件夹，输出刮削计划表
 
 ## 115 网盘认证
 
-支持两种模式，优先使用 cookie 模式：
+支持两种模式，优先使用 cookie 模式。
+
+> **安全提示**：Cookie 模式使用非官方接口，cookie 明文保存在 `.env` 文件中。请确保 `.env` 权限为 600（`chmod 600 .env`），不要将其提交到版本控制。
 
 | 模式 | 认证方式 | 是否需要审批 | 适用场景 |
 |------|---------|------------|---------|
@@ -99,7 +101,7 @@ Agent: 修正 → 写入回归测试 case → 跑 pytest 验证
 # 搜索元数据
 media115 scrape "The Matrix"                     # TMDB（默认）
 media115 scrape "孤独摇滚" --source bangumi       # Bangumi
-media115 scrape "ABC-123"                          # AV（自动识别）
+media115 scrape "ABC-123" --source javbus          # AV（JavBus）
 
 # 115 网盘操作（需要先 auth）
 media115 auth                                     # 扫码登录
@@ -108,8 +110,10 @@ media115 ls /                                     # 列出根目录
 media115 ls /影音/电影                             # 列出子目录
 media115 scan /影音                               # 扫描并输出刮削计划表
 media115 upload movie.mkv --remote-dir 12345      # 上传文件（cookie 模式）
-media115 serve --port 9000                        # 启动 strm-proxy
+media115 serve --port 9000                        # 启动 strm-proxy（仅监听 localhost）
 ```
+
+> **注意**：strm-proxy 默认只监听 127.0.0.1，没有认证层。如需局域网访问，请使用 `--host 0.0.0.0` 并自行做好网络隔离。
 
 ### 方式三：Python API
 
