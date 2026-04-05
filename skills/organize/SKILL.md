@@ -1,37 +1,50 @@
 ---
 name: organize
-description: Rename and move 115 files to Jellyfin standard naming
-version: 1.0
+description: Rename, move, upload NFO, and cleanup — the main operation
+version: 3.0
 ---
 
-Organize media files on 115 to Jellyfin standard: `中文名 (年份)/中文名 (年份).ext`
+The single operation that does everything: move files to correct dirs, rename to standard format, upload NFO/poster, and clean up old dirs.
 
 ## Input
-$ARGUMENTS — category: `电影`, `AV`, `剧目`, or `all`
+$ARGUMENTS — category: `电影`, `AV`, or `剧目`.
+
+## Preconditions
+- `/scrape` must have been run (creates file_map cache with correct names).
+- Tree cache must be fresh. If you just ran organize for another category, run `/sync-tree` first.
 
 ## Steps
 
-### 1. Ensure scrape is done
-file_map cache must exist (created by batch-scrape). If not, tell user to run `/scrape` first.
-
-### 2. Dry-run
+### 1. Dry-run
 ```bash
 .venv/bin/python -m media115.cli organize $CATEGORY
 ```
-Show the plan table to user. Ask for confirmation.
+Show the plan table to user. Check for:
+- Target conflicts (two files → same name) — resolve before executing
+- Unexpected matches — verify titles look correct
+- "0 to rename" when anomalies exist — means you forgot `batch-scrape --force`
 
-### 3. Execute (after user confirms)
+### 2. Execute (after user confirms)
 ```bash
 .venv/bin/python -m media115.cli organize $CATEGORY --execute
 ```
-This does: mkdir target folder → move file → rename file. Never renames existing dirs.
 
-### 4. Clean up empty dirs
-After organize, old empty directories may remain. Tell the user they can delete them manually from 115 web, or note them for later cleanup.
+This does 6 phases automatically:
+1. Resolve file IDs on 115
+2. Create target directories
+3. Move files to target dirs
+4. Rename files to standard format
+5. Upload NFO/poster (named to match video)
+6. Delete old source directories (if no video files remain)
 
-### 5. Verify
-Re-export tree to confirm:
+### 3. Refresh tree cache
+organize invalidates the tree cache. **Always refresh after execute:**
 ```bash
-.venv/bin/python -m media115.cli export-tree /PATH
-.venv/bin/python -m media115.cli ls /影音/$CATEGORY
+.venv/bin/python -m media115.cli export-tree /影音
 ```
+
+### 4. Verify
+```bash
+.venv/bin/python -m media115.cli scan-tree $CATEGORY
+```
+Check: 0 anomalies, all files have NFO.

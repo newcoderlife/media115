@@ -1,13 +1,17 @@
 ---
 name: scrape-fix
 description: Correct a scraping result and save as regression test case
-version: 2.0
+version: 2.1
 ---
 
 Correct a wrong scraping result, re-scrape with correct info, and save as regression test.
 
+This skill is used in two scenarios:
+1. User says "that result is wrong" — triggered by user feedback
+2. Agent resolves a failed file during `/scrape` — triggered by agent
+
 ## Input
-$ARGUMENTS — correction instruction, e.g. "The Running Man 是电影 The Running Man (2025)"
+$ARGUMENTS — correction instruction, e.g. "xxx.mkv 是电影《满江红》" or "The Running Man is movie The Running Man (2025)"
 
 ## Steps
 
@@ -17,6 +21,7 @@ Extract: filename, correct type (movie/tv/anime/av), correct title, source, sour
 ### 2. Search for correct match
 ```bash
 .venv/bin/python -m media115.cli scrape "correct title"
+.venv/bin/python -m media115.cli scrape "correct title" --source bangumi
 ```
 
 ### 3. Save regression case
@@ -38,8 +43,4 @@ add_case(Path('tests/scrape_cases.json'), r)
 ```
 
 ### 5. Report
-- What was corrected
-- New case ID
-- Test results (all green?)
-
-If tests fail, diagnose and report to user.
+What was corrected, new case ID, test results (all green?).
