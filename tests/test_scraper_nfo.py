@@ -176,7 +176,11 @@ def tvshow_metadata():
         "studios": ["AMC"],
         "tags": ["crime", "drugs"],
         "actors": [
-            {"name": "Bryan Cranston", "role": "Walter White", "thumb": "https://example.com/bc.jpg"},
+            {
+                "name": "Bryan Cranston",
+                "role": "Walter White",
+                "thumb": "https://example.com/bc.jpg",
+            },
             {"name": "Aaron Paul", "role": "Jesse Pinkman", "thumb": ""},
         ],
         "uniqueids": {"tmdb": "1396", "imdb": "tt0903747"},

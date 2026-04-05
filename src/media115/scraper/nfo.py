@@ -4,7 +4,6 @@ Follows the Kodi NFO standard for maximum compatibility with
 Jellyfin, Infuse, and Kodi itself.
 """
 
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -276,9 +275,7 @@ def parse_nfo(nfo_path: Path) -> dict:
 def _write_xml(root: etree._Element, output_path: Path):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     tree = etree.ElementTree(root)
-    tree.write(
-        str(output_path), encoding="UTF-8", xml_declaration=True, pretty_print=True
-    )
+    tree.write(str(output_path), encoding="UTF-8", xml_declaration=True, pretty_print=True)
 
 
 def _as_list(val) -> list:

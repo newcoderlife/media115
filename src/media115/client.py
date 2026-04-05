@@ -4,7 +4,6 @@ Cookie mode: works immediately, no approval needed. Based on py115/p115client.
 OpenAPI mode: requires approved app_id/app_secret from open.115.com.
 """
 
-
 from __future__ import annotations
 
 import contextlib
@@ -79,8 +78,7 @@ class RateLimiter:
                 mins, secs = divmod(remaining, 60)
                 until_str = time.strftime("%H:%M", time.localtime(cooldown_until))
                 raise RuntimeError(
-                    f"Rate limit cooldown: {mins}m{secs:02d}s remaining "
-                    f"(until {until_str})"
+                    f"Rate limit cooldown: {mins}m{secs:02d}s remaining (until {until_str})"
                 )
 
             # Check QPS
@@ -125,7 +123,8 @@ class RateLimiter:
             dur = f"{hours}h" if hours else f"{mins}m{secs:02d}s"
             print(
                 f"  429 received: entering {dur} cooldown (until {until_str})",
-                file=sys.stderr, flush=True,
+                file=sys.stderr,
+                flush=True,
             )
 
 
@@ -411,9 +410,7 @@ class Cloud115Client:
             if err == 770004 or "访问上限" in str(result.get("error", "")):
                 self._limiter.set_cooldown(3600)
                 self._download_limiter.set_cooldown(3600)
-                raise RuntimeError(
-                    f"115 API rate limit hit (errNo={err}). Cooling down."
-                )
+                raise RuntimeError(f"115 API rate limit hit (errNo={err}). Cooling down.")
         return result
 
     def _openapi_request(
@@ -460,9 +457,7 @@ class Cloud115Client:
 
     # ── Public API ───────────────────────────────────────────────────
 
-    def list_files(
-        self, dir_id: str = "0", limit: int = 100, offset: int = 0
-    ) -> list[dict]:
+    def list_files(self, dir_id: str = "0", limit: int = 100, offset: int = 0) -> list[dict]:
         if self._mode == "cookie":
             result = self._cookie_request(
                 "GET",
@@ -544,9 +539,7 @@ class Cloud115Client:
                     found = True
                     break
             if not found:
-                raise FileNotFoundError(
-                    f"Directory not found: '{part}' in path '{path}'"
-                )
+                raise FileNotFoundError(f"Directory not found: '{part}' in path '{path}'")
         return current_id
 
     def get_dir_id(self, path: str) -> str | None:
@@ -698,9 +691,7 @@ class Cloud115Client:
                 data={"fid": ",".join(file_ids)},
             )
 
-    def upload_file(
-        self, local_path: Path, target_dir_id: str, filename: str = ""
-    ) -> dict | None:
+    def upload_file(self, local_path: Path, target_dir_id: str, filename: str = "") -> dict | None:
         """Upload a small file (NFO, image) to 115 via OSS.
 
         No encryption needed. Works for files up to ~500MB.
@@ -749,9 +740,7 @@ class Cloud115Client:
         """
         if self._mode == "cookie":
             data = {f"files_new_name[{fid}]": name for fid, name in renames.items()}
-            return self._cookie_request(
-                "POST", f"{WEB_API}/files/batch_rename", data=data
-            )
+            return self._cookie_request("POST", f"{WEB_API}/files/batch_rename", data=data)
         else:
             # OpenAPI doesn't have batch_rename, fall back to individual
             for fid, name in renames.items():

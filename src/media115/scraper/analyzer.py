@@ -6,7 +6,6 @@ This module provides the logic that LLM skills call. It handles:
 3. Falling back to heuristic analysis for unknown files
 """
 
-
 from __future__ import annotations
 
 import datetime

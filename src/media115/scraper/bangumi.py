@@ -1,7 +1,5 @@
 """Bangumi API client for anime metadata."""
 
-
-
 from __future__ import annotations
 
 import time
@@ -39,9 +37,7 @@ class BangumiClient:
             time.sleep(_MIN_INTERVAL - elapsed)
         self._last_request = time.monotonic()
 
-    def search(
-        self, keyword: str, subject_type: int = 2, limit: int = 10
-    ) -> list[dict]:
+    def search(self, keyword: str, subject_type: int = 2, limit: int = 10) -> list[dict]:
         self._throttle()
         resp = self._http.post(
             "/v0/search/subjects",

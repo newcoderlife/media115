@@ -62,8 +62,7 @@ def test_regression(case):
 
     if "title" in expect:
         assert expect["title"] in result.title or result.title in expect["title"], (
-            f"Expected title containing '{expect['title']}', got '{result.title}' "
-            f"for {filename}"
+            f"Expected title containing '{expect['title']}', got '{result.title}' for {filename}"
         )
 
     if "year" in expect:
@@ -88,6 +87,5 @@ def test_regression(case):
 
     if "source_id" in expect:
         assert result.source_id == expect["source_id"], (
-            f"Expected source_id={expect['source_id']}, got {result.source_id} "
-            f"for {filename}"
+            f"Expected source_id={expect['source_id']}, got {result.source_id} for {filename}"
         )

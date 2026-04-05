@@ -1,6 +1,5 @@
 """strm-proxy: Jellyfin reverse proxy with STRM 302 redirect."""
 
-
 from __future__ import annotations
 
 import re
@@ -67,9 +66,7 @@ def create_app(jellyfin_url: str, cloud115_client) -> FastAPI:
         try:
             dir_id = client.get_dir_id(dir_path)
             if not dir_id:
-                return Response(
-                    content=f"Directory not found: {dir_path}", status_code=404
-                )
+                return Response(content=f"Directory not found: {dir_path}", status_code=404)
 
             files = client.list_files_all(dir_id=dir_id)
             for f in files:
@@ -77,9 +74,7 @@ def create_app(jellyfin_url: str, cloud115_client) -> FastAPI:
                 if name == filename and "fid" in f:
                     pick_code = f.get("pc", "")
                     if not pick_code:
-                        return Response(
-                            content=f"No pick_code for: {filename}", status_code=404
-                        )
+                        return Response(content=f"No pick_code for: {filename}", status_code=404)
                     cache[cache_key] = (pick_code, now)
                     url = _get_cached_url(app, pick_code)
                     return RedirectResponse(url=url, status_code=302)
@@ -159,9 +154,7 @@ async def _proxy_to_jellyfin(app: FastAPI, request: Request) -> Response:
     if request.url.query:
         target += f"?{request.url.query}"
 
-    fwd_headers = {
-        k: v for k, v in request.headers.items() if k.lower() not in EXCLUDED_HEADERS
-    }
+    fwd_headers = {k: v for k, v in request.headers.items() if k.lower() not in EXCLUDED_HEADERS}
     body = await request.body()
 
     resp = await app.state.http.request(
@@ -171,9 +164,5 @@ async def _proxy_to_jellyfin(app: FastAPI, request: Request) -> Response:
         content=body,
     )
 
-    resp_headers = {
-        k: v for k, v in resp.headers.items() if k.lower() not in EXCLUDED_HEADERS
-    }
-    return Response(
-        content=resp.content, status_code=resp.status_code, headers=resp_headers
-    )
+    resp_headers = {k: v for k, v in resp.headers.items() if k.lower() not in EXCLUDED_HEADERS}
+    return Response(content=resp.content, status_code=resp.status_code, headers=resp_headers)

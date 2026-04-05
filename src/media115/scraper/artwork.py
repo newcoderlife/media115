@@ -1,6 +1,5 @@
 """Artwork (poster/fanart) download utilities."""
 
-
 from __future__ import annotations
 
 from pathlib import Path

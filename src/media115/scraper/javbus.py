@@ -1,6 +1,5 @@
 """JavBus HTML scraper for AV metadata."""
 
-
 from __future__ import annotations
 
 from lxml import html as lxml_html
@@ -67,14 +66,10 @@ def parse_detail_page(html_str: str) -> dict:
     series_els = doc.xpath('//a[contains(@href, "/series/")]/text()')
     result["series"] = series_els[0].strip() if series_els else ""
 
-    result["actors"] = [
-        a.strip() for a in doc.xpath('//div[@class="star-name"]/a/text()')
-    ]
+    result["actors"] = [a.strip() for a in doc.xpath('//div[@class="star-name"]/a/text()')]
     result["genres"] = [
         g.strip()
-        for g in doc.xpath(
-            '//span[@class="genre"]/label/a[contains(@href, "/genre/")]/text()'
-        )
+        for g in doc.xpath('//span[@class="genre"]/label/a[contains(@href, "/genre/")]/text()')
     ]
 
     cover_els = doc.xpath('//a[@class="bigImage"]/@href')
@@ -88,9 +83,7 @@ def _get_info_text(doc, label: str) -> str | None:
     p_els = doc.xpath(f'//span[@class="header"][contains(text(), "{label}")]/parent::p')
     if p_els:
         full_text = p_els[0].text_content()
-        parts = (
-            full_text.split(":", 1) if ":" in full_text else full_text.split("：", 1)
-        )
+        parts = full_text.split(":", 1) if ":" in full_text else full_text.split("：", 1)
         if len(parts) > 1:
             return parts[1].strip()
     return None
