@@ -3,6 +3,8 @@
 import os
 import pytest
 
+pytestmark = pytest.mark.live
+
 from media115.scraper.bangumi import BangumiClient
 
 

@@ -1,5 +1,9 @@
 """Artwork download tests. Hits real TMDB image CDN (read-only, free)."""
 
+import pytest
+
+pytestmark = pytest.mark.live
+
 from media115.scraper.artwork import download_image, save_poster
 
 

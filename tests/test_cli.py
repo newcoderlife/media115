@@ -43,17 +43,20 @@ class TestCLI:
             assert result.exit_code == 0
             assert "Already logged in" in result.output
 
+    @pytest.mark.live
     @pytest.mark.skipif(not has_tmdb, reason="TMDB_READ_ACCESS_TOKEN not set")
     def test_scrape_tmdb(self, runner):
         result = runner.invoke(main, ["scrape", "The Matrix", "--source", "tmdb"])
         assert result.exit_code == 0
         assert "Matrix" in result.output or "603" in result.output
 
+    @pytest.mark.live
     @pytest.mark.skipif(not has_bangumi, reason="BANGUMI_ACCESS_TOKEN not set")
     def test_scrape_bangumi(self, runner):
         result = runner.invoke(main, ["scrape", "孤独摇滚", "--source", "bangumi"])
         assert result.exit_code == 0
 
+    @pytest.mark.live
     @pytest.mark.skipif(not has_tmdb, reason="TMDB_READ_ACCESS_TOKEN not set")
     def test_scrape_default_source(self, runner):
         result = runner.invoke(main, ["scrape", "The Matrix"])
