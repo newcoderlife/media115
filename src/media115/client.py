@@ -123,7 +123,7 @@ class Cloud115Client:
 
     def __init__(self):
         self._http = httpx.Client(
-            timeout=15,
+            timeout=30,
             headers={
                 "User-Agent": self._USER_AGENT,
                 "Origin": "https://115.com",
@@ -359,13 +359,22 @@ class Cloud115Client:
         limiter: "RateLimiter | None" = None,
     ) -> dict:
         (limiter or self._limiter).acquire()
-        resp = self._http.request(
-            method,
-            url,
-            params=params,
-            data=data,
-            headers={"Cookie": self._cookies},
-        )
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                resp = self._http.request(
+                    method,
+                    url,
+                    params=params,
+                    data=data,
+                    headers={"Cookie": self._cookies},
+                )
+                break
+            except (httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.ConnectError):
+                if attempt == max_retries - 1:
+                    raise
+                time.sleep(3 * (attempt + 1))
+                continue
         if resp.status_code == 429:
             self._limiter.set_cooldown(3600)
             self._download_limiter.set_cooldown(3600)
