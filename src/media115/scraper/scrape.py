@@ -4,7 +4,6 @@ All scrapers go through this module. Cache is checked first;
 on miss, the appropriate provider is called and result is cached.
 """
 
-
 from __future__ import annotations
 
 import contextlib
@@ -194,12 +193,11 @@ def scrape_tv(
                 "status": detail.get("status"),
                 "genres": [g["name"] for g in detail.get("genres", [])],
                 "studios": [
-                    c["name"] for c in detail.get("production_companies", [])
-                    if c.get("name")
+                    c["name"] for c in detail.get("production_companies", []) if c.get("name")
                 ],
-                "tags": [
-                    k["name"] for k in detail.get("keywords", {}).get("results", [])
-                ] if isinstance(detail.get("keywords"), dict) else [],
+                "tags": [k["name"] for k in detail.get("keywords", {}).get("results", [])]
+                if isinstance(detail.get("keywords"), dict)
+                else [],
                 "actors": [
                     {
                         "name": a["name"],
@@ -294,9 +292,7 @@ def _get_tmdb_movie_full(client, tmdb_id: int) -> tuple[dict, dict, dict]:
     detail = client.movie_detail(tmdb_id)
     images = client.movie_images(tmdb_id)
     credits = client.movie_credits(tmdb_id)
-    media_cache.put(
-        "tmdb", cache_key, {"detail": detail, "images": images, "credits": credits}
-    )
+    media_cache.put("tmdb", cache_key, {"detail": detail, "images": images, "credits": credits})
     return detail, images, credits
 
 
@@ -328,9 +324,7 @@ def _save_tmdb_poster(images: dict, out_dir: Path):
     """Download first poster from TMDB images."""
     if images.get("posters"):
         with contextlib.suppress(Exception):
-            save_poster(
-                images["posters"][0]["file_path"], out_dir, filename="poster.jpg"
-            )
+            save_poster(images["posters"][0]["file_path"], out_dir, filename="poster.jpg")
 
 
 def _write_av_nfo(meta: dict, filename: str, out_dir: Path, source: str):

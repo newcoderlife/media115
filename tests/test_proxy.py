@@ -61,9 +61,7 @@ class TestVideoStreamIntercept:
             "Items": [
                 {
                     "Path": "/media/movies/test.strm",
-                    "MediaSources": [
-                        {"Id": "src1", "Path": "http://proxy:9000/play/xyz789"}
-                    ],
+                    "MediaSources": [{"Id": "src1", "Path": "http://proxy:9000/play/xyz789"}],
                 }
             ]
         }
@@ -113,3 +111,147 @@ class TestPassthrough:
 
         resp = client.get("/Items?api_key=test")
         assert resp.status_code == 200
+
+
+class TestRedirectByPath:
+    """Tests for /redirect/{file_path} endpoint."""
+
+    def test_redirect_success(self):
+        """Mock client resolves path -> pick_code -> download URL, verify 302."""
+        cloud_client = MagicMock()
+        cloud_client.get_dir_id.return_value = "dir_123"
+        cloud_client.list_files_all.return_value = [
+            {"n": "Test Movie (2024).mkv", "fid": "fid_1", "pc": "pick_abc"},
+        ]
+        cloud_client.download_url.return_value = "https://cdn.115.com/test.mkv"
+
+        app = create_app(
+            jellyfin_url="http://jellyfin:8096",
+            cloud115_client=cloud_client,
+        )
+        tc = TestClient(app)
+
+        resp = tc.get(
+            "/redirect/影音/电影/Test Movie (2024)/Test Movie (2024).mkv",
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 302
+        assert resp.headers["location"] == "https://cdn.115.com/test.mkv"
+        cloud_client.get_dir_id.assert_called_once()
+        cloud_client.download_url.assert_called_once_with("pick_abc")
+
+    def test_redirect_not_found(self):
+        """When get_dir_id returns None, should return 404."""
+        cloud_client = MagicMock()
+        cloud_client.get_dir_id.return_value = None
+
+        app = create_app(
+            jellyfin_url="http://jellyfin:8096",
+            cloud115_client=cloud_client,
+        )
+        tc = TestClient(app)
+
+        resp = tc.get(
+            "/redirect/影音/电影/Missing/missing.mkv",
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 404
+
+    def test_redirect_file_not_in_listing(self):
+        """Directory exists but file not found in listing, should 404."""
+        cloud_client = MagicMock()
+        cloud_client.get_dir_id.return_value = "dir_123"
+        cloud_client.list_files_all.return_value = [
+            {"n": "other_file.mkv", "fid": "fid_other", "pc": "pick_other"},
+        ]
+
+        app = create_app(
+            jellyfin_url="http://jellyfin:8096",
+            cloud115_client=cloud_client,
+        )
+        tc = TestClient(app)
+
+        resp = tc.get(
+            "/redirect/影音/电影/SomeDir/missing.mkv",
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 404
+
+    def test_redirect_caches(self):
+        """Call twice with same path, verify client only called once (caching)."""
+        cloud_client = MagicMock()
+        cloud_client.get_dir_id.return_value = "dir_123"
+        cloud_client.list_files_all.return_value = [
+            {"n": "cached.mkv", "fid": "fid_1", "pc": "pick_cached"},
+        ]
+        cloud_client.download_url.return_value = "https://cdn.115.com/cached.mkv"
+
+        app = create_app(
+            jellyfin_url="http://jellyfin:8096",
+            cloud115_client=cloud_client,
+        )
+        tc = TestClient(app)
+
+        # First request -- resolves path, populates cache
+        resp1 = tc.get(
+            "/redirect/影音/电影/CacheDir/cached.mkv",
+            follow_redirects=False,
+        )
+        assert resp1.status_code == 302
+
+        # Second request -- should use cached pick_code
+        resp2 = tc.get(
+            "/redirect/影音/电影/CacheDir/cached.mkv",
+            follow_redirects=False,
+        )
+        assert resp2.status_code == 302
+
+        # get_dir_id and list_files_all should only be called once
+        assert cloud_client.get_dir_id.call_count == 1
+        assert cloud_client.list_files_all.call_count == 1
+        # download_url may be called once (URL also cached by _get_cached_url)
+        assert cloud_client.download_url.call_count == 1
+
+    def test_redirect_no_pick_code(self):
+        """File found but has no pick_code, should 404."""
+        cloud_client = MagicMock()
+        cloud_client.get_dir_id.return_value = "dir_123"
+        cloud_client.list_files_all.return_value = [
+            {"n": "no_pc.mkv", "fid": "fid_1", "pc": ""},
+        ]
+
+        app = create_app(
+            jellyfin_url="http://jellyfin:8096",
+            cloud115_client=cloud_client,
+        )
+        tc = TestClient(app)
+
+        resp = tc.get(
+            "/redirect/影音/电影/SomeDir/no_pc.mkv",
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 404
+        assert "No pick_code" in resp.text
+
+    def test_redirect_exception(self):
+        """When client raises, should return 500."""
+        cloud_client = MagicMock()
+        cloud_client.get_dir_id.side_effect = Exception("connection refused")
+
+        app = create_app(
+            jellyfin_url="http://jellyfin:8096",
+            cloud115_client=cloud_client,
+        )
+        tc = TestClient(app)
+
+        resp = tc.get(
+            "/redirect/影音/电影/SomeDir/file.mkv",
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 500
+        assert "connection refused" in resp.text

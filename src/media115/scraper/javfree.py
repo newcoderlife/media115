@@ -1,6 +1,5 @@
 """JavFree scraper for AV metadata. Simple, no anti-bot."""
 
-
 from __future__ import annotations
 
 from lxml import html as lxml_html

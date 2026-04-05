@@ -18,7 +18,6 @@ Structure:
           └── DANDY-992.json   # Keyed by number
 """
 
-
 from __future__ import annotations
 
 import json

@@ -1,5 +1,6 @@
 """115 client tests. Covers both cookie and OpenAPI modes (all mocked)."""
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -107,18 +108,14 @@ class TestRenewCookies:
         # Mock the 4-step auto-scan flow
         get_responses = [
             # Step 1: QR token
-            MagicMock(
-                json=lambda: {"data": {"uid": "test_uid"}}, raise_for_status=MagicMock()
-            ),
+            MagicMock(json=lambda: {"data": {"uid": "test_uid"}}, raise_for_status=MagicMock()),
             # Step 2: auto-scan
             MagicMock(json=lambda: {"state": True}, raise_for_status=MagicMock()),
             # Step 3: auto-confirm
             MagicMock(json=lambda: {"state": True}, raise_for_status=MagicMock()),
         ]
         post_resp = MagicMock(
-            json=lambda: {
-                "data": {"cookie": {"UID": "2_A1_1", "CID": "new", "SEID": "new"}}
-            },
+            json=lambda: {"data": {"cookie": {"UID": "2_A1_1", "CID": "new", "SEID": "new"}}},
             raise_for_status=MagicMock(),
         )
 
@@ -302,17 +299,13 @@ class TestCookieModeAPIs:
 
     def test_get_dir_id(self, client):
         resp_data = {"state": True, "id": 12345}
-        with patch.object(
-            client._http, "request", return_value=self._mock_resp(resp_data)
-        ):
+        with patch.object(client._http, "request", return_value=self._mock_resp(resp_data)):
             dir_id = client.get_dir_id("/movies/action")
             assert dir_id == "12345"
 
     def test_get_dir_id_not_found(self, client):
         resp_data = {"state": False}
-        with patch.object(
-            client._http, "request", return_value=self._mock_resp(resp_data)
-        ):
+        with patch.object(client._http, "request", return_value=self._mock_resp(resp_data)):
             dir_id = client.get_dir_id("/nonexistent")
             assert dir_id is None
 
@@ -370,14 +363,16 @@ class TestCookieModeAPIs:
         nfo_file = tmp_path / "movie.nfo"
         nfo_file.write_text("<movie><title>Test</title></movie>")
 
-        init_resp = self._mock_resp({
-            "host": "https://oss.example.com/upload",
-            "object": "obj_key",
-            "accessid": "ak123",
-            "policy": "pol",
-            "signature": "sig",
-            "callback": "cb",
-        })
+        init_resp = self._mock_resp(
+            {
+                "host": "https://oss.example.com/upload",
+                "object": "obj_key",
+                "accessid": "ak123",
+                "policy": "pol",
+                "signature": "sig",
+                "callback": "cb",
+            }
+        )
         oss_resp = self._mock_resp({"data": {"file_id": "999", "file_name": "movie.nfo"}})
 
         with patch.object(client._http, "post", return_value=init_resp):
@@ -422,9 +417,7 @@ class TestCookieModeAPIs:
             "state": True,
             "data": [{"n": "found.mkv", "fid": "400"}],
         }
-        with patch.object(
-            client._http, "request", return_value=self._mock_resp(resp_data)
-        ):
+        with patch.object(client._http, "request", return_value=self._mock_resp(resp_data)):
             results = client.search("found", dir_id="0")
             assert len(results) == 1
             assert results[0]["n"] == "found.mkv"
@@ -484,9 +477,7 @@ class TestListFilesAllAndRecursive:
         sub_items = [
             {"n": "child.mkv", "fid": "2"},
         ]
-        with patch.object(
-            client, "list_files_all", side_effect=[root_items, sub_items]
-        ):
+        with patch.object(client, "list_files_all", side_effect=[root_items, sub_items]):
             result = client.list_files_recursive(dir_id="0", max_depth=2)
             assert len(result) == 3
             dir_entry = [r for r in result if r["n"] == "SubDir"][0]
@@ -593,9 +584,7 @@ class TestOpenAPIModeAPIs:
 
     def test_search(self, client):
         resp_data = {"state": True, "data": [{"n": "hit.mp4", "fid": "60"}]}
-        with patch.object(
-            client._http, "request", return_value=self._mock_resp(resp_data)
-        ):
+        with patch.object(client._http, "request", return_value=self._mock_resp(resp_data)):
             results = client.search("hit")
             assert len(results) == 1
             assert results[0]["n"] == "hit.mp4"
@@ -605,9 +594,7 @@ class TestOpenAPIModeAPIs:
             "state": True,
             "data": {"pc1": {"url": {"url": "https://cdn.115.com/dl.mkv"}}},
         }
-        with patch.object(
-            client._http, "request", return_value=self._mock_resp(resp_data)
-        ):
+        with patch.object(client._http, "request", return_value=self._mock_resp(resp_data)):
             url = client.download_url("pc1")
             assert url == "https://cdn.115.com/dl.mkv"
 
@@ -617,26 +604,20 @@ class TestOpenAPIModeAPIs:
             "state": True,
             "data": {"pc2": {"url": "https://cdn.115.com/direct.mkv"}},
         }
-        with patch.object(
-            client._http, "request", return_value=self._mock_resp(resp_data)
-        ):
+        with patch.object(client._http, "request", return_value=self._mock_resp(resp_data)):
             url = client.download_url("pc2")
             assert url == "https://cdn.115.com/direct.mkv"
 
     def test_download_url_no_url_raises(self, client):
         resp_data = {"state": True, "data": {"pc3": {"url": {}}}}
-        with patch.object(
-            client._http, "request", return_value=self._mock_resp(resp_data)
-        ):
+        with patch.object(client._http, "request", return_value=self._mock_resp(resp_data)):
             with pytest.raises(ValueError, match="No download URL"):
                 client.download_url("pc3")
 
     def test_batch_rename_falls_back_to_individual(self, client):
         """OpenAPI batch_rename falls back to individual rename calls."""
         resp_data = {"state": True}
-        with patch.object(
-            client._http, "request", return_value=self._mock_resp(resp_data)
-        ):
+        with patch.object(client._http, "request", return_value=self._mock_resp(resp_data)):
             result = client.batch_rename({"1": "a.mkv", "2": "b.mkv"})
             assert result["state"] is True
 
@@ -667,12 +648,8 @@ class TestOpenAPIModeAPIs:
         api_resp.json.return_value = {"state": True, "data": []}
         api_resp.raise_for_status = MagicMock()
 
-        with patch.object(
-            client._http, "post", return_value=refresh_resp
-        ):
-            with patch.object(
-                client._http, "request", return_value=api_resp
-            ):
+        with patch.object(client._http, "post", return_value=refresh_resp):
+            with patch.object(client._http, "request", return_value=api_resp):
                 client.list_files(dir_id="0")
                 assert client._access_token == "refreshed"
 
@@ -739,8 +716,240 @@ class TestRateLimiterSetCooldown:
         state = json.loads(state_file.read_text())
         assert "cooldown_until" in state
         import time
+
         assert state["cooldown_until"] > time.time()
         assert state["cooldown_until"] <= time.time() + 1801
+
+
+class TestExportTree:
+    """Tests for the export_tree 3-step flow."""
+
+    @pytest.fixture
+    def client(self):
+        c = Cloud115Client.from_cookies("UID=1_A1_0; CID=abc; SEID=def")
+        c._limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
+        c._download_limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
+        return c
+
+    def _mock_resp(self, json_data, status_code=200):
+        resp = MagicMock()
+        resp.status_code = status_code
+        resp.json.return_value = json_data
+        resp.raise_for_status = MagicMock()
+        return resp
+
+    @patch("media115.client.time.sleep", return_value=None)
+    def test_export_tree(self, _sleep, client):
+        """Full flow: POST export_dir -> poll -> download -> delete -> return text."""
+        # Content must be >= 100 bytes when UTF-16-LE encoded
+        tree_text = "root\n" + "".join(f"  file_{i}.mkv\n" for i in range(20))
+        tree_bytes = tree_text.encode("utf-16-le")
+
+        # Step 1: start export -> returns export_id
+        start_resp = {"state": True, "data": {"export_id": "123"}}
+        # Step 2: poll status -> returns pick_code + file_id
+        poll_resp = {
+            "state": True,
+            "data": {"pick_code": "pc_tree", "file_id": "999"},
+        }
+        # Step 4: delete cleanup
+        delete_resp = {"state": True}
+
+        # Download response (httpx.get)
+        dl_resp = MagicMock()
+        dl_resp.status_code = 200
+        dl_resp.content = tree_bytes
+
+        with patch.object(
+            client, "_cookie_request", side_effect=[start_resp, poll_resp, delete_resp]
+        ):
+            with patch("httpx.get", return_value=dl_resp):
+                result = client.export_tree("12345")
+
+        assert result is not None
+        assert "root" in result
+        assert "file_0.mkv" in result
+
+    @patch("media115.client.time.sleep", return_value=None)
+    def test_export_tree_pending(self, _sleep, client):
+        """When start returns no export_id, falls back to export_id=0 for polling."""
+        tree_text = "dir_tree\n" + "".join(f"  item_{i}.mkv\n" for i in range(20))
+        tree_bytes = tree_text.encode("utf-16-le")
+
+        # Step 1: no export_id (previous export pending / errno 990005 scenario)
+        start_resp = {"state": True, "errno": 990005, "data": {}}
+        # Step 2: poll with export_id=0 -> returns pick_code
+        poll_resp = {
+            "state": True,
+            "data": {"pick_code": "pc_pending", "file_id": "888"},
+        }
+        delete_resp = {"state": True}
+
+        dl_resp = MagicMock()
+        dl_resp.status_code = 200
+        dl_resp.content = tree_bytes
+
+        cookie_request_calls = []
+
+        def track_cookie_request(method, url, **kwargs):
+            cookie_request_calls.append((method, url, kwargs))
+            if len(cookie_request_calls) == 1:
+                return start_resp
+            if len(cookie_request_calls) == 2:
+                return poll_resp
+            return delete_resp
+
+        with patch.object(client, "_cookie_request", side_effect=track_cookie_request):
+            with patch("httpx.get", return_value=dl_resp):
+                result = client.export_tree("12345")
+
+        assert result is not None
+        # Verify that poll used export_id=0 (since start returned no export_id)
+        _, poll_url, poll_kwargs = cookie_request_calls[1]
+        assert poll_kwargs.get("params", {}).get("export_id") == 0
+
+    @patch("media115.client.time.sleep", return_value=None)
+    def test_export_tree_list_format(self, _sleep, client):
+        """When poll returns data as a list instead of dict."""
+        tree_text = "list_format_tree\n" + "".join(f"  entry_{i}.mkv\n" for i in range(20))
+        tree_bytes = tree_text.encode("utf-16-le")
+
+        start_resp = {"state": True, "data": {"export_id": "456"}}
+        # data is a list wrapping the dict
+        poll_resp = {
+            "state": True,
+            "data": [{"pick_code": "pc_list", "file_id": "777"}],
+        }
+        delete_resp = {"state": True}
+
+        dl_resp = MagicMock()
+        dl_resp.status_code = 200
+        dl_resp.content = tree_bytes
+
+        with patch.object(
+            client, "_cookie_request", side_effect=[start_resp, poll_resp, delete_resp]
+        ):
+            with patch("httpx.get", return_value=dl_resp):
+                result = client.export_tree("12345")
+
+        assert result is not None
+        assert "list_format_tree" in result
+
+    def test_export_tree_openapi_raises(self):
+        """export_tree raises NotImplementedError for OpenAPI mode."""
+        client = Cloud115Client.from_openapi(app_id="x", app_secret="y", access_token="t")
+        with pytest.raises(NotImplementedError, match="cookie mode"):
+            client.export_tree("123")
+
+
+class TestSaveCookiesToEnv:
+    def test_save_cookies_to_env_existing(self, tmp_path):
+        """Save cookies to .env that already has the key -> replaces it."""
+        client = Cloud115Client.from_cookies("UID=1_A1_0; CID=new; SEID=new")
+        env = tmp_path / ".env"
+        env.write_text("CLOUD_115_COOKIES=old_value\nTMDB_API_KEY=abc\n")
+        client.save_cookies_to_env(env)
+        content = env.read_text()
+        assert "CLOUD_115_COOKIES=UID=1_A1_0; CID=new; SEID=new" in content
+        assert "old_value" not in content
+        assert "TMDB_API_KEY=abc" in content
+
+    def test_save_cookies_to_env_new_file(self, tmp_path):
+        """Save cookies to non-existent .env -> creates it."""
+        client = Cloud115Client.from_cookies("UID=2_A1_0; CID=x; SEID=y")
+        env = tmp_path / ".env"
+        client.save_cookies_to_env(env)
+        content = env.read_text()
+        assert "CLOUD_115_COOKIES=UID=2_A1_0; CID=x; SEID=y" in content
+
+    def test_save_cookies_openapi_raises(self):
+        """save_cookies_to_env raises ValueError for OpenAPI mode."""
+        client = Cloud115Client.from_openapi(app_id="x", app_secret="y", access_token="t")
+        with pytest.raises(ValueError, match="Not in cookie mode"):
+            client.save_cookies_to_env(Path("/tmp/test.env"))
+
+
+class TestRenewCookiesEdgeCases:
+    def test_renew_cookies_no_existing(self):
+        """Client with no cookies (openapi mode) returns False."""
+        client = Cloud115Client.from_openapi(app_id="x", app_secret="y")
+        assert client.renew_cookies() is False
+
+    def test_renew_cookies_empty_cookies(self):
+        """Client with empty cookie string returns False."""
+        client = Cloud115Client.from_cookies("")
+        # from_cookies sets mode="cookie" but cookies is empty
+        assert client.renew_cookies() is False
+
+    def test_renew_cookies_exception_returns_false(self):
+        """If any step in renewal raises, returns False gracefully."""
+        client = Cloud115Client.from_cookies("UID=1_A1_0; CID=abc; SEID=def")
+        with patch.object(client._http, "get", side_effect=Exception("network error")):
+            assert client.renew_cookies() is False
+
+    def test_renew_cookies_short_cookie_returns_false(self):
+        """If renewed cookie is too short (<10 chars), returns False."""
+        client = Cloud115Client.from_cookies("UID=1_A1_0; CID=abc; SEID=def")
+
+        get_responses = [
+            MagicMock(
+                json=lambda: {"data": {"uid": "test_uid"}},
+                raise_for_status=MagicMock(),
+            ),
+            MagicMock(json=lambda: {"state": True}, raise_for_status=MagicMock()),
+            MagicMock(json=lambda: {"state": True}, raise_for_status=MagicMock()),
+        ]
+        # Return a cookie string that's too short
+        post_resp = MagicMock(
+            json=lambda: {"data": {"cookie": "short"}},
+            raise_for_status=MagicMock(),
+        )
+
+        with patch.object(client._http, "get", side_effect=get_responses):
+            with patch.object(client._http, "post", return_value=post_resp):
+                result = client.renew_cookies()
+                assert result is False
+
+
+class TestListFilesAllPagination:
+    """Test list_files_all with multi-page pagination."""
+
+    @pytest.fixture
+    def client(self):
+        c = Cloud115Client.from_cookies("UID=1_A1_0; CID=abc; SEID=def")
+        c._limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
+        c._download_limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
+        return c
+
+    def test_list_files_all_pagination(self, client):
+        """Multiple pages: first page full (1000 items), second page partial."""
+        page1 = [{"n": f"file{i}.mkv", "fid": str(i)} for i in range(1000)]
+        page2 = [{"n": f"file{i}.mkv", "fid": str(i)} for i in range(1000, 1050)]
+
+        with patch.object(client, "list_files", side_effect=[page1, page2]):
+            result = client.list_files_all(dir_id="42")
+            assert len(result) == 1050
+            assert result[0]["n"] == "file0.mkv"
+            assert result[-1]["n"] == "file1049.mkv"
+
+    def test_list_files_all_exact_page_boundary(self, client):
+        """When first page is exactly 1000 items, must request second page."""
+        page1 = [{"n": f"file{i}.mkv", "fid": str(i)} for i in range(1000)]
+        page2 = []  # second page empty => done
+
+        with patch.object(client, "list_files", side_effect=[page1, page2]):
+            result = client.list_files_all(dir_id="42")
+            assert len(result) == 1000
+
+    def test_list_files_all_three_pages(self, client):
+        """Three full pages then partial."""
+        page1 = [{"n": f"f{i}", "fid": str(i)} for i in range(1000)]
+        page2 = [{"n": f"f{i}", "fid": str(i)} for i in range(1000, 2000)]
+        page3 = [{"n": f"f{i}", "fid": str(i)} for i in range(2000, 2500)]
+
+        with patch.object(client, "list_files", side_effect=[page1, page2, page3]):
+            result = client.list_files_all(dir_id="42")
+            assert len(result) == 2500
 
 
 class TestCrypto:

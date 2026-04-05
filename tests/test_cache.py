@@ -97,11 +97,7 @@ class TestParseTreeCache:
 
     def test_parse_tree_cache_basic(self, tmp_path, monkeypatch):
         # 115 tree format: root has no |- prefix, children use "| |-"
-        tree_text = (
-            "root\n"
-            "| |-movie.mkv\n"
-            "| |-movie.nfo\n"
-        )
+        tree_text = "root\n| |-movie.mkv\n| |-movie.nfo\n"
         self._write_tree(tmp_path, monkeypatch, tree_text)
         entries = cache.parse_tree_cache(self.VIDEO_EXTS)
         assert len(entries) == 2
@@ -121,10 +117,7 @@ class TestParseTreeCache:
     def test_parse_tree_cache_nested(self, tmp_path, monkeypatch):
         # Matches SAMPLE_TREE format from test_cli.py
         tree_text = (
-            "\u5f71\u97f3\n"
-            "| |-\u7535\u5f71\n"
-            "| | |-The Matrix (1999)\n"
-            "| | | |-The Matrix.mkv\n"
+            "\u5f71\u97f3\n| |-\u7535\u5f71\n| | |-The Matrix (1999)\n| | | |-The Matrix.mkv\n"
         )
         self._write_tree(tmp_path, monkeypatch, tree_text)
         entries = cache.parse_tree_cache(self.VIDEO_EXTS)
