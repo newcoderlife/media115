@@ -136,6 +136,7 @@ def generate_tvshow_nfo(metadata: dict, output_path: Path):
 
     _add(root, "title", metadata.get("title"))
     _add(root, "originaltitle", metadata.get("originaltitle"))
+    _add(root, "showtitle", metadata.get("showtitle") or metadata.get("title"))
     _add(root, "year", metadata.get("year"))
     _add(root, "plot", metadata.get("plot"))
     _add(root, "rating", metadata.get("rating"))
@@ -143,16 +144,20 @@ def generate_tvshow_nfo(metadata: dict, output_path: Path):
     _add(root, "premiered", metadata.get("premiered"))
     _add(root, "status", metadata.get("status"))
 
+    for studio in _as_list(metadata.get("studios")) or _as_list(metadata.get("studio")):
+        _add(root, "studio", studio)
+
     for genre in metadata.get("genres", []):
         _add(root, "genre", genre)
 
-    for studio in _as_list(metadata.get("studios")) or _as_list(metadata.get("studio")):
-        _add(root, "studio", studio)
+    for tag in metadata.get("tags", []):
+        _add(root, "tag", tag)
 
     for actor_data in metadata.get("actors", []):
         actor_el = etree.SubElement(root, "actor")
         _add(actor_el, "name", actor_data.get("name"))
         _add(actor_el, "role", actor_data.get("role"))
+        _add(actor_el, "thumb", actor_data.get("thumb"))
 
     for uid_type, uid_value in metadata.get("uniqueids", {}).items():
         uid_el = etree.SubElement(root, "uniqueid", type=uid_type)
