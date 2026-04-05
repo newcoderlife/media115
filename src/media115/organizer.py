@@ -85,7 +85,7 @@ def build_organize_plan(
         if media_type == "movie":
             title = scrape_info.get("title", "")
             year = scrape_info.get("year")
-            if title and year:
+            if title and year is not None:
                 new_folder = f"{_sanitize(title)} ({year})"
                 new_name = f"{_sanitize(title)} ({year}){ext}"
                 if new_folder != parent_leaf or new_name != name:
@@ -97,7 +97,10 @@ def build_organize_plan(
             number = scrape_info.get("number", "")
             if number:
                 new_folder = number
-                new_name = f"{number}{ext}"
+                # Preserve Part suffix for multi-part files
+                part_m = re.search(r"[._](Part\d+)", name, re.IGNORECASE)
+                part_suffix = f".{part_m.group(1)}" if part_m else ""
+                new_name = f"{number}{part_suffix}{ext}"
                 if new_folder != parent_leaf or new_name != name:
                     op["new_folder"] = new_folder if new_folder != parent_leaf else None
                     op["new_name"] = new_name if new_name != name else None
@@ -155,6 +158,7 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
     """
     import sys
     from collections import defaultdict
+
     from media115 import cache as _cache
     from media115.utils import stem as _u_stem
 
@@ -180,12 +184,25 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
             results.append({**op, "status": "skipped"})
 
     # Phase 1: Resolve all fids
+    # Pre-populate sub-dir cids from category listing to avoid N get_dir_id calls
     print(f"  Resolving {len(active_ops)} files...", file=sys.stderr, flush=True)
+    cat_items = client.list_files_all(dir_id=category_cid)
+    subdir_cids = {}  # subdir_name → cid
+    for item in cat_items:
+        if "fid" not in item:
+            subdir_cids[item.get("n", "")] = str(item.get("cid", ""))
+
     resolved = []  # (op, fid)
     for op in active_ops:
         parent_path = op["parent"]
         if parent_path not in folder_cache:
-            cid = client.get_dir_id("/" + parent_path)
+            # Try to resolve from pre-fetched subdir list
+            parent_leaf = (
+                parent_path.split("/")[-1] if "/" in parent_path else parent_path
+            )
+            cid = subdir_cids.get(parent_leaf)
+            if not cid:
+                cid = client.get_dir_id("/" + parent_path)
             if not cid:
                 results.append(
                     {
@@ -277,7 +294,18 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
     for op, fid in resolved:
         target_folder = op.get("new_folder")
         if target_folder and target_folder in created_dirs:
-            _upload_scrape_output(client, op, created_dirs[target_folder])
+            # File was moved to a new directory
+            upload_cid = created_dirs[target_folder]
+        else:
+            # File was only renamed in-place — upload to its current directory
+            parent = op["parent"]
+            parent_leaf = parent.split("/")[-1] if "/" in parent else parent
+            upload_cid = subdir_cids.get(parent_leaf)
+
+        if upload_cid:
+            _upload_scrape_output(
+                client, op, upload_cid, op.get("new_name")
+            )
 
         # Update file_map cache
         new_name = op.get("new_name")
@@ -290,16 +318,68 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
 
         results.append({**op, "status": "ok"})
 
+    # Phase 6: Delete old source directories (now empty or metadata-only)
+    source_dirs = set()
+    for op, fid in resolved:
+        if op.get("new_folder"):
+            parent = op["parent"]
+            parent_leaf = parent.split("/")[-1] if "/" in parent else parent
+            # Only clean up if file moved to a DIFFERENT directory
+            if parent_leaf != op["new_folder"]:
+                source_dirs.add(parent_leaf)
+
+    if source_dirs:
+        print(
+            f"  Cleaning up {len(source_dirs)} old directories...",
+            file=sys.stderr,
+            flush=True,
+        )
+        # Refresh category listing to get current cids
+        cat_items = client.list_files_all(dir_id=category_cid)
+        for item in cat_items:
+            if "fid" in item:
+                continue
+            name = item.get("n", "")
+            if name not in source_dirs:
+                continue
+            cid = str(item.get("cid", ""))
+            # Check if dir still has video files
+            contents = client.list_files_all(dir_id=cid)
+            has_video = any(
+                "fid" in f
+                and re.search(r"\.(mkv|mp4|avi|ts|rmvb|flv|wmv)$", f.get("n", ""), re.I)
+                for f in contents
+            )
+            if not has_video:
+                try:
+                    client.delete([cid])
+                    print(f"    Deleted: {name}", file=sys.stderr)
+                except Exception as e:
+                    print(f"    Failed to delete {name}: {e}", file=sys.stderr)
+
     return results
 
 
-def _upload_scrape_output(client, op: dict, target_cid: str):
-    """Upload NFO + poster for an organized file if they exist locally."""
+def _upload_scrape_output(
+    client, op: dict, target_cid: str, new_video_name: str | None = None
+):
+    """Upload NFO + poster for an organized file if they exist locally.
+
+    NFO is renamed to match the new video filename so Jellyfin can pair them.
+    """
     import os
+
+    from media115.utils import split_ext
 
     scrape_dir = Path(os.getcwd()) / ".cache" / "scrape_output"
     if not scrape_dir.exists():
         return
+
+    # Compute the NFO name that matches the new video
+    if new_video_name:
+        nfo_name = split_ext(new_video_name)[0] + ".nfo"
+    else:
+        nfo_name = None
 
     # Find matching output directory (by original parent path)
     parent = op.get("parent", "")
@@ -312,11 +392,12 @@ def _upload_scrape_output(client, op: dict, target_cid: str):
             if not out_dir.is_dir():
                 continue
             if search_name in out_dir.name:
-                # Upload all NFO and image files
                 for f in out_dir.iterdir():
                     if f.suffix in (".nfo", ".jpg", ".png"):
+                        # Rename NFO to match video; keep image names as-is
+                        remote_name = nfo_name if f.suffix == ".nfo" and nfo_name else f.name
                         try:
-                            client.upload_file(f, target_cid, f.name)
+                            client.upload_file(f, target_cid, remote_name)
                         except Exception:
                             pass
                 return
