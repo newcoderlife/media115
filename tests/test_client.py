@@ -442,6 +442,288 @@ class TestCookieModeAPIs:
             assert data["file_name"] == "renamed.mkv"
 
 
+class TestListFilesAllAndRecursive:
+    """Test list_files_all and list_files_recursive with mocked list_files."""
+
+    @pytest.fixture
+    def client(self):
+        c = Cloud115Client.from_cookies("UID=1_A1_0; CID=abc; SEID=def")
+        c._limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
+        c._download_limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
+        return c
+
+    def test_list_files_all_single_page(self, client):
+        items = [{"n": f"file{i}.mkv", "fid": str(i)} for i in range(5)]
+        with patch.object(client, "list_files", return_value=items):
+            result = client.list_files_all(dir_id="10")
+            assert len(result) == 5
+
+    def test_list_files_all_empty(self, client):
+        with patch.object(client, "list_files", return_value=[]):
+            result = client.list_files_all(dir_id="10")
+            assert result == []
+
+    def test_list_files_recursive_flat(self, client):
+        """Flat directory with only files (no subdirs)."""
+        items = [
+            {"n": "a.mkv", "fid": "1"},
+            {"n": "b.mkv", "fid": "2"},
+        ]
+        with patch.object(client, "list_files_all", return_value=items):
+            result = client.list_files_recursive(dir_id="0", max_depth=2)
+            assert len(result) == 2
+            assert all(item["_is_dir"] is False for item in result)
+            assert all(item["_parent_id"] == "0" for item in result)
+
+    def test_list_files_recursive_with_subdir(self, client):
+        """Directory with a subdirectory containing files."""
+        root_items = [
+            {"n": "SubDir", "cid": "55"},  # dir (no "fid")
+            {"n": "root.mkv", "fid": "1"},
+        ]
+        sub_items = [
+            {"n": "child.mkv", "fid": "2"},
+        ]
+        with patch.object(
+            client, "list_files_all", side_effect=[root_items, sub_items]
+        ):
+            result = client.list_files_recursive(dir_id="0", max_depth=2)
+            assert len(result) == 3
+            dir_entry = [r for r in result if r["n"] == "SubDir"][0]
+            assert dir_entry["_is_dir"] is True
+
+    def test_list_files_recursive_max_depth(self, client):
+        """Stops recursing when max_depth is exceeded."""
+        result = client.list_files_recursive(dir_id="0", max_depth=0, _depth=1)
+        assert result == []
+
+
+class TestResolvePath:
+    @pytest.fixture
+    def client(self):
+        c = Cloud115Client.from_cookies("UID=1_A1_0; CID=abc; SEID=def")
+        c._limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
+        c._download_limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
+        return c
+
+    def test_resolve_empty_path(self, client):
+        assert client.resolve_path("") == "0"
+        assert client.resolve_path("/") == "0"
+
+    def test_resolve_single_level(self, client):
+        items = [{"fn": "movies", "cid": "42"}]  # dir, no "fid"
+        with patch.object(client, "list_files_all", return_value=items):
+            result = client.resolve_path("/movies")
+            assert result == "42"
+
+    def test_resolve_not_found(self, client):
+        items = [{"fn": "other", "cid": "99"}]
+        with patch.object(client, "list_files_all", return_value=items):
+            with pytest.raises(FileNotFoundError, match="movies"):
+                client.resolve_path("/movies")
+
+
+class TestOpenAPIModeAPIs:
+    """Test OpenAPI-mode API methods with mocked HTTP."""
+
+    @pytest.fixture
+    def client(self):
+        c = Cloud115Client.from_openapi(
+            app_id="test_app",
+            app_secret="test_secret",
+            access_token="test_token",
+            refresh_token="test_refresh",
+        )
+        c._limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
+        return c
+
+    def _mock_resp(self, json_data, status_code=200):
+        resp = MagicMock()
+        resp.status_code = status_code
+        resp.json.return_value = json_data
+        resp.raise_for_status = MagicMock()
+        return resp
+
+    def test_mkdir(self, client):
+        resp_data = {"state": True, "cid": "888", "cname": "NewDir"}
+        with patch.object(
+            client._http, "request", return_value=self._mock_resp(resp_data)
+        ) as mock_req:
+            result = client.mkdir(parent_id="0", name="NewDir")
+            assert result["cid"] == "888"
+            call_args = mock_req.call_args
+            data = call_args.kwargs.get("data", {})
+            assert data["pid"] == "0"
+            assert data["cname"] == "NewDir"
+
+    def test_move(self, client):
+        resp_data = {"state": True}
+        with patch.object(
+            client._http, "request", return_value=self._mock_resp(resp_data)
+        ) as mock_req:
+            result = client.move(["10", "20"], target_dir_id="100")
+            assert result["state"] is True
+            call_args = mock_req.call_args
+            data = call_args.kwargs.get("data", {})
+            assert data["fid"] == "10,20"
+            assert data["pid"] == "100"
+
+    def test_delete(self, client):
+        resp_data = {"state": True}
+        with patch.object(
+            client._http, "request", return_value=self._mock_resp(resp_data)
+        ) as mock_req:
+            result = client.delete(["30", "40"])
+            assert result["state"] is True
+            call_args = mock_req.call_args
+            data = call_args.kwargs.get("data", {})
+            assert data["fid"] == "30,40"
+
+    def test_rename(self, client):
+        resp_data = {"state": True}
+        with patch.object(
+            client._http, "request", return_value=self._mock_resp(resp_data)
+        ) as mock_req:
+            result = client.rename("50", "new_name.mkv")
+            assert result["state"] is True
+            call_args = mock_req.call_args
+            data = call_args.kwargs.get("data", {})
+            assert data["fid"] == "50"
+            assert data["file_name"] == "new_name.mkv"
+
+    def test_search(self, client):
+        resp_data = {"state": True, "data": [{"n": "hit.mp4", "fid": "60"}]}
+        with patch.object(
+            client._http, "request", return_value=self._mock_resp(resp_data)
+        ):
+            results = client.search("hit")
+            assert len(results) == 1
+            assert results[0]["n"] == "hit.mp4"
+
+    def test_download_url_openapi(self, client):
+        resp_data = {
+            "state": True,
+            "data": {"pc1": {"url": {"url": "https://cdn.115.com/dl.mkv"}}},
+        }
+        with patch.object(
+            client._http, "request", return_value=self._mock_resp(resp_data)
+        ):
+            url = client.download_url("pc1")
+            assert url == "https://cdn.115.com/dl.mkv"
+
+    def test_download_url_string_format(self, client):
+        """download_url when url value is a plain string, not a dict."""
+        resp_data = {
+            "state": True,
+            "data": {"pc2": {"url": "https://cdn.115.com/direct.mkv"}},
+        }
+        with patch.object(
+            client._http, "request", return_value=self._mock_resp(resp_data)
+        ):
+            url = client.download_url("pc2")
+            assert url == "https://cdn.115.com/direct.mkv"
+
+    def test_download_url_no_url_raises(self, client):
+        resp_data = {"state": True, "data": {"pc3": {"url": {}}}}
+        with patch.object(
+            client._http, "request", return_value=self._mock_resp(resp_data)
+        ):
+            with pytest.raises(ValueError, match="No download URL"):
+                client.download_url("pc3")
+
+    def test_batch_rename_falls_back_to_individual(self, client):
+        """OpenAPI batch_rename falls back to individual rename calls."""
+        resp_data = {"state": True}
+        with patch.object(
+            client._http, "request", return_value=self._mock_resp(resp_data)
+        ):
+            result = client.batch_rename({"1": "a.mkv", "2": "b.mkv"})
+            assert result["state"] is True
+
+    def test_get_dir_id_delegates_to_resolve_path(self, client):
+        """OpenAPI get_dir_id delegates to resolve_path."""
+        with patch.object(client, "resolve_path", return_value="42") as mock_rp:
+            result = client.get_dir_id("/movies")
+            assert result == "42"
+            mock_rp.assert_called_once_with("/movies")
+
+    def test_auto_refresh_expired_token(self, client):
+        """When token is expired, _openapi_request auto-refreshes."""
+        import time as _time
+
+        client._token_expires_at = _time.time() - 10  # expired
+
+        refresh_resp = MagicMock()
+        refresh_resp.json.return_value = {
+            "data": {
+                "access_token": "refreshed",
+                "refresh_token": "new_r",
+                "expires_in": 7200,
+            }
+        }
+        refresh_resp.raise_for_status = MagicMock()
+
+        api_resp = MagicMock()
+        api_resp.json.return_value = {"state": True, "data": []}
+        api_resp.raise_for_status = MagicMock()
+
+        with patch.object(
+            client._http, "post", return_value=refresh_resp
+        ):
+            with patch.object(
+                client._http, "request", return_value=api_resp
+            ):
+                client.list_files(dir_id="0")
+                assert client._access_token == "refreshed"
+
+
+class TestCheckLogin:
+    def test_check_login_cookie_success(self):
+        client = Cloud115Client.from_cookies("UID=1_A1_0; CID=abc; SEID=def")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"state": True}
+        with patch.object(client._http, "get", return_value=mock_resp):
+            assert client.check_login() is True
+
+    def test_check_login_cookie_failure(self):
+        client = Cloud115Client.from_cookies("UID=1_A1_0; CID=abc; SEID=def")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"state": False}
+        with patch.object(client._http, "get", return_value=mock_resp):
+            assert client.check_login() is False
+
+    def test_check_login_exception(self):
+        client = Cloud115Client.from_cookies("UID=1_A1_0; CID=abc; SEID=def")
+        with patch.object(client._http, "get", side_effect=Exception("network")):
+            assert client.check_login() is False
+
+
+class TestContextManager:
+    def test_context_manager(self):
+        with Cloud115Client.from_cookies("UID=1_A1_0; CID=abc") as client:
+            assert client._mode == "cookie"
+        # after __exit__, close has been called (no crash)
+
+
+class TestReadStateCorrupt:
+    def test_corrupt_json(self, tmp_path):
+        """_read_state returns {} for corrupt JSON."""
+        from media115.client import _read_state
+
+        state_file = tmp_path / "bad.json"
+        state_file.write_text("{invalid json")
+        result = _read_state(state_file)
+        assert result == {}
+
+    def test_missing_file(self, tmp_path):
+        from media115.client import _read_state
+
+        result = _read_state(tmp_path / "nonexistent.json")
+        assert result == {}
+
+
 class TestRateLimiterSetCooldown:
     def test_set_cooldown_writes_state(self, tmp_path):
         """Verify set_cooldown writes cooldown_until to state file."""
