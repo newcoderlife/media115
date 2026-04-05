@@ -8,14 +8,14 @@
 # 1. 安装
 git clone <repo-url> && cd 115-media
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e .
+pip install -e ".[dev]"
 
 # 2. 配置密钥
 cp .env.example .env && chmod 600 .env
 # 编辑 .env，填入 TMDB_READ_ACCESS_TOKEN（必需）和 BANGUMI_ACCESS_TOKEN（可选）
 
 # 3. 验证安装
-.venv/bin/pytest tests/ -v   # 111 tests should pass
+.venv/bin/pytest tests/ -v   # 离线测试应全部通过（TMDB/Bangumi live 测试需要网络+token）
 
 # 4. 试用：搜索电影元数据
 115-media scrape "The Matrix"
@@ -102,7 +102,7 @@ Agent: 修正 → 写入回归测试 case → 跑 pytest 验证
 115-media ls /                                     # 列出根目录
 115-media ls /影音/电影                             # 列出子目录
 115-media scan /影音                               # 扫描并输出刮削计划表
-115-media upload movie.mkv --remote-dir 12345      # 秒传上传
+115-media upload movie.mkv --remote-dir 12345      # 上传文件（cookie 模式）
 115-media serve --port 9000                        # 启动 strm-proxy
 ```
 
@@ -133,15 +133,18 @@ save_poster(images["posters"][0]["file_path"], Path("."))
 AGENTS.md                  # Agent 指令（任何 AI 工具读这个就能跑）
 skills/                    # Agent Skills 定义（可选）
 src/media115/              # Python 源码（~1600 行，零额外依赖的 115 加密）
-tests/                     # 111 个测试 + 回归用例
+tests/                     # 单元测试 + 回归用例
 ```
 
 ## 测试
 
 ```bash
-.venv/bin/pytest tests/ -v                          # 全部（111 tests）
+.venv/bin/pytest tests/ -v                          # 全部测试
+.venv/bin/pytest tests/ -v -k "not live"            # 离线测试（不需要网络）
 .venv/bin/pytest tests/test_scrape_regression.py -v  # 刮削回归
 ```
+
+> Live 测试（TMDB/Bangumi API）需要有效的 token 和网络。离线测试覆盖分析器、NFO 生成、缓存等核心逻辑。
 
 ## 数据源
 
@@ -149,4 +152,6 @@ tests/                     # 111 个测试 + 回归用例
 |------|------|------|------|
 | 电影/剧集 | TMDB | API Key (免费) | 中文支持完整 |
 | 动漫 | Bangumi | Bearer Token (可选) | 原生中文 |
-| AV | JavBus | 无需 | HTML 刮削 |
+| AV | jav321 + javfree | 无需 | HTML 刮削，双源 fallback |
+
+> **注意**：CLI 必须在项目根目录运行（依赖 `.env` 和 `.cache/`）。
