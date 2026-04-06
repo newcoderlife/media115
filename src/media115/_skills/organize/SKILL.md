@@ -40,7 +40,7 @@ This does 6 phases automatically:
 ### 3. Refresh tree cache
 organize invalidates the tree cache. **Always refresh after execute:**
 ```bash
-media115 export-tree /影音
+media115 sync /影音
 ```
 
 ### 3.5 补传缺失的 NFO（当 organize 输出 "0 to rename" 时）
