@@ -436,21 +436,29 @@ def _upload_scrape_output(client, op: dict, target_cid: str, new_video_name: str
                 from media115.log import get_logger
                 _log = get_logger()
 
-                # Fetch existing filenames in the target directory to avoid duplicates.
-                # 115 does not overwrite same-name files; it creates "(1)", "(2)" copies.
-                existing_names: set[str] = set()
+                # 115 不支持覆盖上传——同名文件会创建副本。
+                # 采用 rclone 策略：先删旧文件再上传新文件。
+                existing_files: dict[str, str] = {}  # name → fid
                 try:
                     items = client.list_files_all(dir_id=target_cid)
-                    existing_names = {item.get("fn", item.get("n", "")) for item in items}
+                    for item in items:
+                        if "fid" in item:
+                            name = item.get("fn", item.get("n", ""))
+                            existing_files[name] = str(item["fid"])
                 except Exception:
-                    pass  # If listing fails, skip dedup and upload anyway
+                    pass
 
                 for f in out_dir.iterdir():
                     if f.suffix in (".nfo", ".jpg", ".png"):
                         remote_name = nfo_name if f.suffix == ".nfo" and nfo_name else f.name
-                        if remote_name in existing_names:
-                            _log.debug("  skip %s (already exists in cid=%s)", remote_name, target_cid)
-                            continue
+                        # 同名文件已存在 → 删旧再上传（覆盖语义）
+                        old_fid = existing_files.get(remote_name)
+                        if old_fid:
+                            try:
+                                client.delete([old_fid])
+                                _log.debug("  deleted old %s (fid=%s)", remote_name, old_fid)
+                            except Exception as e:
+                                _log.warning("  delete old %s failed: %s", remote_name, e)
                         try:
                             client.upload_file(f, target_cid, remote_name)
                             _log.debug("  uploaded %s → cid=%s", remote_name, target_cid)
