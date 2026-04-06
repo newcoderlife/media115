@@ -6,11 +6,13 @@ Cookie mode: works immediately, no approval needed. Based on py115/p115client.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import sys
 import threading
 import time
 from pathlib import Path
+from urllib.parse import urlencode
 
 import httpx
 
@@ -572,6 +574,127 @@ class Cloud115Client:
         if oss_resp.status_code == 200:
             return oss_resp.json().get("data")
         return None
+
+    def upload_info(self) -> dict:
+        """获取上传所需的 user_id 和 user_key。"""
+        self._limiter.acquire()
+        resp = self._http.get(
+            f"{PRO_API}/app/uploadinfo",
+            headers={"Cookie": self._cookies},
+        )
+        resp.raise_for_status()
+        result = resp.json()
+        return {
+            "user_id": str(result.get("user_id", "")),
+            "user_key": result.get("userkey", ""),
+        }
+
+    def rapid_upload(
+        self,
+        dir_id: str,
+        filename: str,
+        file_size: int,
+        file_sha1: str,
+        file_stream=None,
+    ) -> dict:
+        """Cookie 模式秒传。
+
+        file_stream: 可选的文件流（seekable），用于 sign_check 验证。
+        返回 {"status": 2, "pickcode": "..."} 表示成功，
+               {"status": 1} 表示 115 上没有此文件。
+        """
+        from media115._ec115 import EC115Cipher, TOKEN_SALT
+
+        info = self.upload_info()
+        user_id = info["user_id"]
+        user_key = info["user_key"]
+        user_hash = hashlib.md5(user_id.encode()).hexdigest()
+        app_ver = "2.0.3.6"
+
+        ec = EC115Cipher()
+        target = f"U_1_{dir_id}"
+
+        sign_key = ""
+        sign_val = ""
+
+        for _ in range(3):  # 最多重试 3 次（sign_check）
+            timestamp = str(int(time.time()))
+
+            # sig
+            h1 = hashlib.sha1(
+                f"{user_id}{file_sha1}{target}0".encode()
+            ).hexdigest()
+            sig = hashlib.sha1(
+                f"{user_key}{h1}000000".encode()
+            ).hexdigest().upper()
+
+            # token
+            token_data = (
+                TOKEN_SALT
+                + file_sha1
+                + str(file_size)
+                + sign_key
+                + sign_val
+                + user_id
+                + timestamp
+                + user_hash
+                + app_ver
+            )
+            token = hashlib.md5(token_data.encode()).hexdigest()
+
+            form: dict[str, str] = {
+                "appid": "0",
+                "appversion": app_ver,
+                "userid": user_id,
+                "filename": filename,
+                "filesize": str(file_size),
+                "fileid": file_sha1,
+                "target": target,
+                "sig": sig,
+                "t": timestamp,
+                "token": token,
+            }
+            if sign_key:
+                form["sign_key"] = sign_key
+                form["sign_val"] = sign_val
+
+            # EC115 加密请求
+            form_data = urlencode(form).encode()
+            encrypted = ec.encode(form_data)
+
+            self._limiter.acquire()
+            resp = self._http.post(
+                "https://uplb.115.com/4.0/initupload.php",
+                params={"k_ec": ec.encode_token()},
+                content=encrypted,
+                headers={
+                    "Cookie": self._cookies,
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+            )
+            resp.raise_for_status()
+
+            # EC115 解密响应
+            result = json.loads(ec.decode(resp.content))
+
+            status = result.get("status")
+            if status == 2:
+                return {"status": 2, "pickcode": result.get("pickcode", "")}
+            elif status == 7 and result.get("statuscode") == 701 and file_stream:
+                # sign_check: 计算指定范围 SHA1
+                sign_key = result["sign_key"]
+                sign_range = result["sign_check"]
+                start_s, end_s = sign_range.split("-")
+                start, end = int(start_s), int(end_s)
+                file_stream.seek(start)
+                sign_val = hashlib.sha1(
+                    file_stream.read(end - start + 1)
+                ).hexdigest().upper()
+                continue
+            else:
+                return {"status": result.get("status", 0)}
+
+        return {"status": 0}  # 超过重试次数
 
     def batch_rename(self, renames: dict[str, str]) -> dict:
         """Rename multiple files in one API call.
