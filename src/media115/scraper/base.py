@@ -29,10 +29,14 @@ class ThrottledClient:
         self._limiter.acquire()
 
     def get(self, url: str, **kwargs) -> httpx.Response:
+        from media115.log import get_logger
+        get_logger().debug("HTTP GET %s", url[:80])
         self._throttle()
         return self._http.get(url, **kwargs)
 
     def post(self, url: str, **kwargs) -> httpx.Response:
+        from media115.log import get_logger
+        get_logger().debug("HTTP POST %s", url[:80])
         self._throttle()
         return self._http.post(url, **kwargs)
 

@@ -36,10 +36,14 @@ class TMDBClient:
         self.close()
 
     def _get(self, path: str, params: dict | None = None) -> dict:
+        from media115.log import get_logger
+        logger = get_logger()
+        logger.debug("TMDB GET %s", path)
         self._limiter.acquire()
         resp = self._http.get(path, params=params)
         if resp.status_code == 429:
             retry_after = int(resp.headers.get("Retry-After", "5"))
+            logger.warning("TMDB 429, retry after %ds", retry_after)
             time.sleep(retry_after)
             self._limiter.acquire()
             resp = self._http.get(path, params=params)

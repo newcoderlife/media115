@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 
 import click
 
+from media115.log import get_logger
+
 if TYPE_CHECKING:
     from media115.fs import PathResolver
 
@@ -163,6 +165,7 @@ def register(cli: click.Group):
                 resolver.update_dir_entry(current_path, current_cid, part, new_cid)
                 current_path = current_path.rstrip("/") + "/" + part
                 current_cid = new_cid
+            get_logger().info("mkdir %s", path)
             click.echo(f"已创建: {path}")
         else:
             # 普通模式：解析父目录，创建最后一段
@@ -179,6 +182,7 @@ def register(cli: click.Group):
             result = resolver.client.mkdir(parent_cid, name)
             new_cid = str(result["cid"])
             resolver.update_dir_entry(parent, parent_cid, name, new_cid)
+            get_logger().info("mkdir %s", path)
             click.echo(f"已创建: {path}")
 
     @cli.command("rm")
@@ -241,6 +245,7 @@ def register(cli: click.Group):
             else:
                 resolver.remove_from_listing(parent_cid, name_or_path)
 
+        get_logger().info("rm %d items", len(ids))
         click.echo(f"已删除 {len(ids)} 个项目")
 
     @cli.command("rename")
@@ -298,6 +303,7 @@ def register(cli: click.Group):
             resolver.client.rename(fid, new_name)
             resolver.remove_from_listing(parent_cid, old_name)
             resolver.mark_stale(parent_cid)
+            get_logger().info("rename %s → %s", old_name, new_name)
             click.echo(f"已重命名: {old_name} → {new_name}")
 
     @cli.command("rapid")
@@ -336,7 +342,9 @@ def register(cli: click.Group):
             )
 
         if result.get("status") == 2:
-            click.echo(f"秒传成功: {local.name} (pickcode={result['pickcode']})")
+            pickcode = result['pickcode']
+            get_logger().info("rapid %s → %s (pickcode=%s)", local.name, remote_dir, pickcode)
+            click.echo(f"秒传成功: {local.name} (pickcode={pickcode})")
             resolver.mark_stale(cid)
         else:
             raise click.ClickException(f"秒传失败: {local.name} (115 上没有此文件)")
@@ -380,6 +388,7 @@ def register(cli: click.Group):
                 )
 
             if rapid_result.get("status") == 2:
+                get_logger().info("put %s → %s", local.name, remote_dir)
                 click.echo(f"已上传（秒传）: {local.name}")
                 resolver.mark_stale(cid)
                 return
@@ -387,6 +396,7 @@ def register(cli: click.Group):
         # 普通上传
         resolver.client.upload_file(local, cid)
         resolver.mark_stale(cid)
+        get_logger().info("put %s → %s", local.name, remote_dir)
         click.echo(f"已上传: {local.name}")
 
     @cli.command("get")
@@ -412,6 +422,7 @@ def register(cli: click.Group):
         url = resolver.client.download_url(pick_code)
         dest = Path(local_dir) / filename
         _download_to_file(url, dest)
+        get_logger().info("get %s → %s", remote_path, local_dir)
         click.echo(f"已下载: {dest}")
 
     @cli.command("sync")
@@ -454,6 +465,7 @@ def register(cli: click.Group):
         video_count = sum(
             1 for ln in lines if any(ln.rstrip().lower().endswith(ext) for ext in VIDEO_EXTS)
         )
+        get_logger().info("sync %s: %d lines, %d videos", path, len(lines), video_count)
         click.echo(f"已保存 tree_cache.txt：{len(lines)} 行，{video_count} 个视频文件")
 
     @cli.group("cache")
@@ -560,6 +572,7 @@ def register(cli: click.Group):
             for parent_cid, name in cache_entries:
                 resolver.remove_from_listing(parent_cid, name)
             resolver.mark_stale(target_cid)
+            get_logger().info("mv %s → %s", srcs, dest)
             click.echo(f"已移动 {len(fids)} 个文件到 {dest}")
 
         else:
@@ -588,6 +601,7 @@ def register(cli: click.Group):
                 resolver.client.move([fid], target_cid)
                 resolver.remove_from_listing(src_parent_cid, src_name)
                 resolver.mark_stale(target_cid)
+                get_logger().info("mv %s → %s", src, dest)
                 click.echo(f"已移动: {src} → {dest}")
                 return
             except FileNotFoundError:
@@ -607,6 +621,7 @@ def register(cli: click.Group):
                 resolver.client.rename(fid, dest_name)
                 resolver.remove_from_listing(src_parent_cid, src_name)
                 resolver.mark_stale(src_parent_cid)
+                get_logger().info("mv %s → %s", src, dest)
                 click.echo(f"已重命名: {src_name} → {dest_name}")
             else:
                 # 跨目录 + 改名 → 先移动，再重命名
@@ -614,6 +629,7 @@ def register(cli: click.Group):
                 resolver.client.rename(fid, dest_name)
                 resolver.remove_from_listing(src_parent_cid, src_name)
                 resolver.mark_stale(dest_parent_cid)
+                get_logger().info("mv %s → %s", src, dest)
                 click.echo(f"已移动并重命名: {src} → {dest}")
 
 
