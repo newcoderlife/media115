@@ -2,12 +2,23 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import click
 
 if TYPE_CHECKING:
     from media115.fs import PathResolver
+
+
+def _download_to_file(url: str, local_path: Path):
+    """用 httpx 流式下载文件。"""
+    import httpx
+    with httpx.stream("GET", url, follow_redirects=True, timeout=60) as resp:
+        resp.raise_for_status()
+        with open(local_path, "wb") as f:
+            for chunk in resp.iter_bytes(chunk_size=1024 * 1024):
+                f.write(chunk)
 
 
 def _get_resolver() -> "PathResolver":
@@ -270,6 +281,53 @@ def register(cli: click.Group):
             resolver.remove_from_listing(parent_cid, old_name)
             resolver.mark_stale(parent_cid)
             click.echo(f"已重命名: {old_name} → {new_name}")
+
+    @cli.command("put")
+    @click.argument("local_path", type=click.Path(exists=True))
+    @click.argument("remote_dir")
+    @click.option("--no-rapid", "no_rapid", is_flag=True, hidden=True,
+                  help="跳过秒传（预留，当前无效）")
+    def put(local_path, remote_dir, no_rapid):
+        """上传本地文件到 115 网盘目录。"""
+        try:
+            resolver = _get_resolver()
+        except click.ClickException as e:
+            raise e
+
+        try:
+            cid = resolver.resolve_dir(remote_dir)
+        except FileNotFoundError:
+            raise click.ClickException(f"远程目录不存在: {remote_dir!r}")
+
+        local = Path(local_path)
+        result = resolver.client.upload_file(local, cid)
+        resolver.mark_stale(cid)
+        click.echo(f"已上传: {local.name}")
+
+    @cli.command("get")
+    @click.argument("remote_path")
+    @click.argument("local_dir", default=".", required=False)
+    def get(remote_path, local_dir):
+        """从 115 网盘下载文件到本地目录。"""
+        try:
+            resolver = _get_resolver()
+        except click.ClickException as e:
+            raise e
+
+        try:
+            fid, parent_cid, meta = resolver.resolve_file(remote_path)
+        except FileNotFoundError:
+            raise click.ClickException(f"远程文件不存在: {remote_path!r}")
+
+        pick_code = meta.get("pick_code")
+        if not pick_code:
+            raise click.ClickException(f"文件缺少 pick_code: {remote_path!r}")
+
+        filename = meta.get("name") or remote_path.rsplit("/", 1)[-1]
+        url = resolver.client.download_url(pick_code)
+        dest = Path(local_dir) / filename
+        _download_to_file(url, dest)
+        click.echo(f"已下载: {dest}")
 
     @cli.command("mv")
     @click.argument("args", nargs=-1, required=True)
