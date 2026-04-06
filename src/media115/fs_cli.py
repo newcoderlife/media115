@@ -129,6 +129,13 @@ def register(cli: click.Group):
             path = "/" + path
 
         if parents:
+            # 先检查目标是否已存在
+            try:
+                resolver.resolve_dir(path)
+                click.echo(f"目录已存在: {path}")
+                return
+            except FileNotFoundError:
+                pass
             # 找到第一个存在的祖先目录，然后逐级创建
             parts = [p for p in path.split("/") if p]
             # 从父目录往上找第一个存在的（跳过目标本身，从 len(parts)-1 往下）
@@ -426,8 +433,9 @@ def register(cli: click.Group):
         tree_path = media_cache.tree_cache_path()
         tree_path.write_text(text, encoding="utf-8")
 
-        # 确保 path 本身写入 path_index
-        resolver._write_path_index(path, cid)
+        # 确保 path 本身写入 path_index（规范化路径以避免缓存 miss）
+        from media115.fs import _normalize
+        resolver._write_path_index(_normalize(path), cid)
 
         # 统计
         lines = text.strip().split("\n")

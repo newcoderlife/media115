@@ -200,7 +200,7 @@ class TestMkdir:
         """mkdir -p 逐级创建不存在的目录。"""
         resolver = MagicMock()
         # /a 不存在，/ 存在
-        resolver.resolve_dir.side_effect = [FileNotFoundError(""), "0"]
+        resolver.resolve_dir.side_effect = [FileNotFoundError(""), FileNotFoundError(""), "0"]
         resolver.client.get_dir_id.return_value = None
         resolver.client.mkdir.side_effect = [
             {"cid": "10", "cname": "a"},
@@ -209,6 +209,16 @@ class TestMkdir:
         with patch("media115.fs_cli._get_resolver", return_value=resolver):
             result = runner.invoke(main, ["mkdir", "-p", "/a/b"])
         assert resolver.client.mkdir.call_count == 2
+
+    def test_mkdir_p_existing_dir(self, runner):
+        """mkdir -p 目标已存在时应该是 no-op。"""
+        resolver = _mock_resolver()
+        # resolve_dir 成功意味着目录已存在
+        resolver.resolve_dir.return_value = "existing_cid"
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["mkdir", "-p", "/影音/电影"])
+        assert result.exit_code == 0
+        resolver.client.mkdir.assert_not_called()
 
 
 class TestRm:
@@ -402,6 +412,19 @@ class TestSync:
             result = runner.invoke(main, ["sync", "/影音"])
         assert result.exit_code == 0
         resolver._write_path_index.assert_called_once_with("/影音", "100")
+
+    def test_sync_normalizes_path(self, runner):
+        """sync 写入缓存时路径应该被规范化。"""
+        resolver = _mock_resolver()
+        resolver.client.export_tree.return_value = "影音\n|-电影\n"
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            # 用户输入没有前导 /
+            result = runner.invoke(main, ["sync", "影音/"])
+        assert result.exit_code == 0
+        # 验证写入缓存时路径被规范化了
+        resolver._write_path_index.assert_called()
+        call_args = resolver._write_path_index.call_args[0]
+        assert call_args[0] == "/影音"  # 规范化后
 
     def test_sync_no_result(self, runner):
         resolver = _mock_resolver()
