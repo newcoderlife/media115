@@ -71,6 +71,19 @@ class TestCacheInvalidation:
         listing = resolver._read_dir_listing("100")
         assert listing["stale"] is True
 
+    def test_invalidate_recursive(self, resolver):
+        """invalidate 应该递归清理所有子路径。"""
+        resolver._write_path_index("/a", "100")
+        resolver._write_path_index("/a/b", "200")
+        resolver._write_path_index("/a/b/c", "300")
+        resolver._write_path_index("/other", "400")
+        resolver.invalidate("/a")
+        index = resolver._read_path_index()
+        assert "/a" not in index
+        assert "/a/b" not in index
+        assert "/a/b/c" not in index
+        assert "/other" in index  # 不应该被删
+
 
 class TestListing:
     def test_listing_from_cache(self, resolver):
