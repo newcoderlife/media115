@@ -49,7 +49,10 @@ def build_organize_plan(category: str, tree_entries: list[dict], cache_module) -
     from media115.utils import stem as _u_stem
 
     ops = []
-    videos = [e for e in tree_entries if e["is_video"] and category in e["path"]]
+    videos = [
+        e for e in tree_entries
+        if e["is_video"] and f"/{category}/" in f"/{e['path']}/"
+    ]
 
     for item in videos:
         name = item["n"]
@@ -334,8 +337,9 @@ def execute_organize_plan(
             failed_fids.update(rename_map.keys())
 
     # Phase 5: Upload NFO/poster + update file_map (skip failed files)
-    print("  Uploading NFO/poster...", file=sys.stderr, flush=True)
-    for op, fid in resolved:
+    upload_total = len(resolved)
+    print(f"  Uploading NFO/poster ({upload_total} files)...", file=sys.stderr, flush=True)
+    for idx, (op, fid) in enumerate(resolved, 1):
         if fid in failed_fids:
             results.append({**op, "status": "error", "error": "move or rename failed"})
             continue
@@ -347,6 +351,12 @@ def execute_organize_plan(
             parent = op["parent"]
             parent_leaf = parent.split("/")[-1] if "/" in parent else parent
             upload_cid = subdir_cids.get(parent_leaf)
+
+        display_name = (op.get("new_name") or op["file"])[:50]
+        print(
+            f"\r  [{idx}/{upload_total}] {display_name}",
+            end="", file=sys.stderr, flush=True,
+        )
 
         if upload_cid:
             _upload_scrape_output(client, op, upload_cid, op.get("new_name"))
@@ -361,6 +371,7 @@ def execute_organize_plan(
                 _cache.put("file_map", new_stem, old_data)
 
         results.append({**op, "status": "ok"})
+    print("", file=sys.stderr)  # 换行
 
     # Phase 6: Delete old source directories (now empty or metadata-only)
     source_dirs = set()

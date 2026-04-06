@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -194,7 +195,10 @@ def register(cli: click.Group):
         # (parent_cid, name) pairs for cache update
         cache_entries = []
 
-        for path in paths:
+        total = len(paths)
+        for i, path in enumerate(paths, 1):
+            if total > 1:
+                print(f"\r  [{i}/{total}] {path[:60]}", end="", file=sys.stderr, flush=True)
             # 先尝试解析为文件
             try:
                 fid, parent_cid, meta = resolver.resolve_file(path)
@@ -224,6 +228,8 @@ def register(cli: click.Group):
         if not ids:
             return
 
+        if total > 1:
+            print("", file=sys.stderr)
         resolver.client.delete(ids)
 
         # 更新缓存
@@ -258,7 +264,10 @@ def register(cli: click.Group):
 
             renames = {}
             cache_updates = []
-            for item_path, item_new_name in pairs:
+            total = len(pairs)
+            for i, (item_path, item_new_name) in enumerate(pairs, 1):
+                if total > 1:
+                    print(f"\r  [{i}/{total}] {item_path[:60]}", end="", file=sys.stderr, flush=True)
                 try:
                     fid, parent_cid, meta = resolver.resolve_file(item_path)
                 except FileNotFoundError:
@@ -266,6 +275,8 @@ def register(cli: click.Group):
                 old_name = meta.get("name", item_path.rsplit("/", 1)[-1])
                 renames[fid] = item_new_name
                 cache_updates.append((parent_cid, old_name, fid, item_new_name))
+            if total > 1:
+                print("", file=sys.stderr)
 
             resolver.client.batch_rename(renames)
 
@@ -530,10 +541,18 @@ def register(cli: click.Group):
             for src in srcs:
                 try:
                     fid, parent_cid, meta = resolver.resolve_file(src)
+                    name = meta.get("name", src.rsplit("/", 1)[-1])
                 except FileNotFoundError:
-                    raise click.ClickException(f"文件不存在: {src!r}")
+                    # 可能是目录
+                    try:
+                        cid = resolver.resolve_dir(src)
+                        fid = cid
+                        src_parent = src.rstrip("/").rpartition("/")[0] or "/"
+                        parent_cid = resolver.resolve_dir(src_parent)
+                        name = src.rstrip("/").rsplit("/", 1)[-1]
+                    except FileNotFoundError:
+                        raise click.ClickException(f"文件或目录不存在: {src!r}")
                 fids.append(fid)
-                name = meta.get("name", src.rsplit("/", 1)[-1])
                 cache_entries.append((parent_cid, name))
 
             resolver.client.move(fids, target_cid)
@@ -547,12 +566,20 @@ def register(cli: click.Group):
             # 两个参数：src dest
             src = srcs[0]
 
+            is_dir = False
             try:
                 fid, src_parent_cid, meta = resolver.resolve_file(src)
+                src_name = meta.get("name", src.rsplit("/", 1)[-1])
             except FileNotFoundError:
-                raise click.ClickException(f"文件不存在: {src!r}")
-
-            src_name = meta.get("name", src.rsplit("/", 1)[-1])
+                # 可能是目录
+                try:
+                    fid = resolver.resolve_dir(src)
+                    is_dir = True
+                    src_parent = src.rstrip("/").rpartition("/")[0] or "/"
+                    src_parent_cid = resolver.resolve_dir(src_parent)
+                    src_name = src.rstrip("/").rsplit("/", 1)[-1]
+                except FileNotFoundError:
+                    raise click.ClickException(f"文件或目录不存在: {src!r}")
 
             # 1. 先试 dest 是否已存在的目录
             try:

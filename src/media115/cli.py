@@ -294,7 +294,7 @@ def export_tree(path):
 def scan_tree(category, show_all):
     """Scan media files from cached directory tree (no API calls).
 
-    Run 'export-tree' first. Then: scan-tree [AV|电影|剧目|里番|写真]
+    Run 'media115 sync' first. Then: scan-tree [AV|电影|剧目|里番|写真]
     Default: only show files needing action. Use --all to show everything.
     """
     from media115.scraper.analyzer import (
@@ -305,7 +305,7 @@ def scan_tree(category, show_all):
 
     tree_path = media_cache.tree_cache_path()
     if not tree_path.exists():
-        click.echo("No tree cache. Run 'media115 export-tree' first.", err=True)
+        click.echo("No tree cache. Run 'media115 sync /影音' first.", err=True)
         return
 
     entries = media_cache.parse_tree_cache(VIDEO_EXTS)
@@ -450,7 +450,7 @@ def batch_scrape(category, output, max_count, force):
     entries = media_cache.parse_tree_cache(VIDEO_EXTS)
     videos = [e for e in entries if e["is_video"]]
 
-    videos = [v for v in videos if category in v["path"]]
+    videos = [v for v in videos if f"/{category}/" in f"/{v['path']}/"]
 
     if not force:
         nfo_names = {e["parent"] + "/" + _split_ext(e["n"])[0] for e in entries if e["is_nfo"]}
@@ -543,7 +543,7 @@ def organize(category, execute, cleanup):
 
     tree_path = media_cache.tree_cache_path()
     if not tree_path.exists():
-        click.echo("No tree cache. Run 'media115 export-tree' first.", err=True)
+        click.echo("No tree cache. Run 'media115 sync /影音' first.", err=True)
         return
 
     entries = media_cache.parse_tree_cache(VIDEO_EXTS)
@@ -630,7 +630,7 @@ def organize(category, execute, cleanup):
 
     if ok > 0:
         click.echo(
-            "\nTree cache is now stale. Run 'export-tree /影音' to refresh.",
+            "\nTree cache is now stale. Run 'media115 sync /影音' to refresh.",
             err=True,
         )
 
@@ -797,7 +797,7 @@ def strm(path, output, host, port):
 
     tree_path = media_cache.tree_cache_path()
     if not tree_path.exists():
-        click.echo("No tree cache. Run 'media115 export-tree' first.", err=True)
+        click.echo("No tree cache. Run 'media115 sync /影音' first.", err=True)
         return
 
     # Normalize the filter path (strip leading/trailing slashes)
@@ -813,7 +813,7 @@ def strm(path, output, host, port):
 
     if not matched:
         click.echo(f"No video files found under '{path}' in tree cache.")
-        click.echo("Run 'media115 export-tree' to refresh the cache.")
+        click.echo("Run 'media115 sync /影音' to refresh the cache.")
         return
 
     out_dir = Path(output)
