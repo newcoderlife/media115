@@ -10,6 +10,8 @@ dependencies = [
     "lxml",
     "click",
     "pyyaml",
+    "pycryptodome",
+    "lz4",
 ]
 
 [project.scripts]

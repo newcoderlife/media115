@@ -282,13 +282,13 @@ def register(cli: click.Group):
             resolver.mark_stale(parent_cid)
             click.echo(f"已重命名: {old_name} → {new_name}")
 
-    @cli.command("put")
+    @cli.command("rapid")
     @click.argument("local_path", type=click.Path(exists=True))
     @click.argument("remote_dir")
-    @click.option("--no-rapid", "no_rapid", is_flag=True, hidden=True,
-                  help="跳过秒传（预留，当前无效）")
-    def put(local_path, remote_dir, no_rapid):
-        """上传本地文件到 115 网盘目录。"""
+    def rapid(local_path, remote_dir):
+        """秒传：只传哈希，115 端去重。失败不 fallback。"""
+        import hashlib as _hl
+
         try:
             resolver = _get_resolver()
         except click.ClickException as e:
@@ -300,7 +300,74 @@ def register(cli: click.Group):
             raise click.ClickException(f"远程目录不存在: {remote_dir!r}")
 
         local = Path(local_path)
-        result = resolver.client.upload_file(local, cid)
+
+        # 计算文件完整 SHA1
+        h = _hl.sha1()
+        with open(local, "rb") as f:
+            while chunk := f.read(1024 * 1024):
+                h.update(chunk)
+        file_sha1 = h.hexdigest().upper()
+
+        with open(local, "rb") as f:
+            result = resolver.client.rapid_upload(
+                cid,
+                local.name,
+                local.stat().st_size,
+                file_sha1,
+                file_stream=f,
+            )
+
+        if result.get("status") == 2:
+            click.echo(f"秒传成功: {local.name} (pickcode={result['pickcode']})")
+            resolver.mark_stale(cid)
+        else:
+            raise click.ClickException(f"秒传失败: {local.name} (115 上没有此文件)")
+
+    @cli.command("put")
+    @click.argument("local_path", type=click.Path(exists=True))
+    @click.argument("remote_dir")
+    @click.option("--no-rapid", "no_rapid", is_flag=True,
+                  help="跳过秒传，直接走普通上传")
+    def put(local_path, remote_dir, no_rapid):
+        """上传本地文件到 115 网盘目录。默认先尝试秒传，失败则走普通上传。"""
+        import hashlib as _hl
+
+        try:
+            resolver = _get_resolver()
+        except click.ClickException as e:
+            raise e
+
+        try:
+            cid = resolver.resolve_dir(remote_dir)
+        except FileNotFoundError:
+            raise click.ClickException(f"远程目录不存在: {remote_dir!r}")
+
+        local = Path(local_path)
+
+        if not no_rapid:
+            # 先尝试秒传
+            h = _hl.sha1()
+            with open(local, "rb") as f:
+                while chunk := f.read(1024 * 1024):
+                    h.update(chunk)
+            file_sha1 = h.hexdigest().upper()
+
+            with open(local, "rb") as f:
+                rapid_result = resolver.client.rapid_upload(
+                    cid,
+                    local.name,
+                    local.stat().st_size,
+                    file_sha1,
+                    file_stream=f,
+                )
+
+            if rapid_result.get("status") == 2:
+                click.echo(f"已上传（秒传）: {local.name}")
+                resolver.mark_stale(cid)
+                return
+
+        # 普通上传
+        resolver.client.upload_file(local, cid)
         resolver.mark_stale(cid)
         click.echo(f"已上传: {local.name}")
 
