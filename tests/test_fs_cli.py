@@ -498,7 +498,11 @@ class TestCacheClear:
         assert result.exit_code == 0
         assert not fs_dir.exists()
 
-    def test_cache_clear_cancelled(self, runner):
+    def test_cache_clear_cancelled(self, runner, tmp_path, monkeypatch):
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+        from media115.cache import _cache_dir
+        fs_dir = _cache_dir("fs")
+        (fs_dir / "path_index.json").write_text("{}")
         result = runner.invoke(main, ["cache", "clear"], input="n\n")
         assert result.exit_code == 0
         assert "取消" in result.output

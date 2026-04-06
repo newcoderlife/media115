@@ -510,21 +510,44 @@ def register(cli: click.Group):
         click.echo(f"tree_cache.txt:    {tree_info}")
 
     @cache_group.command("clear")
-    def cache_clear():
-        """清除 fs/ 缓存目录（path_index + dir listings）。"""
+    @click.option("--tree", is_flag=True, help="也清除 tree_cache.txt")
+    @click.option("--scrape", is_flag=True, help="也清除刮削缓存和 scrape_output")
+    @click.option("--all", "clear_all", is_flag=True, help="清除全部缓存")
+    def cache_clear(tree, scrape, clear_all):
+        """清除缓存。默认只清路径缓存（fs/）。"""
         import shutil
-        import media115.cache as media_cache
+        from media115.cache import _cache_root
 
-        fs_dir = media_cache._cache_dir("fs")
-        if not click.confirm(f"确认删除缓存目录 {fs_dir}？", default=False):
+        root = _cache_root()
+
+        targets = []
+        targets.append(("路径缓存 (fs/)", root / "fs"))
+        if tree or clear_all:
+            targets.append(("目录树缓存 (tree_cache.txt)", root / "tree_cache.txt"))
+        if scrape or clear_all:
+            targets.append(("刮削缓存 (scrape/)", root / "scrape"))
+            targets.append(("刮削输出 (scrape_output/)", root / "scrape_output"))
+        if clear_all:
+            targets.append(("日志 (logs/)", root / "logs"))
+
+        existing = [(name, path) for name, path in targets if path.exists()]
+        if not existing:
+            click.echo("没有可清除的缓存")
+            return
+
+        click.echo("将清除：")
+        for name, path in existing:
+            click.echo(f"  - {name}")
+        if not click.confirm("确认？", default=False):
             click.echo("已取消")
             return
 
-        if fs_dir.exists():
-            shutil.rmtree(fs_dir)
-            click.echo(f"已删除: {fs_dir}")
-        else:
-            click.echo("缓存目录不存在，无需清理")
+        for name, path in existing:
+            if path.is_file():
+                path.unlink()
+            elif path.is_dir():
+                shutil.rmtree(path)
+            click.echo(f"  已清除: {name}")
 
     @cli.command("mv")
     @click.argument("args", nargs=-1, required=True)
@@ -676,6 +699,115 @@ def register(cli: click.Group):
         click.echo(f"Env: {env_path}")
 
         click.echo("\nNext: media115 auth")
+
+    @cli.command()
+    def doctor():
+        """检查环境状态和配置。"""
+        import importlib.metadata
+        import sys
+        from media115.cache import _cache_root, _config_root
+
+        # Python + 版本
+        click.echo("环境检查:")
+        click.echo(f"  Python:        {sys.version.split()[0]}")
+        try:
+            ver = importlib.metadata.version("media115")
+        except importlib.metadata.PackageNotFoundError:
+            ver = "dev"
+        click.echo(f"  media115:      {ver}")
+        click.echo()
+
+        # 配置文件
+        config_root = _config_root()
+        env_path = config_root / ".env"
+        config_path = config_root / "config.yaml"
+        click.echo("配置:")
+        click.echo(f"  .env:          {env_path} {'✓' if env_path.exists() else '✗ 不存在'}")
+        click.echo(f"  config.yaml:   {config_path} {'✓' if config_path.exists() else '✗ (使用默认)'}")
+        click.echo()
+
+        # 认证
+        import os
+        from media115.cli import _load_env
+        _load_env()
+        cookies = os.environ.get("CLOUD_115_COOKIES", "")
+        tmdb = os.environ.get("TMDB_READ_ACCESS_TOKEN", "")
+        bangumi = os.environ.get("BANGUMI_ACCESS_TOKEN", "")
+        click.echo("认证:")
+        click.echo(f"  115 Cookies:   {'✓ 已配置' if cookies else '✗ 未配置'}")
+        click.echo(f"  TMDB Token:    {'✓ 已配置' if tmdb else '✗ 未配置'}")
+        click.echo(f"  Bangumi Token: {'✓ 已配置' if bangumi else '✗ 未配置 (可选)'}")
+        click.echo()
+
+        # 缓存
+        import json as _json
+        import time as _time
+        cache_root = _cache_root()
+        click.echo("缓存:")
+        click.echo(f"  缓存根目录:    {cache_root}")
+
+        # path_index
+        pi = cache_root / "fs" / "path_index.json"
+        if pi.exists():
+            try:
+                count = len(_json.loads(pi.read_text()))
+            except Exception:
+                count = "?"
+            click.echo(f"  path_index:    {count} 条目")
+        else:
+            click.echo("  path_index:    ✗ 不存在")
+
+        # dir listings
+        dir_cache = cache_root / "fs" / "dir"
+        if dir_cache.exists():
+            count = len(list(dir_cache.glob("*.json")))
+            click.echo(f"  dir listings:  {count} 文件")
+        else:
+            click.echo("  dir listings:  ✗ 不存在")
+
+        # tree_cache
+        tc = cache_root / "tree_cache.txt"
+        if tc.exists():
+            lines = tc.read_text().count("\n")
+            mtime = _time.strftime("%Y-%m-%d %H:%M", _time.localtime(tc.stat().st_mtime))
+            click.echo(f"  tree_cache:    ✓ {lines} 行 ({mtime})")
+        else:
+            click.echo("  tree_cache:    ✗ 不存在 (run: media115 sync)")
+
+        # scrape_output
+        scrape_output = cache_root / "scrape_output"
+        if scrape_output.exists():
+            cats = [d.name for d in scrape_output.iterdir() if d.is_dir()]
+            click.echo(f"  scrape_output: {len(cats)} 分类")
+        else:
+            click.echo("  scrape_output: ✗ 不存在")
+
+        # rate_limit
+        rl = cache_root / "rate_limit.json"
+        if rl.exists():
+            try:
+                state = _json.loads(rl.read_text())
+                cooldown = state.get("cooldown_until", 0)
+                if _time.time() < cooldown:
+                    remaining = int(cooldown - _time.time())
+                    click.echo(f"  rate_limit:    ⚠ cooldown 中 (剩余 {remaining}s)")
+                else:
+                    click.echo("  rate_limit:    ✓ 正常")
+            except Exception:
+                click.echo("  rate_limit:    ? 读取失败")
+        else:
+            click.echo("  rate_limit:    ✓ 无状态文件")
+
+        click.echo()
+
+        # Skills
+        skills_dir = Path.home() / ".claude" / "skills" / "media115"
+        click.echo("Skills:")
+        if skills_dir.exists():
+            skill_count = len([d for d in skills_dir.iterdir() if d.is_dir() and (d / "SKILL.md").exists()])
+            click.echo(f"  {skills_dir}: ✓ {skill_count} skills")
+        else:
+            click.echo(f"  {skills_dir}: ✗ 未安装 (run: media115 init)")
 
 
 def _ls_dir(
