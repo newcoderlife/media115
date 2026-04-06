@@ -1,4 +1,4 @@
-"""115 client tests. Covers both cookie and OpenAPI modes (all mocked)."""
+"""115 client tests. Cookie mode (all mocked)."""
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
