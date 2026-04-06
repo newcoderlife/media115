@@ -280,10 +280,10 @@ def export_tree(path):
 
     # Write resolved path → dir_id into PathResolver cache
     if not path.isdigit():
-        from media115.fs import PathResolver
+        from media115.fs import PathResolver, _normalize
 
         resolver = PathResolver(client)
-        resolver._write_path_index(path, dir_id)
+        resolver._write_path_index(_normalize(path), dir_id)
 
     click.echo("\nNext: run 'scan-tree <category>' to preview what needs scraping.")
 
