@@ -45,25 +45,32 @@ media115 export-tree /影音
 
 ### 3.5 补传缺失的 NFO（当 organize 输出 "0 to rename" 时）
 
-如果 organize 输出 "0 to rename" 或 "Nothing to rename"，说明文件已命名正确但可能缺少 NFO/海报。检查 scrape_output 并手动上传：
+如果 organize 输出 "0 to rename" 或 "Nothing to rename"，文件已命名正确但可能缺少 NFO/海报。
 
 ```bash
-# 查看 scrape_output 中是否有待上传的 NFO
+# 查看 scrape_output 中是否有待上传的内容
 ls ~/.cache/media115/scrape_output/$CATEGORY/
 ```
 
-对于每个有 NFO 但 115 上对应目录缺少 NFO 的条目：
+对于每个有 scrape_output 但 115 上对应目录缺少 NFO 的条目：
 
 ```bash
-# 检查远程目录是否有 NFO
+# 检查远程目录
 media115 ls /影音/$CATEGORY/目录名/
 
-# 如果没有 NFO，上传
-media115 put ~/.cache/media115/scrape_output/$CATEGORY/影音_$CATEGORY_目录名/目录名.nfo /影音/$CATEGORY/目录名/
-media115 put ~/.cache/media115/scrape_output/$CATEGORY/影音_$CATEGORY_目录名/poster.jpg /影音/$CATEGORY/目录名/
+# 上传 scrape_output 中的所有 NFO 和图片
+# 电影：目录名.nfo + poster.jpg
+# 剧目：tvshow.nfo + 各集 NFO（如 迷宫饭 S01E01.nfo）+ poster.jpg
+# AV：番号.nfo + poster.jpg
 ```
 
-注意 NFO 文件名必须和视频文件名一致（如 `满江红 (2023).nfo` 对应 `满江红 (2023).mkv`）。
+逐个上传 scrape_output 目录下的所有 `.nfo`、`.jpg`、`.png` 文件：
+```bash
+media115 put ~/.cache/media115/scrape_output/$CATEGORY/源目录名/文件.nfo /影音/$CATEGORY/目录名/
+media115 put ~/.cache/media115/scrape_output/$CATEGORY/源目录名/poster.jpg /影音/$CATEGORY/目录名/
+```
+
+**注意：** NFO 文件名必须和视频文件名一致。对于剧目，每集有独立 NFO（如 `迷宫饭 S01E01.nfo`），另有一个 `tvshow.nfo` 描述整部剧。上传时保持原文件名不变即可。
 
 ### 4. Verify
 ```bash
