@@ -10,20 +10,20 @@ Analyze the cached directory tree. Reports what needs scraping AND detects anoma
 $ARGUMENTS — category: `电影`, `AV`, `剧目`. If not provided, run all three.
 
 ## Preconditions
-- Tree cache must exist. If not, tell user to run `/sync-tree` first.
+- Tree cache must exist. If not, tell user to run `/sync` first.
 
 ## Steps
 
 ### 1. Scan
 ```bash
-.venv/bin/python -m media115.cli scan-tree $CATEGORY
+media115 scan-tree $CATEGORY
 ```
 
 If no category given, run for each:
 ```bash
-.venv/bin/python -m media115.cli scan-tree 电影
-.venv/bin/python -m media115.cli scan-tree AV
-.venv/bin/python -m media115.cli scan-tree 剧目
+media115 scan-tree 电影
+media115 scan-tree AV
+media115 scan-tree 剧目
 ```
 
 ### 2. Report
@@ -45,6 +45,6 @@ If anomalies are found, report them to the user and suggest fixes.
 
 **Non-standard naming** is the most common issue — it means Codex or a previous agent scraped the file but didn't rename the directory. Fix with:
 ```bash
-.venv/bin/python -m media115.cli batch-scrape $CATEGORY --force
-.venv/bin/python -m media115.cli organize $CATEGORY
+media115 batch-scrape $CATEGORY --force
+media115 organize $CATEGORY
 ```

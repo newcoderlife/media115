@@ -7,7 +7,7 @@ version: 2.1
 ## Step 1: Check login status
 
 ```bash
-.venv/bin/python -m media115.cli auth --check
+media115 auth --check
 ```
 
 If logged in → tell user "115 已登录", done.
@@ -15,7 +15,7 @@ If logged in → tell user "115 已登录", done.
 ## Step 2: If NOT logged in — generate QR (non-blocking)
 
 ```bash
-.venv/bin/python -m media115.cli auth --get-qr
+media115 auth --get-qr
 ```
 
 This prints `QR_URL=https://...` and exits immediately. Show the URL to the user:
@@ -28,8 +28,8 @@ This prints `QR_URL=https://...` and exits immediately. Show the URL to the user
 ## Step 3: After user confirms scan — complete login
 
 ```bash
-.venv/bin/python -m media115.cli auth --wait-qr
-.venv/bin/python -m media115.cli auth --check
+media115 auth --wait-qr
+media115 auth --check
 ```
 
 ## Other options

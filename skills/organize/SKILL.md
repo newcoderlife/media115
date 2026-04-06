@@ -11,13 +11,13 @@ $ARGUMENTS — category: `电影`, `AV`, or `剧目`.
 
 ## Preconditions
 - `/scrape` must have been run (creates file_map cache with correct names).
-- Tree cache must be fresh. If you just ran organize for another category, run `/sync-tree` first.
+- Tree cache must be fresh. If you just ran organize for another category, run `/sync` first.
 
 ## Steps
 
 ### 1. Dry-run
 ```bash
-.venv/bin/python -m media115.cli organize $CATEGORY
+media115 organize $CATEGORY
 ```
 Show the plan table to user. Check for:
 - Target conflicts (two files → same name) — resolve before executing
@@ -26,7 +26,7 @@ Show the plan table to user. Check for:
 
 ### 2. Execute (after user confirms)
 ```bash
-.venv/bin/python -m media115.cli organize $CATEGORY --execute
+media115 organize $CATEGORY --execute
 ```
 
 This does 6 phases automatically:
@@ -40,11 +40,11 @@ This does 6 phases automatically:
 ### 3. Refresh tree cache
 organize invalidates the tree cache. **Always refresh after execute:**
 ```bash
-.venv/bin/python -m media115.cli export-tree /影音
+media115 export-tree /影音
 ```
 
 ### 4. Verify
 ```bash
-.venv/bin/python -m media115.cli scan-tree $CATEGORY
+media115 scan-tree $CATEGORY
 ```
 Check: 0 anomalies, all files have NFO.
