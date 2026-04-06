@@ -20,8 +20,8 @@ Extract: filename, correct type (movie/tv/anime/av), correct title, source, sour
 
 ### 2. Search for correct match
 ```bash
-.venv/bin/python -m media115.cli scrape "correct title"
-.venv/bin/python -m media115.cli scrape "correct title" --source bangumi
+media115 scrape "correct title"
+media115 scrape "correct title" --source bangumi
 ```
 
 ### 3. Save regression case

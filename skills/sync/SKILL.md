@@ -1,7 +1,7 @@
 ---
-name: sync-tree
+name: sync
 description: Export 115 directory tree to local cache (2-3 API calls)
-version: 1.0
+version: 2.0
 ---
 
 Refresh the local directory tree cache from 115 cloud. This is a prerequisite for `/scan` and `/scrape`.
@@ -16,7 +16,7 @@ $ARGUMENTS — 115 path to export, e.g. `/影音`. Ask the user if not provided.
 
 ### 1. Export tree
 ```bash
-.venv/bin/python -m media115.cli export-tree $PATH
+media115 sync $PATH
 ```
 This makes 2-3 API calls (create export task → download result → delete temp file on 115).
 
