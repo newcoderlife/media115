@@ -814,8 +814,12 @@ def register(cli: click.Group):
     @click.argument("path")
     @click.option("--execute", is_flag=True, help="执行删除（默认 dry-run）")
     def dedup(path, execute):
-        """清理目录下的重复文件（名字包含 (1), (2) 等后缀的副本）。"""
-        import re
+        """清理目录下的重复文件。
+
+        扫描子目录，按文件名分组，同名文件保留一个，删除其余副本。
+        115 上传同名文件时不覆盖而是创建完全同名的副本，此命令清理这些副本。
+        """
+        from collections import defaultdict
 
         try:
             resolver = _get_resolver()
@@ -827,7 +831,6 @@ def register(cli: click.Group):
         except FileNotFoundError:
             raise click.ClickException(f"目录不存在: {path!r}")
 
-        # List top-level items to find subdirectories (one level deep only)
         items = resolver.client.list_files_all(dir_id=cid)
         subdirs = [
             (item.get("n", ""), str(item.get("cid", "")))
@@ -840,39 +843,46 @@ def register(cli: click.Group):
 
         for dir_name, dir_cid in subdirs:
             files = resolver.client.list_files_all(dir_id=dir_cid)
-            dupes = []
+            # 按文件名分组
+            by_name: dict[str, list[str]] = defaultdict(list)
             for f in files:
                 if "fid" not in f:
                     continue
                 name = f.get("fn", f.get("n", ""))
-                # Match "xxx(1).nfo", "xxx(2).jpg", etc. — 115's automatic dupe suffix
-                if re.search(r'\(\d+\)\.\w+$', name):
-                    dupes.append((name, str(f["fid"])))
+                by_name[name].append(str(f["fid"]))
+
+            # 同名文件 > 1 个的，保留第一个，其余是重复
+            dupes = []
+            for name, fids in by_name.items():
+                if len(fids) > 1:
+                    dupes.extend((name, fid) for fid in fids[1:])  # 保留 fids[0]
 
             if dupes:
                 click.echo(f"{dir_name}/: {len(dupes)} 个重复文件")
-                preview = dupes[:3]
-                for name, _fid in preview:
-                    click.echo(f"  {name}")
-                if len(dupes) > 3:
-                    click.echo(f"  ... 等共 {len(dupes)} 个")
+                shown = set()
+                for name, _fid in dupes[:5]:
+                    if name not in shown:
+                        count = sum(1 for n, _ in dupes if n == name)
+                        click.echo(f"  {name} (x{count} 副本)")
+                        shown.add(name)
+                if len(dupes) > 5:
+                    click.echo(f"  ...")
                 total_dupes += len(dupes)
                 all_dupe_fids.extend(fid for _, fid in dupes)
 
-        click.echo(f"\n共 {total_dupes} 个重复文件")
+        click.echo(f"\n共 {total_dupes} 个重复文件待清理")
 
         if not all_dupe_fids:
             return
 
         if execute:
-            # Delete in batches of 50 to avoid oversized API requests
             batch_size = 50
             deleted = 0
             for i in range(0, len(all_dupe_fids), batch_size):
                 batch = all_dupe_fids[i:i + batch_size]
                 resolver.client.delete(batch)
                 deleted += len(batch)
-                click.echo(f"  已删除 {len(batch)} 个 ({deleted}/{len(all_dupe_fids)})")
+                click.echo(f"  已删除 {deleted}/{len(all_dupe_fids)}")
             click.echo(f"清理完成: 删除 {len(all_dupe_fids)} 个重复文件")
         else:
             click.echo("(dry-run) 使用 --execute 执行删除")
