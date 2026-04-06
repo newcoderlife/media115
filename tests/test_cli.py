@@ -517,70 +517,54 @@ class TestUpload:
 
 
 class TestLs:
+    """Tests for the new PathResolver-based ls command."""
+
+    def _mock_resolver(self, items=None):
+        from unittest.mock import MagicMock
+        r = MagicMock()
+        r.resolve_dir.return_value = "0"
+        r.listing.return_value = items or []
+        return r
+
     def test_ls_lists_files(self, runner):
-        mock_client = MagicMock()
-        mock_client.list_files_all.return_value = [
-            {"n": "movie.mkv", "fid": "f1", "s": 1048576},
-            {"n": "subdir", "cid": "c1"},
-        ]
-
-        with runner.isolated_filesystem():
-            _write_env()
-            with patch("media115.cli._get_115_client", return_value=mock_client):
-                result = runner.invoke(main, ["ls", "12345"])
-
+        resolver = self._mock_resolver([
+            {"name": "movie.mkv", "fid": "f1", "size": 1048576, "pick_code": "pc"},
+            {"name": "subdir", "cid": "c1"},
+        ])
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["ls", "/影音"])
         assert result.exit_code == 0
         assert "movie.mkv" in result.output
         assert "subdir" in result.output
-        assert "[F]" in result.output
-        assert "[D]" in result.output
-        assert "Total: 2 items" in result.output
 
     def test_ls_default_root(self, runner):
-        mock_client = MagicMock()
-        mock_client.list_files_all.return_value = []
-
-        with runner.isolated_filesystem():
-            _write_env()
-            with patch("media115.cli._get_115_client", return_value=mock_client):
-                result = runner.invoke(main, ["ls"])
-
+        resolver = self._mock_resolver([])
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["ls"])
         assert result.exit_code == 0
-        mock_client.list_files_all.assert_called_once_with(dir_id="0")
+        resolver.resolve_dir.assert_called_with("/")
 
     def test_ls_no_client(self, runner):
-        with runner.isolated_filesystem():
-            _write_env()
-            with patch("media115.cli._get_115_client", return_value=None):
-                result = runner.invoke(main, ["ls", "0"])
-        assert result.exit_code == 0
+        with patch("media115.fs_cli._get_resolver", side_effect=Exception("ClickException: 未登录")):
+            result = runner.invoke(main, ["ls"])
+        assert result.exit_code != 0
 
     def test_ls_error_handling(self, runner):
-        mock_client = MagicMock()
-        mock_client.list_files_all.side_effect = Exception("API error")
-
-        with runner.isolated_filesystem():
-            _write_env()
-            with patch("media115.cli._get_115_client", return_value=mock_client):
-                result = runner.invoke(main, ["ls", "12345"])
-
-        assert "Error" in result.output
+        resolver = self._mock_resolver()
+        resolver.resolve_dir.side_effect = FileNotFoundError("path not found")
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["ls", "/no/such/path"])
+        assert result.exit_code != 0
 
     def test_ls_path_resolution(self, runner):
-        """Non-numeric paths should be resolved via client.resolve_path."""
-        mock_client = MagicMock()
-        mock_client.resolve_path.return_value = "77777"
-        mock_client.list_files_all.return_value = [
-            {"n": "file.txt", "fid": "f1", "s": 42},
-        ]
-
-        with runner.isolated_filesystem():
-            _write_env()
-            with patch("media115.cli._get_115_client", return_value=mock_client):
-                result = runner.invoke(main, ["ls", "/影音/电影"])
-
+        """Path should be passed to resolve_dir."""
+        resolver = self._mock_resolver([
+            {"name": "file.txt", "fid": "f1", "size": 42, "pick_code": "pc"},
+        ])
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["ls", "/影音/电影"])
         assert result.exit_code == 0
-        mock_client.resolve_path.assert_called_once_with("/影音/电影")
+        resolver.resolve_dir.assert_called_with("/影音/电影")
 
 
 class TestStrm:
@@ -1051,27 +1035,24 @@ class TestScrapeCommandMocked:
 
 
 class TestLsTree:
-    """Cover ls --tree path (line 240 + _print_tree)."""
+    """Cover ls -R recursive path."""
 
-    def test_ls_tree(self, runner):
-        mock_client = MagicMock()
-
-        # First call (root listing) returns dirs + files
-        mock_client.list_files_all.side_effect = [
-            [
-                {"n": "电影", "cid": "100"},
-                {"n": "readme.txt", "fid": "f1", "s": 100},
-            ],
-            # Second call (电影 dir)
-            [
-                {"n": "The Matrix.mkv", "fid": "f2", "s": 5000000},
-            ],
+    def test_ls_recursive(self, runner):
+        root_items = [
+            {"name": "电影", "cid": "100"},
+            {"name": "readme.txt", "fid": "f1", "size": 100, "pick_code": "pc"},
         ]
+        child_items = [
+            {"name": "The Matrix.mkv", "fid": "f2", "size": 5000000, "pick_code": "pc2"},
+        ]
+        resolver = MagicMock()
+        resolver.resolve_dir.return_value = "0"
+        resolver.listing.side_effect = lambda cid: (
+            child_items if cid == "100" else root_items
+        )
 
-        with runner.isolated_filesystem():
-            _write_env()
-            with patch("media115.cli._get_115_client", return_value=mock_client):
-                result = runner.invoke(main, ["ls", "12345", "--tree", "--depth", "1"])
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["ls", "-R", "--depth", "1", "/"])
 
         assert result.exit_code == 0
         assert "电影" in result.output
