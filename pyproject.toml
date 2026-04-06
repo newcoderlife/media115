@@ -5,11 +5,11 @@ requires-python = ">=3.9"
 license = "MIT"
 dependencies = [
     "httpx[socks]",
-    "fastapi",
-    "uvicorn",
     "lxml",
     "click",
     "pyyaml",
+    "pycryptodome",
+    "lz4",
 ]
 
 [project.scripts]
@@ -23,7 +23,11 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [project.optional-dependencies]
+proxy = ["fastapi", "uvicorn"]
 dev = ["pytest", "pytest-xdist", "pytest-cov", "ruff"]
+
+[tool.setuptools.package-data]
+media115 = ["_skills/**/*.md"]
 
 [tool.ruff]
 target-version = "py39"

@@ -6,20 +6,25 @@ import time
 
 import httpx
 
+from media115.cache import _cache_dir
+from media115.rate_limit import RateLimiter
+
 BASE_URL = "https://api.themoviedb.org/3"
 IMAGE_BASE = "https://image.tmdb.org/t/p"
-_MIN_INTERVAL = 0.05  # ~20 QPS max (TMDB allows ~40, we stay conservative)
 
 
 class TMDBClient:
     def __init__(self, read_access_token: str, language: str = "zh-CN"):
         self._language = language
+        self._limiter = RateLimiter(
+            qps=0.8, qpm=40,
+            state_path=_cache_dir() / "rate_limit_tmdb.json",
+        )
         self._http = httpx.Client(
             base_url=BASE_URL,
             headers={"Authorization": f"Bearer {read_access_token}"},
-            timeout=10,
+            timeout=15,
         )
-        self._last_request: float = 0
 
     def close(self):
         self._http.close()
@@ -31,16 +36,17 @@ class TMDBClient:
         self.close()
 
     def _get(self, path: str, params: dict | None = None) -> dict:
-        elapsed = time.monotonic() - self._last_request
-        if elapsed < _MIN_INTERVAL:
-            time.sleep(_MIN_INTERVAL - elapsed)
+        from media115.log import get_logger
+        logger = get_logger()
+        logger.debug("TMDB GET %s", path)
+        self._limiter.acquire()
         resp = self._http.get(path, params=params)
-        self._last_request = time.monotonic()
         if resp.status_code == 429:
-            retry_after = int(resp.headers.get("Retry-After", "2"))
+            retry_after = int(resp.headers.get("Retry-After", "5"))
+            logger.warning("TMDB 429, retry after %ds", retry_after)
             time.sleep(retry_after)
+            self._limiter.acquire()
             resp = self._http.get(path, params=params)
-            self._last_request = time.monotonic()
         resp.raise_for_status()
         return resp.json()
 

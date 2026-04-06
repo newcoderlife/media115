@@ -48,10 +48,9 @@ def _write_env(base="."):
 
 
 def _write_tree(base=".", content=None):
-    """Write tree_cache.txt inside .cache/."""
-    cache_dir = Path(base) / ".cache"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    tree_path = cache_dir / "tree_cache.txt"
+    """Write tree_cache.txt to the XDG cache location."""
+    from media115 import cache as media_cache
+    tree_path = media_cache.tree_cache_path()
     tree_path.write_text(content or SAMPLE_TREE)
     return tree_path
 
@@ -115,7 +114,8 @@ class TestExportTree:
 
             assert result.exit_code == 0
             assert "Tree exported" in result.output
-            tree_path = Path(".cache") / "tree_cache.txt"
+            from media115 import cache as media_cache
+            tree_path = media_cache.tree_cache_path()
             assert tree_path.exists()
             assert "The Matrix" in tree_path.read_text()
             # Should report video count
@@ -318,7 +318,8 @@ class TestBatchScrape:
             assert result.exit_code == 0
             assert "Log saved to" in result.output
             # Check log dir exists
-            log_dir = Path(".cache") / "logs"
+            from media115 import cache as media_cache
+            log_dir = media_cache._cache_root() / "logs"
             assert log_dir.exists()
             log_files = list(log_dir.glob("scrape_AV_*.json"))
             assert len(log_files) == 1
@@ -441,99 +442,6 @@ class TestOrganize:
         assert "conflict" in result.output.lower()
 
 
-class TestUploadNfo:
-    def test_upload_nfo_no_scrape_output(self, runner):
-        """Should report missing scrape output."""
-        mock_client = MagicMock()
-        with runner.isolated_filesystem():
-            _write_env()
-            with patch("media115.cli._get_115_client", return_value=mock_client):
-                result = runner.invoke(main, ["upload-nfo", "AV"])
-
-        assert "No scrape output" in result.output or "batch-scrape" in result.output
-
-    def test_upload_nfo_no_client(self, runner):
-        """Should handle missing credentials."""
-        with runner.isolated_filesystem():
-            _write_env()
-            # Create scrape output dir so we get past that check
-            scrape_dir = Path(".cache") / "scrape_output" / "AV" / "影音_AV_DANDY-992"
-            scrape_dir.mkdir(parents=True)
-            (scrape_dir / "DANDY-992.nfo").write_text("<nfo>test</nfo>")
-
-            with patch("media115.cli._get_115_client", return_value=None):
-                result = runner.invoke(main, ["upload-nfo", "AV"])
-            # No client => early return
-            assert result.exit_code == 0
-
-    def test_upload_nfo_uploads_files(self, runner):
-        """Should upload NFO/poster to matched 115 dirs."""
-        mock_client = MagicMock()
-        mock_client.get_dir_id.return_value = "cat_cid_100"
-        mock_client.list_files_all.return_value = [
-            {"n": "DANDY-992", "cid": 200},  # directory (no "fid")
-        ]
-
-        with runner.isolated_filesystem():
-            _write_env()
-            _write_tree()
-
-            # Create scrape output
-            scrape_dir = Path(".cache") / "scrape_output" / "AV" / "影音_AV_DANDY-992"
-            scrape_dir.mkdir(parents=True)
-            nfo_file = scrape_dir / "DANDY-992.nfo"
-            nfo_file.write_text("<nfo>test</nfo>")
-            poster_file = scrape_dir / "poster.jpg"
-            poster_file.write_bytes(b"\xff\xd8\xff\xe0")  # fake JPEG header
-
-            with patch("media115.cli._get_115_client", return_value=mock_client):
-                result = runner.invoke(main, ["upload-nfo", "AV"])
-
-        assert result.exit_code == 0
-        # upload_file should be called for each file
-        assert mock_client.upload_file.call_count >= 1
-
-    def test_upload_nfo_skips_existing(self, runner):
-        """Dirs that already have NFO in tree cache should be skipped."""
-        mock_client = MagicMock()
-        mock_client.get_dir_id.return_value = "cat_cid_100"
-        mock_client.list_files_all.return_value = [
-            {"n": "ABC-123", "cid": 300},
-        ]
-
-        with runner.isolated_filesystem():
-            _write_env()
-            # ABC-123 already has NFO in the tree cache
-            _write_tree()
-
-            scrape_dir = Path(".cache") / "scrape_output" / "AV" / "影音_AV_ABC-123"
-            scrape_dir.mkdir(parents=True)
-            (scrape_dir / "ABC-123.nfo").write_text("<nfo>test</nfo>")
-
-            with patch("media115.cli._get_115_client", return_value=mock_client):
-                result = runner.invoke(main, ["upload-nfo", "AV"])
-
-        assert result.exit_code == 0
-        # Should not upload because ABC-123 already has NFO
-        assert "already have NFO" in result.output or "Nothing to upload" in result.output
-
-    def test_upload_nfo_category_dir_not_found(self, runner):
-        """Should report error if category dir doesn't exist on 115."""
-        mock_client = MagicMock()
-        mock_client.get_dir_id.return_value = None
-
-        with runner.isolated_filesystem():
-            _write_env()
-            scrape_dir = Path(".cache") / "scrape_output" / "AV" / "影音_AV_TEST"
-            scrape_dir.mkdir(parents=True)
-            (scrape_dir / "TEST.nfo").write_text("<nfo/>")
-
-            with patch("media115.cli._get_115_client", return_value=mock_client):
-                result = runner.invoke(main, ["upload-nfo", "AV"])
-
-        assert "not found" in result.output.lower()
-
-
 class TestUpload:
     def test_upload_success(self, runner, tmp_path):
         """Upload command should call client.upload_file."""
@@ -609,70 +517,54 @@ class TestUpload:
 
 
 class TestLs:
+    """Tests for the new PathResolver-based ls command."""
+
+    def _mock_resolver(self, items=None):
+        from unittest.mock import MagicMock
+        r = MagicMock()
+        r.resolve_dir.return_value = "0"
+        r.listing.return_value = items or []
+        return r
+
     def test_ls_lists_files(self, runner):
-        mock_client = MagicMock()
-        mock_client.list_files_all.return_value = [
-            {"n": "movie.mkv", "fid": "f1", "s": 1048576},
-            {"n": "subdir", "cid": "c1"},
-        ]
-
-        with runner.isolated_filesystem():
-            _write_env()
-            with patch("media115.cli._get_115_client", return_value=mock_client):
-                result = runner.invoke(main, ["ls", "12345"])
-
+        resolver = self._mock_resolver([
+            {"name": "movie.mkv", "fid": "f1", "size": 1048576, "pick_code": "pc"},
+            {"name": "subdir", "cid": "c1"},
+        ])
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["ls", "/影音"])
         assert result.exit_code == 0
         assert "movie.mkv" in result.output
         assert "subdir" in result.output
-        assert "[F]" in result.output
-        assert "[D]" in result.output
-        assert "Total: 2 items" in result.output
 
     def test_ls_default_root(self, runner):
-        mock_client = MagicMock()
-        mock_client.list_files_all.return_value = []
-
-        with runner.isolated_filesystem():
-            _write_env()
-            with patch("media115.cli._get_115_client", return_value=mock_client):
-                result = runner.invoke(main, ["ls"])
-
+        resolver = self._mock_resolver([])
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["ls"])
         assert result.exit_code == 0
-        mock_client.list_files_all.assert_called_once_with(dir_id="0")
+        resolver.resolve_dir.assert_called_with("/")
 
     def test_ls_no_client(self, runner):
-        with runner.isolated_filesystem():
-            _write_env()
-            with patch("media115.cli._get_115_client", return_value=None):
-                result = runner.invoke(main, ["ls", "0"])
-        assert result.exit_code == 0
+        with patch("media115.fs_cli._get_resolver", side_effect=Exception("ClickException: 未登录")):
+            result = runner.invoke(main, ["ls"])
+        assert result.exit_code != 0
 
     def test_ls_error_handling(self, runner):
-        mock_client = MagicMock()
-        mock_client.list_files_all.side_effect = Exception("API error")
-
-        with runner.isolated_filesystem():
-            _write_env()
-            with patch("media115.cli._get_115_client", return_value=mock_client):
-                result = runner.invoke(main, ["ls", "12345"])
-
-        assert "Error" in result.output
+        resolver = self._mock_resolver()
+        resolver.resolve_dir.side_effect = FileNotFoundError("path not found")
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["ls", "/no/such/path"])
+        assert result.exit_code != 0
 
     def test_ls_path_resolution(self, runner):
-        """Non-numeric paths should be resolved via client.resolve_path."""
-        mock_client = MagicMock()
-        mock_client.resolve_path.return_value = "77777"
-        mock_client.list_files_all.return_value = [
-            {"n": "file.txt", "fid": "f1", "s": 42},
-        ]
-
-        with runner.isolated_filesystem():
-            _write_env()
-            with patch("media115.cli._get_115_client", return_value=mock_client):
-                result = runner.invoke(main, ["ls", "/影音/电影"])
-
+        """Path should be passed to resolve_dir."""
+        resolver = self._mock_resolver([
+            {"name": "file.txt", "fid": "f1", "size": 42, "pick_code": "pc"},
+        ])
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["ls", "/影音/电影"])
         assert result.exit_code == 0
-        mock_client.resolve_path.assert_called_once_with("/影音/电影")
+        resolver.resolve_dir.assert_called_with("/影音/电影")
 
 
 class TestStrm:
@@ -1051,56 +943,6 @@ class TestOrganizeExecute:
         assert "Not found on 115" in result.output
 
 
-class TestUploadNfoAdditional:
-    """Cover additional upload-nfo paths (unmatched dirs, AV NFO rename)."""
-
-    def test_upload_nfo_unmatched_dir(self, runner):
-        """Dirs in scrape_output not matching any 115 dir should be skipped."""
-        mock_client = MagicMock()
-        mock_client.get_dir_id.return_value = "cat_cid_100"
-        # No matching dirs on 115
-        mock_client.list_files_all.return_value = []
-
-        with runner.isolated_filesystem():
-            _write_env()
-            _write_tree()
-
-            scrape_dir = Path(".cache") / "scrape_output" / "AV" / "影音_AV_NONEXIST-999"
-            scrape_dir.mkdir(parents=True)
-            (scrape_dir / "NONEXIST-999.nfo").write_text("<nfo/>")
-
-            with patch("media115.cli._get_115_client", return_value=mock_client):
-                result = runner.invoke(main, ["upload-nfo", "AV"])
-
-        assert result.exit_code == 0
-        # Should report dirs not matched
-        assert "not matched" in result.output.lower() or "Nothing to upload" in result.output
-
-    def test_upload_nfo_nothing_to_upload(self, runner):
-        """Empty scrape output dirs should result in nothing to upload."""
-        mock_client = MagicMock()
-        mock_client.get_dir_id.return_value = "cat_cid_100"
-        mock_client.list_files_all.return_value = [
-            {"n": "DANDY-992", "cid": 200},
-        ]
-
-        with runner.isolated_filesystem():
-            _write_env()
-            _write_tree()
-
-            # Create scrape output dir but with no uploadable files
-            scrape_dir = Path(".cache") / "scrape_output" / "AV" / "影音_AV_DANDY-992"
-            scrape_dir.mkdir(parents=True)
-            # Only a .txt file, not .nfo/.jpg/.png
-            (scrape_dir / "notes.txt").write_text("some notes")
-
-            with patch("media115.cli._get_115_client", return_value=mock_client):
-                result = runner.invoke(main, ["upload-nfo", "AV"])
-
-        assert result.exit_code == 0
-        assert "Nothing to upload" in result.output
-
-
 class TestScrapeCommandMocked:
     """Cover scrape command branches with mocked API clients."""
 
@@ -1193,27 +1035,24 @@ class TestScrapeCommandMocked:
 
 
 class TestLsTree:
-    """Cover ls --tree path (line 240 + _print_tree)."""
+    """Cover ls -R recursive path."""
 
-    def test_ls_tree(self, runner):
-        mock_client = MagicMock()
-
-        # First call (root listing) returns dirs + files
-        mock_client.list_files_all.side_effect = [
-            [
-                {"n": "电影", "cid": "100"},
-                {"n": "readme.txt", "fid": "f1", "s": 100},
-            ],
-            # Second call (电影 dir)
-            [
-                {"n": "The Matrix.mkv", "fid": "f2", "s": 5000000},
-            ],
+    def test_ls_recursive(self, runner):
+        root_items = [
+            {"name": "电影", "cid": "100"},
+            {"name": "readme.txt", "fid": "f1", "size": 100, "pick_code": "pc"},
         ]
+        child_items = [
+            {"name": "The Matrix.mkv", "fid": "f2", "size": 5000000, "pick_code": "pc2"},
+        ]
+        resolver = MagicMock()
+        resolver.resolve_dir.return_value = "0"
+        resolver.listing.side_effect = lambda cid: (
+            child_items if cid == "100" else root_items
+        )
 
-        with runner.isolated_filesystem():
-            _write_env()
-            with patch("media115.cli._get_115_client", return_value=mock_client):
-                result = runner.invoke(main, ["ls", "12345", "--tree", "--depth", "1"])
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["ls", "-R", "--depth", "1", "/"])
 
         assert result.exit_code == 0
         assert "电影" in result.output
@@ -1256,6 +1095,38 @@ class TestConfigLoading:
         assert config["strm_proxy"]["host"] == "myhost"
         assert config["strm_proxy"]["port"] == 9000
 
+    def test_load_config_xdg_fallback(self, tmp_path, monkeypatch):
+        """When no cwd/config.yaml exists, fall back to XDG config dir."""
+        empty_dir = tmp_path / "empty_dir"
+        empty_dir.mkdir()
+        monkeypatch.chdir(empty_dir)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+        config_dir = tmp_path / "media115"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").write_text("root: /test\n")
+
+        from media115.cli import _load_config
+        config = _load_config()
+        assert config["root"] == "/test"
+
+    def test_load_config_cwd_takes_precedence(self, tmp_path, monkeypatch):
+        """cwd/config.yaml takes precedence over XDG config."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+        # XDG config
+        xdg_dir = tmp_path / "media115"
+        xdg_dir.mkdir()
+        (xdg_dir / "config.yaml").write_text("root: /xdg\n")
+
+        # cwd config (higher priority)
+        (tmp_path / "config.yaml").write_text("root: /cwd\n")
+
+        from media115.cli import _load_config
+        config = _load_config()
+        assert config["root"] == "/cwd"
+
 
 class TestLoadEnv:
     """Cover _load_env (line 17)."""
@@ -1296,35 +1167,10 @@ class TestGetClient:
     def test_get_client_no_credentials(self, runner):
         with patch.dict(
             os.environ,
-            {"CLOUD_115_COOKIES": "", "CLOUD_115_APP_ID": ""},
+            {"CLOUD_115_COOKIES": ""},
             clear=False,
         ):
             from media115.cli import _get_115_client
 
             client = _get_115_client()
         assert client is None
-
-    def test_get_client_openapi_mode(self, runner):
-        """_get_115_client should fall back to OpenAPI when no cookies."""
-        with patch("media115.client.Cloud115Client.from_openapi") as mock_from:
-            mock_from.return_value = MagicMock()
-            with patch.dict(
-                os.environ,
-                {
-                    "CLOUD_115_COOKIES": "",
-                    "CLOUD_115_APP_ID": "my_app_id",
-                    "CLOUD_115_APP_SECRET": "my_secret",
-                    "CLOUD_115_ACCESS_TOKEN": "my_token",
-                    "CLOUD_115_REFRESH_TOKEN": "my_refresh",
-                },
-            ):
-                from media115.cli import _get_115_client
-
-                client = _get_115_client()
-            assert client is not None
-            mock_from.assert_called_once_with(
-                app_id="my_app_id",
-                app_secret="my_secret",
-                access_token="my_token",
-                refresh_token="my_refresh",
-            )

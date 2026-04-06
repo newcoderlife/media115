@@ -49,7 +49,10 @@ def build_organize_plan(category: str, tree_entries: list[dict], cache_module) -
     from media115.utils import stem as _u_stem
 
     ops = []
-    videos = [e for e in tree_entries if e["is_video"] and category in e["path"]]
+    videos = [
+        e for e in tree_entries
+        if e["is_video"] and f"/{category}/" in f"/{e['path']}/"
+    ]
 
     for item in videos:
         name = item["n"]
@@ -151,7 +154,9 @@ def build_organize_plan(category: str, tree_entries: list[dict], cache_module) -
     return ops
 
 
-def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[dict]:
+def execute_organize_plan(
+    ops: list[dict], client, category_path: str, resolver=None
+) -> list[dict]:
     """Execute organize operations on 115 using batch APIs.
 
     Strategy:
@@ -166,13 +171,23 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
     from collections import defaultdict
 
     from media115 import cache as _cache
+    from media115.fs import PathResolver
+    from media115.log import get_logger
     from media115.utils import stem as _u_stem
+
+    logger = get_logger()
+
+    if resolver is None:
+        resolver = PathResolver(client)
 
     results = []
     folder_cache: dict[str, tuple[str, dict[str, str]]] = {}
     created_dirs: dict[str, str] = {}
 
-    category_cid = client.get_dir_id("/" + category_path)
+    try:
+        category_cid = resolver.resolve_dir("/" + category_path)
+    except FileNotFoundError:
+        category_cid = None
     if not category_cid:
         return [
             {
@@ -191,7 +206,7 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
 
     # Phase 1: Resolve all fids
     # Pre-populate sub-dir cids from category listing to avoid N get_dir_id calls
-    print(f"  Resolving {len(active_ops)} files...", file=sys.stderr, flush=True)
+    logger.info("  Resolving %d files...", len(active_ops))
     cat_items = client.list_files_all(dir_id=category_cid)
     subdir_cids = {}  # subdir_name → cid
     for item in cat_items:
@@ -206,7 +221,10 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
             parent_leaf = parent_path.split("/")[-1] if "/" in parent_path else parent_path
             cid = subdir_cids.get(parent_leaf)
             if not cid:
-                cid = client.get_dir_id("/" + parent_path)
+                try:
+                    cid = resolver.resolve_dir("/" + parent_path)
+                except FileNotFoundError:
+                    cid = None
             if not cid:
                 results.append(
                     {
@@ -229,15 +247,11 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
             continue
         resolved.append((op, fid))
 
-    print(
-        f"  Resolved {len(resolved)}/{len(active_ops)} files",
-        file=sys.stderr,
-        flush=True,
-    )
+    logger.info("  Resolved %d/%d files", len(resolved), len(active_ops))
 
     # Phase 2: Create all target directories
     target_folders = {op.get("new_folder") for op, _ in resolved if op.get("new_folder")}
-    print(f"  Creating {len(target_folders)} directories...", file=sys.stderr, flush=True)
+    logger.info("  Creating %d directories...", len(target_folders))
     for folder in target_folders:
         if folder not in created_dirs:
             try:
@@ -245,12 +259,19 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
                 new_cid = str(result.get("cid", result.get("aid", "")))
                 if new_cid:
                     created_dirs[folder] = new_cid
+                    resolver.update_dir_entry("/" + category_path, category_cid, folder, new_cid)
                 else:
-                    existing = client.get_dir_id(f"/{category_path}/{folder}")
+                    try:
+                        existing = resolver.resolve_dir(f"/{category_path}/{folder}")
+                    except FileNotFoundError:
+                        existing = None
                     if existing:
                         created_dirs[folder] = existing
             except Exception:
-                existing = client.get_dir_id(f"/{category_path}/{folder}")
+                try:
+                    existing = resolver.resolve_dir(f"/{category_path}/{folder}")
+                except FileNotFoundError:
+                    existing = None
                 if existing:
                     created_dirs[folder] = existing
 
@@ -265,16 +286,21 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
 
     failed_fids: set[str] = set()
     total_moves = sum(len(fids) for fids in move_groups.values())
-    print(
-        f"  Moving {total_moves} files to {len(move_groups)} directories...",
-        file=sys.stderr,
-        flush=True,
-    )
+    logger.info("  Moving %d files to %d directories...", total_moves, len(move_groups))
     for target_cid, fids in move_groups.items():
         try:
             client.move(fids, target_cid)
+            # Mark source dirs stale; target dir is new so its listing is already fresh
+            for fid in fids:
+                op = move_fid_to_op.get(fid)
+                if op:
+                    parent_path = op["parent"]
+                    if parent_path in folder_cache:
+                        src_cid, _ = folder_cache[parent_path]
+                        resolver.mark_stale(src_cid)
+            resolver.mark_stale(target_cid)
         except Exception as e:
-            print(f"  Move failed: {e}", file=sys.stderr)
+            logger.error("  Move failed: %s", e)
             failed_fids.update(fids)
 
     # Phase 4: Batch rename
@@ -287,16 +313,28 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
             rename_map[fid] = new_name
 
     if rename_map:
-        print(f"  Renaming {len(rename_map)} files...", file=sys.stderr, flush=True)
+        logger.info("  Renaming %d files...", len(rename_map))
         try:
             client.batch_rename(rename_map)
+            # Mark dirs containing renamed files as stale
+            renamed_cids: set[str] = set()
+            for op, fid in resolved:
+                if fid in rename_map:
+                    target_folder = op.get("new_folder")
+                    if target_folder and target_folder in created_dirs:
+                        renamed_cids.add(created_dirs[target_folder])
+                    elif op["parent"] in folder_cache:
+                        renamed_cids.add(folder_cache[op["parent"]][0])
+            for cid in renamed_cids:
+                resolver.mark_stale(cid)
         except Exception as e:
-            print(f"  Rename failed: {e}", file=sys.stderr)
+            logger.error("  Rename failed: %s", e)
             failed_fids.update(rename_map.keys())
 
     # Phase 5: Upload NFO/poster + update file_map (skip failed files)
-    print("  Uploading NFO/poster...", file=sys.stderr, flush=True)
-    for op, fid in resolved:
+    upload_total = len(resolved)
+    logger.info("  Uploading NFO/poster (%d files)...", upload_total)
+    for idx, (op, fid) in enumerate(resolved, 1):
         if fid in failed_fids:
             results.append({**op, "status": "error", "error": "move or rename failed"})
             continue
@@ -308,6 +346,12 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
             parent = op["parent"]
             parent_leaf = parent.split("/")[-1] if "/" in parent else parent
             upload_cid = subdir_cids.get(parent_leaf)
+
+        display_name = (op.get("new_name") or op["file"])[:50]
+        print(
+            f"\r  [{idx}/{upload_total}] {display_name}",
+            end="", file=sys.stderr, flush=True,
+        )
 
         if upload_cid:
             _upload_scrape_output(client, op, upload_cid, op.get("new_name"))
@@ -322,6 +366,8 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
                 _cache.put("file_map", new_stem, old_data)
 
         results.append({**op, "status": "ok"})
+    print("", file=sys.stderr)  # 换行
+    logger.info("  Uploaded %d NFO/poster files", upload_total)
 
     # Phase 6: Delete old source directories (now empty or metadata-only)
     source_dirs = set()
@@ -334,11 +380,7 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
                 source_dirs.add(parent_leaf)
 
     if source_dirs:
-        print(
-            f"  Cleaning up {len(source_dirs)} old directories...",
-            file=sys.stderr,
-            flush=True,
-        )
+        logger.info("  Cleaning up %d old directories...", len(source_dirs))
         # Refresh category listing to get current cids
         cat_items = client.list_files_all(dir_id=category_cid)
         for item in cat_items:
@@ -357,9 +399,10 @@ def execute_organize_plan(ops: list[dict], client, category_path: str) -> list[d
             if not has_video:
                 try:
                     client.delete([cid])
-                    print(f"    Deleted: {name}", file=sys.stderr)
+                    logger.debug("    Deleted: %s", name)
+                    resolver.invalidate(f"/{category_path}/{name}")
                 except Exception as e:
-                    print(f"    Failed to delete {name}: {e}", file=sys.stderr)
+                    logger.error("    Failed to delete %s: %s", name, e)
 
     return results
 
@@ -369,11 +412,10 @@ def _upload_scrape_output(client, op: dict, target_cid: str, new_video_name: str
 
     NFO is renamed to match the new video filename so Jellyfin can pair them.
     """
-    import os
-
+    from media115.cache import _cache_root
     from media115.utils import split_ext
 
-    scrape_dir = Path(os.getcwd()) / ".cache" / "scrape_output"
+    scrape_dir = _cache_root() / "scrape_output"
     if not scrape_dir.exists():
         return
 
@@ -391,12 +433,37 @@ def _upload_scrape_output(client, op: dict, target_cid: str, new_video_name: str
             if not out_dir.is_dir():
                 continue
             if out_dir.name == search_name:
+                from media115.log import get_logger
+                _log = get_logger()
+
+                # 115 不支持覆盖上传——同名文件会创建副本。
+                # 采用 rclone 策略：先删旧文件再上传新文件。
+                existing_files: dict[str, str] = {}  # name → fid
+                try:
+                    items = client.list_files_all(dir_id=target_cid)
+                    for item in items:
+                        if "fid" in item:
+                            name = item.get("fn", item.get("n", ""))
+                            existing_files[name] = str(item["fid"])
+                except Exception:
+                    pass
+
                 for f in out_dir.iterdir():
                     if f.suffix in (".nfo", ".jpg", ".png"):
-                        # Rename NFO to match video; keep image names as-is
                         remote_name = nfo_name if f.suffix == ".nfo" and nfo_name else f.name
-                        with contextlib.suppress(Exception):
+                        # 同名文件已存在 → 删旧再上传（覆盖语义）
+                        old_fid = existing_files.get(remote_name)
+                        if old_fid:
+                            try:
+                                client.delete([old_fid])
+                                _log.debug("  deleted old %s (fid=%s)", remote_name, old_fid)
+                            except Exception as e:
+                                _log.warning("  delete old %s failed: %s", remote_name, e)
+                        try:
                             client.upload_file(f, target_cid, remote_name)
+                            _log.debug("  uploaded %s → cid=%s", remote_name, target_cid)
+                        except Exception as e:
+                            _log.warning("  upload failed %s: %s", remote_name, e)
                 return
 
 

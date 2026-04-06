@@ -1,135 +1,33 @@
-"""115 cloud client supporting both cookie mode and OpenAPI mode.
+"""115 cloud client (cookie mode only).
 
 Cookie mode: works immediately, no approval needed. Based on py115/p115client.
-OpenAPI mode: requires approved app_id/app_secret from open.115.com.
 """
 
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
-import sys
-import threading
 import time
 from pathlib import Path
+from urllib.parse import urlencode
 
 import httpx
 
 from media115._crypto import generate_m115_key, m115_decode, m115_encode
-from media115.cache import rate_limit_path as _rate_limit_path
+from media115.cache import _cache_dir
+from media115.log import get_logger
+from media115.rate_limit import RateLimiter, _read_state, _write_state
 
 # API endpoints
 WEB_API = "https://webapi.115.com"
 PRO_API = "https://proapi.115.com"
 QR_API = "https://qrcodeapi.115.com"
 PASSPORT_API = "https://passportapi.115.com"
-OPEN_API = "https://proapi.115.com"
-
-
-def _read_state(state_path: Path) -> dict:
-    """Read rate limit state from a dedicated state file (not .env)."""
-    if not state_path.exists():
-        return {}
-    try:
-        return json.loads(state_path.read_text())
-    except (json.JSONDecodeError, ValueError):
-        return {}
-
-
-def _write_state(state_path: Path, state: dict):
-    """Write rate limit state atomically."""
-    state_path.write_text(json.dumps(state))
-
-
-class RateLimiter:
-    """Rate limiter with QPS + QPM control and cross-process persistence.
-
-    State persisted to .115_rate_limit (JSON):
-    - cooldown_until: timestamp, 429 triggers 1-hour global cooldown
-    - last_request: timestamp of last API request
-    - minute_start: start of current minute window
-    - minute_count: requests in current minute window
-    """
-
-    def __init__(self, qps: float = 0.5, qpm: int = 20, use_state: bool = True):
-        self._qps = qps
-        self._qpm = qpm
-        self._state_path = _rate_limit_path() if use_state else None
-        self._lock = threading.Lock()
-        self.request_count = 0
-
-    def acquire(self):
-        with self._lock:
-            self._wait_for_slot()
-            self.request_count += 1
-
-    def _wait_for_slot(self):
-        if not self._state_path:
-            return
-
-        while True:
-            now = time.time()
-            state = _read_state(self._state_path)
-
-            # Check cooldown (429 ban)
-            cooldown_until = state.get("cooldown_until", 0)
-            if now < cooldown_until:
-                remaining = int(cooldown_until - now)
-                mins, secs = divmod(remaining, 60)
-                until_str = time.strftime("%H:%M", time.localtime(cooldown_until))
-                raise RuntimeError(
-                    f"Rate limit cooldown: {mins}m{secs:02d}s remaining (until {until_str})"
-                )
-
-            # Check QPS
-            last_req = state.get("last_request", 0)
-            min_interval = 1.0 / self._qps
-            wait = min_interval - (now - last_req)
-            if wait > 0:
-                time.sleep(wait)
-                now = time.time()
-
-            # Check QPM
-            minute_start = state.get("minute_start", 0)
-            minute_count = state.get("minute_count", 0)
-
-            if now - minute_start > 60:
-                minute_start = now
-                minute_count = 0
-
-            if minute_count >= self._qpm:
-                wait = 60 - (now - minute_start)
-                if wait > 0:
-                    time.sleep(wait)
-                    continue
-
-            # All checks passed — record this request
-            state["last_request"] = now
-            state["minute_start"] = minute_start
-            state["minute_count"] = minute_count + 1
-            _write_state(self._state_path, state)
-            break
-
-    def set_cooldown(self, seconds: float):
-        """Set a global cooldown, persisted for cross-process enforcement."""
-        if self._state_path:
-            until = time.time() + seconds
-            state = _read_state(self._state_path)
-            state["cooldown_until"] = until
-            _write_state(self._state_path, state)
-            mins, secs = divmod(int(seconds), 60)
-            hours, mins = divmod(mins, 60)
-            until_str = time.strftime("%H:%M", time.localtime(until))
-            dur = f"{hours}h" if hours else f"{mins}m{secs:02d}s"
-            print(
-                f"  429 received: entering {dur} cooldown (until {until_str})",
-                file=sys.stderr,
-                flush=True,
-            )
 
 
 class Cloud115Client:
-    """Unified 115 client. Use `from_cookies` or `from_openapi` to create."""
+    """115 client (cookie mode). Use `from_cookies` to create."""
 
     _USER_AGENT = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -147,18 +45,11 @@ class Cloud115Client:
             },
         )
         self._env_path = Path.cwd() / ".env"
-        self._limiter = RateLimiter(qps=0.5, qpm=20)
-        self._download_limiter = RateLimiter(qps=0.5, qpm=20)
-        self._mode: str = ""  # "cookie" or "openapi"
+        self._limiter = RateLimiter(qps=0.5, qpm=20, state_path=_cache_dir() / "rate_limit.json")
+        self._download_limiter = RateLimiter(qps=0.5, qpm=20, state_path=_cache_dir() / "download_rate_limit.json")
         # Cookie mode
         self._cookies: str = ""
         self._user_id: str = ""
-        # OpenAPI mode
-        self._app_id: str = ""
-        self._app_secret: str = ""
-        self._access_token: str = ""
-        self._refresh_token: str = ""
-        self._token_expires_at: float = 0
 
     def close(self):
         self._http.close()
@@ -175,7 +66,6 @@ class Cloud115Client:
     def from_cookies(cls, cookies: str) -> Cloud115Client:
         """Create client from cookie string (UID=...; CID=...; SEID=...)."""
         client = cls()
-        client._mode = "cookie"
         client._cookies = cookies
         for part in cookies.split(";"):
             part = part.strip()
@@ -188,23 +78,6 @@ class Cloud115Client:
     def from_cookie_file(cls, path: Path) -> Cloud115Client:
         """Load cookies from a text file."""
         return cls.from_cookies(path.read_text().strip())
-
-    @classmethod
-    def from_openapi(
-        cls,
-        app_id: str,
-        app_secret: str,
-        access_token: str = "",
-        refresh_token: str = "",
-    ) -> Cloud115Client:
-        """Create client using OpenAPI credentials."""
-        client = cls()
-        client._mode = "openapi"
-        client._app_id = app_id
-        client._app_secret = app_secret
-        client._access_token = access_token
-        client._refresh_token = refresh_token
-        return client
 
     # ── QR code login ────────────────────────────────────────────────
 
@@ -281,24 +154,20 @@ class Cloud115Client:
     def check_login(self) -> bool:
         """Check if current credentials are valid."""
         try:
-            if self._mode == "cookie":
-                resp = self._http.get(
-                    "https://my.115.com/?ct=guide&ac=status",
-                    headers={"Cookie": self._cookies},
-                    timeout=10,
-                )
-                if resp.status_code == 200:
-                    return resp.json().get("state", False)
-                return False
-            else:
-                self.list_files(dir_id="0", limit=1)
-                return True
+            resp = self._http.get(
+                "https://my.115.com/?ct=guide&ac=status",
+                headers={"Cookie": self._cookies},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                return resp.json().get("state", False)
+            return False
         except Exception:
             return False
 
     def renew_cookies(self, app: str = "tv") -> bool:
         """Auto-renew cookies without user interaction."""
-        if self._mode != "cookie" or not self._cookies:
+        if not self._cookies:
             return False
         try:
             http_headers = {"Cookie": self._cookies}
@@ -349,8 +218,6 @@ class Cloud115Client:
 
     def save_cookies_to_env(self, env_path: Path):
         """Save cookies to .env file as CLOUD_115_COOKIES=..."""
-        if self._mode != "cookie":
-            raise ValueError("Not in cookie mode")
         lines = []
         replaced = False
         if env_path.exists():
@@ -375,6 +242,8 @@ class Cloud115Client:
         limiter: RateLimiter | None = None,
     ) -> dict:
         (limiter or self._limiter).acquire()
+        logger = get_logger()
+        logger.debug("115 %s %s", method, url.split(".com")[-1][:60])
         max_retries = 3
         for attempt in range(max_retries):
             try:
@@ -389,11 +258,13 @@ class Cloud115Client:
             except (httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.ConnectError):
                 if attempt == max_retries - 1:
                     raise
+                logger.warning("115 network error (attempt %d/%d), retrying...", attempt + 1, max_retries)
                 time.sleep(3 * (attempt + 1))
                 continue
         if resp.status_code == 429:
             self._limiter.set_cooldown(3600)
             self._download_limiter.set_cooldown(3600)
+            logger.warning("115 rate limit (429), cooldown 3600s")
             raise RuntimeError("115 API rate limit hit (429). Cooling down for 1 hour.")
         if resp.status_code == 405 and self.renew_cookies():
             resp = self._http.request(
@@ -410,78 +281,29 @@ class Cloud115Client:
             if err == 770004 or "访问上限" in str(result.get("error", "")):
                 self._limiter.set_cooldown(3600)
                 self._download_limiter.set_cooldown(3600)
+                logger.warning("115 rate limit (errNo=%d), cooldown 3600s", err)
                 raise RuntimeError(f"115 API rate limit hit (errNo={err}). Cooling down.")
         return result
-
-    def _openapi_request(
-        self,
-        method: str,
-        path: str,
-        params: dict | None = None,
-        data: dict | None = None,
-    ) -> dict:
-        if (
-            self._refresh_token
-            and self._token_expires_at
-            and time.time() >= self._token_expires_at
-        ):
-            self.refresh_access_token()
-        self._limiter.acquire()
-        resp = self._http.request(
-            method,
-            f"{OPEN_API}{path}",
-            params=params,
-            data=data,
-            headers={"Authorization": f"Bearer {self._access_token}"},
-        )
-        resp.raise_for_status()
-        return resp.json()
-
-    def refresh_access_token(self):
-        resp = self._http.post(
-            f"{PASSPORT_API}/open/refreshToken",
-            data={
-                "app_id": self._app_id,
-                "app_secret": self._app_secret,
-                "refresh_token": self._refresh_token,
-            },
-        )
-        resp.raise_for_status()
-        result = resp.json()
-        data = result.get("data")
-        if not data:
-            raise ValueError(f"Token refresh failed: {result}")
-        self._access_token = data["access_token"]
-        self._refresh_token = data["refresh_token"]
-        self._token_expires_at = time.time() + data.get("expires_in", 7200)
 
     # ── Public API ───────────────────────────────────────────────────
 
     def list_files(self, dir_id: str = "0", limit: int = 100, offset: int = 0) -> list[dict]:
-        if self._mode == "cookie":
-            result = self._cookie_request(
-                "GET",
-                f"{WEB_API}/files",
-                params={
-                    "aid": 1,
-                    "cid": dir_id,
-                    "limit": limit,
-                    "offset": offset,
-                    "show_dir": 1,
-                    "o": "user_ptime",
-                    "asc": 1,
-                    "natsort": 1,
-                    "format": "json",
-                },
-            )
-            return result.get("data", [])
-        else:
-            result = self._openapi_request(
-                "GET",
-                "/open/ufile/files",
-                params={"cid": dir_id, "limit": limit, "offset": offset},
-            )
-            return result.get("data", [])
+        result = self._cookie_request(
+            "GET",
+            f"{WEB_API}/files",
+            params={
+                "aid": 1,
+                "cid": dir_id,
+                "limit": limit,
+                "offset": offset,
+                "show_dir": 1,
+                "o": "user_ptime",
+                "asc": 1,
+                "natsort": 1,
+                "format": "json",
+            },
+        )
+        return result.get("data", [])
 
     def list_files_all(self, dir_id: str = "0") -> list[dict]:
         """List all files in a directory (handles pagination)."""
@@ -544,39 +366,25 @@ class Cloud115Client:
 
     def get_dir_id(self, path: str) -> str | None:
         """Get directory ID by absolute path. One API call, very reliable."""
-        if self._mode == "cookie":
-            result = self._cookie_request(
-                "GET",
-                f"{WEB_API}/files/getid",
-                params={"path": path},
-            )
-            if result.get("state"):
-                return str(result.get("id", ""))
-            return None
-        else:
-            return self.resolve_path(path)
+        result = self._cookie_request(
+            "GET",
+            f"{WEB_API}/files/getid",
+            params={"path": path},
+        )
+        if result.get("state"):
+            return str(result.get("id", ""))
+        return None
 
     def search(self, keyword: str, dir_id: str = "0") -> list[dict]:
-        if self._mode == "cookie":
-            result = self._cookie_request(
-                "GET",
-                f"{WEB_API}/files/search",
-                params={"search_value": keyword, "cid": dir_id, "format": "json"},
-            )
-            return result.get("data", [])
-        else:
-            result = self._openapi_request(
-                "GET",
-                "/open/ufile/search",
-                params={"search_value": keyword, "cid": dir_id},
-            )
-            return result.get("data", [])
+        result = self._cookie_request(
+            "GET",
+            f"{WEB_API}/files/search",
+            params={"search_value": keyword, "cid": dir_id, "format": "json"},
+        )
+        return result.get("data", [])
 
     def download_url(self, pick_code: str) -> str:
-        if self._mode == "cookie":
-            return self._download_url_cookie(pick_code)
-        else:
-            return self._download_url_openapi(pick_code)
+        return self._download_url_cookie(pick_code)
 
     def _download_url_cookie(self, pick_code: str) -> str:
         """Get download URL using M115 encryption (cookie mode)."""
@@ -605,156 +413,228 @@ class Cloud115Client:
                 return url_info
         raise ValueError(f"No download URL for pick_code={pick_code}")
 
-    def _download_url_openapi(self, pick_code: str) -> str:
-        result = self._openapi_request(
-            "POST", "/open/ufile/downurl", data={"pick_code": pick_code}
-        )
-        data = result.get("data", {})
-        for val in data.values():
-            url_info = val.get("url", {})
-            if isinstance(url_info, dict) and "url" in url_info:
-                return url_info["url"]
-            if isinstance(url_info, str) and url_info:
-                return url_info
-        raise ValueError(f"No download URL for pick_code={pick_code}")
-
     def mkdir(self, parent_id: str, name: str) -> dict:
-        if self._mode == "cookie":
-            return self._cookie_request(
-                "POST",
-                f"{WEB_API}/files/add",
-                data={"pid": parent_id, "cname": name},
-            )
-        else:
-            return self._openapi_request(
-                "POST",
-                "/open/folder/create",
-                data={"pid": parent_id, "cname": name},
-            )
-
-    def rapid_upload(
-        self, dir_id: str, filename: str, file_size: int, sha1: str, pre_sha1: str
-    ) -> dict:
-        if self._mode == "cookie":
-            raise NotImplementedError(
-                "Rapid upload via cookie mode requires EC115 encryption (not yet implemented)."
-            )
-        return self._openapi_request(
+        return self._cookie_request(
             "POST",
-            "/open/upload/init",
-            data={
-                "pid": dir_id,
-                "filename": filename,
-                "filesize": str(file_size),
-                "sha1": sha1,
-                "pre_sha1": pre_sha1,
-            },
+            f"{WEB_API}/files/add",
+            data={"pid": parent_id, "cname": name},
         )
 
     def move(self, file_ids: list[str], target_dir_id: str) -> dict:
-        if self._mode == "cookie":
-            data = {"pid": target_dir_id}
-            for i, fid in enumerate(file_ids):
-                data[f"fid[{i}]"] = fid
-            return self._cookie_request("POST", f"{WEB_API}/files/move", data=data)
-        else:
-            return self._openapi_request(
-                "POST",
-                "/open/ufile/move",
-                data={"fid": ",".join(file_ids), "pid": target_dir_id},
-            )
+        data = {"pid": target_dir_id}
+        for i, fid in enumerate(file_ids):
+            data[f"fid[{i}]"] = fid
+        return self._cookie_request("POST", f"{WEB_API}/files/move", data=data)
 
     def rename(self, file_id: str, new_name: str) -> dict:
-        if self._mode == "cookie":
-            return self._cookie_request(
-                "POST",
-                f"{WEB_API}/files/edit",
-                data={"fid": file_id, "file_name": new_name},
-            )
-        else:
-            return self._openapi_request(
-                "POST",
-                "/open/ufile/update",
-                data={"fid": file_id, "file_name": new_name},
-            )
+        return self._cookie_request(
+            "POST",
+            f"{WEB_API}/files/edit",
+            data={"fid": file_id, "file_name": new_name},
+        )
 
     def delete(self, file_ids: list[str]) -> dict:
-        if self._mode == "cookie":
-            data = {}
-            for i, fid in enumerate(file_ids):
-                data[f"fid[{i}]"] = fid
-            return self._cookie_request("POST", f"{WEB_API}/rb/delete", data=data)
-        else:
-            return self._openapi_request(
-                "POST",
-                "/open/ufile/delete",
-                data={"fid": ",".join(file_ids)},
-            )
+        data = {}
+        for i, fid in enumerate(file_ids):
+            data[f"fid[{i}]"] = fid
+        return self._cookie_request("POST", f"{WEB_API}/rb/delete", data=data)
 
     def upload_file(self, local_path: Path, target_dir_id: str, filename: str = "") -> dict | None:
         """Upload a small file (NFO, image) to 115 via OSS.
 
         No encryption needed. Works for files up to ~500MB.
+        Retries up to 3 times on network errors.
         """
-        if self._mode != "cookie":
-            raise NotImplementedError("upload_file requires cookie mode")
-
         import httpx as _httpx
 
+        logger = get_logger()
         fname = filename or local_path.name
         content = local_path.read_bytes()
 
         self._limiter.acquire()
 
         # Step 1: Init upload
-        resp = self._http.post(
-            "https://uplb.115.com/3.0/sampleinitupload.php",
-            data={"filename": fname, "target": f"U_1_{target_dir_id}"},
+        for attempt in range(3):
+            try:
+                resp = self._http.post(
+                    "https://uplb.115.com/3.0/sampleinitupload.php",
+                    data={"filename": fname, "target": f"U_1_{target_dir_id}"},
+                    headers={"Cookie": self._cookies},
+                )
+                resp.raise_for_status()
+                break
+            except (httpx.ReadTimeout, httpx.ConnectError, httpx.RemoteProtocolError):
+                if attempt == 2:
+                    raise
+                logger.warning("upload init failed (attempt %d/3), retrying...", attempt + 1)
+                time.sleep(3 * (attempt + 1))
+
+        init = resp.json()
+
+        # Step 2: Upload to OSS (separate client, longer timeout, with retry)
+        self._limiter.acquire()
+        for attempt in range(3):
+            try:
+                oss_resp = _httpx.post(
+                    init["host"],
+                    data={
+                        "key": init["object"],
+                        "OSSAccessKeyId": init["accessid"],
+                        "policy": init["policy"],
+                        "signature": init["signature"],
+                        "callback": init["callback"],
+                    },
+                    files={"file": (fname, content)},
+                    timeout=60,
+                )
+                break
+            except (httpx.ReadTimeout, httpx.ConnectError, httpx.RemoteProtocolError):
+                if attempt == 2:
+                    raise
+                logger.warning("OSS upload failed (attempt %d/3), retrying...", attempt + 1)
+                time.sleep(3 * (attempt + 1))
+
+        if oss_resp.status_code == 200:
+            logger.debug("115 upload %s → dir=%s", fname, target_dir_id)
+            return oss_resp.json().get("data")
+        logger.warning("115 upload %s failed: HTTP %d", fname, oss_resp.status_code)
+        return None
+
+    def upload_info(self) -> dict:
+        """获取上传所需的 user_id 和 user_key。"""
+        self._limiter.acquire()
+        resp = self._http.get(
+            f"{PRO_API}/app/uploadinfo",
             headers={"Cookie": self._cookies},
         )
         resp.raise_for_status()
-        init = resp.json()
+        result = resp.json()
+        return {
+            "user_id": str(result.get("user_id", "")),
+            "user_key": result.get("userkey", ""),
+        }
 
-        # Step 2: Upload to OSS
-        self._limiter.acquire()
-        oss_resp = _httpx.post(
-            init["host"],
-            data={
-                "key": init["object"],
-                "OSSAccessKeyId": init["accessid"],
-                "policy": init["policy"],
-                "signature": init["signature"],
-                "callback": init["callback"],
-            },
-            files={"file": (fname, content)},
-            timeout=30,
-        )
-        if oss_resp.status_code == 200:
-            return oss_resp.json().get("data")
-        return None
+    def rapid_upload(
+        self,
+        dir_id: str,
+        filename: str,
+        file_size: int,
+        file_sha1: str,
+        file_stream=None,
+    ) -> dict:
+        """Cookie 模式秒传。
+
+        file_stream: 可选的文件流（seekable），用于 sign_check 验证。
+        返回 {"status": 2, "pickcode": "..."} 表示成功，
+               {"status": 1} 表示 115 上没有此文件。
+        """
+        from media115._ec115 import EC115Cipher, TOKEN_SALT
+
+        info = self.upload_info()
+        user_id = info["user_id"]
+        user_key = info["user_key"]
+        user_hash = hashlib.md5(user_id.encode()).hexdigest()
+        app_ver = "2.0.3.6"
+
+        ec = EC115Cipher()
+        target = f"U_1_{dir_id}"
+
+        sign_key = ""
+        sign_val = ""
+
+        for attempt in range(3):  # 最多重试 3 次（sign_check）
+            get_logger().debug("115 rapid_upload %s (attempt %d)", filename, attempt)
+            timestamp = str(int(time.time()))
+
+            # sig
+            h1 = hashlib.sha1(
+                f"{user_id}{file_sha1}{target}0".encode()
+            ).hexdigest()
+            sig = hashlib.sha1(
+                f"{user_key}{h1}000000".encode()
+            ).hexdigest().upper()
+
+            # token
+            token_data = (
+                TOKEN_SALT
+                + file_sha1
+                + str(file_size)
+                + sign_key
+                + sign_val
+                + user_id
+                + timestamp
+                + user_hash
+                + app_ver
+            )
+            token = hashlib.md5(token_data.encode()).hexdigest()
+
+            form: dict[str, str] = {
+                "appid": "0",
+                "appversion": app_ver,
+                "userid": user_id,
+                "filename": filename,
+                "filesize": str(file_size),
+                "fileid": file_sha1,
+                "target": target,
+                "sig": sig,
+                "t": timestamp,
+                "token": token,
+            }
+            if sign_key:
+                form["sign_key"] = sign_key
+                form["sign_val"] = sign_val
+
+            # EC115 加密请求
+            form_data = urlencode(form).encode()
+            encrypted = ec.encode(form_data)
+
+            self._limiter.acquire()
+            resp = self._http.post(
+                "https://uplb.115.com/4.0/initupload.php",
+                params={"k_ec": ec.encode_token()},
+                content=encrypted,
+                headers={
+                    "Cookie": self._cookies,
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+            )
+            resp.raise_for_status()
+
+            # EC115 解密响应
+            result = json.loads(ec.decode(resp.content))
+
+            status = result.get("status")
+            if status == 2:
+                return {"status": 2, "pickcode": result.get("pickcode", "")}
+            elif status == 7 and result.get("statuscode") == 701 and file_stream:
+                # sign_check: 计算指定范围 SHA1
+                sign_key = result["sign_key"]
+                sign_range = result["sign_check"]
+                start_s, end_s = sign_range.split("-")
+                start, end = int(start_s), int(end_s)
+                file_stream.seek(start)
+                sign_val = hashlib.sha1(
+                    file_stream.read(end - start + 1)
+                ).hexdigest().upper()
+                continue
+            else:
+                return {"status": result.get("status", 0)}
+
+        return {"status": 0}  # 超过重试次数
 
     def batch_rename(self, renames: dict[str, str]) -> dict:
         """Rename multiple files in one API call.
 
         renames: {file_id: new_name, ...}
         """
-        if self._mode == "cookie":
-            data = {f"files_new_name[{fid}]": name for fid, name in renames.items()}
-            return self._cookie_request("POST", f"{WEB_API}/files/batch_rename", data=data)
-        else:
-            # OpenAPI doesn't have batch_rename, fall back to individual
-            for fid, name in renames.items():
-                self.rename(fid, name)
-            return {"state": True}
+        data = {f"files_new_name[{fid}]": name for fid, name in renames.items()}
+        return self._cookie_request("POST", f"{WEB_API}/files/batch_rename", data=data)
 
     def export_tree(self, dir_id: str) -> str | None:
         """Export 115 directory tree. Returns tree text (UTF-8) or None on failure.
 
         Only uses 2-3 API calls regardless of directory size.
         """
-        if self._mode != "cookie":
-            raise NotImplementedError("export_tree requires cookie mode")
-
         import httpx as _httpx
 
         # Start export
