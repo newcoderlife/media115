@@ -372,3 +372,105 @@ class TestGet:
             result = runner.invoke(main, ["get", "/影音/b.mkv"])
         assert result.exit_code == 0
         mock_dl.assert_called_once()
+
+
+class TestSync:
+    def test_sync_exports_tree(self, runner):
+        resolver = _mock_resolver()
+        resolver.client.export_tree.return_value = "影音\n|-电影\n| |-满江红 (2023)\n"
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["sync", "/影音"])
+        assert result.exit_code == 0
+        resolver.client.export_tree.assert_called_once()
+
+    def test_sync_saves_tree_cache(self, runner, tmp_path, monkeypatch):
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+        resolver = _mock_resolver()
+        resolver.client.export_tree.return_value = "影音\n|-电影\n| |-满江红 (2023)\n"
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["sync", "/影音"])
+        assert result.exit_code == 0
+        from media115.cache import tree_cache_path
+        assert tree_cache_path().exists()
+
+    def test_sync_writes_path_index(self, runner, tmp_path, monkeypatch):
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+        resolver = _mock_resolver()
+        resolver.resolve_dir.return_value = "100"
+        resolver.client.export_tree.return_value = "影音\n|-电影\n"
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["sync", "/影音"])
+        assert result.exit_code == 0
+        resolver._write_path_index.assert_called_once_with("/影音", "100")
+
+    def test_sync_no_result(self, runner):
+        resolver = _mock_resolver()
+        resolver.client.export_tree.return_value = None
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["sync", "/影音"])
+        assert result.exit_code != 0 or "失败" in result.output or "fail" in result.output.lower()
+
+    def test_sync_dir_not_found(self, runner):
+        resolver = _mock_resolver()
+        resolver.resolve_dir.side_effect = FileNotFoundError
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["sync", "/不存在的路径"])
+        assert result.exit_code != 0
+
+    def test_sync_deep_flag_prints_notice(self, runner):
+        resolver = _mock_resolver()
+        resolver.client.export_tree.return_value = "影音\n|-电影\n"
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["sync", "--deep", "/影音"])
+        assert result.exit_code == 0
+        assert "暂未实现" in result.output
+
+
+class TestCacheStatus:
+    def test_cache_status(self, runner):
+        # autouse _isolate_cache fixture already sets XDG_CACHE_HOME
+        result = runner.invoke(main, ["cache", "status"])
+        assert result.exit_code == 0
+
+    def test_cache_status_shows_path_index_count(self, runner, tmp_path, monkeypatch):
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+        from media115.cache import _cache_dir
+        import json as _json
+        fs_dir = _cache_dir("fs")
+        (fs_dir / "path_index.json").write_text(_json.dumps({"/影音": {"cid": "100", "ts": 1}}))
+        result = runner.invoke(main, ["cache", "status"])
+        assert result.exit_code == 0
+        assert "1" in result.output
+
+    def test_cache_status_tree_cache_absent(self, runner):
+        result = runner.invoke(main, ["cache", "status"])
+        assert result.exit_code == 0
+        assert "不存在" in result.output
+
+
+class TestCacheClear:
+    def test_cache_clear_confirmed(self, runner, tmp_path, monkeypatch):
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+        from media115.cache import _cache_dir
+        fs_dir = _cache_dir("fs")
+        (fs_dir / "path_index.json").write_text("{}")
+        result = runner.invoke(main, ["cache", "clear"], input="y\n")
+        assert result.exit_code == 0
+        assert not fs_dir.exists()
+
+    def test_cache_clear_cancelled(self, runner):
+        result = runner.invoke(main, ["cache", "clear"], input="n\n")
+        assert result.exit_code == 0
+        assert "取消" in result.output
+
+    def test_cache_clear_does_not_remove_scrape(self, runner, tmp_path, monkeypatch):
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+        from media115.cache import _cache_dir, _cache_root
+        # Create scrape dir and fs dir
+        scrape_dir = _cache_dir("scrape")
+        (scrape_dir / "test.json").write_text("{}")
+        _cache_dir("fs")
+        result = runner.invoke(main, ["cache", "clear"], input="y\n")
+        assert result.exit_code == 0
+        # scrape/ should still exist
+        assert scrape_dir.exists()
