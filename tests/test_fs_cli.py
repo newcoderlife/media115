@@ -16,6 +16,7 @@ def _mock_resolver(items=None):
     r = MagicMock()
     r.resolve_dir.return_value = "100"
     r.listing.return_value = items or []
+    r.resolve_file.return_value = ("fid1", "100", {"name": "file.mkv"})
     return r
 
 
@@ -184,3 +185,134 @@ class TestFind:
         with patch("media115.fs_cli._get_resolver", return_value=resolver):
             result = runner.invoke(main, ["find", "nonexistent"])
         assert result.exit_code == 0
+
+
+class TestMkdir:
+    def test_mkdir_simple(self, runner):
+        resolver = _mock_resolver()
+        resolver.client.mkdir.return_value = {"cid": "999", "cname": "新目录"}
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["mkdir", "/影音/新目录"])
+        assert result.exit_code == 0
+        resolver.client.mkdir.assert_called_once()
+
+    def test_mkdir_p(self, runner):
+        """mkdir -p 逐级创建不存在的目录。"""
+        resolver = MagicMock()
+        # /a 不存在，/ 存在
+        resolver.resolve_dir.side_effect = [FileNotFoundError(""), "0"]
+        resolver.client.get_dir_id.return_value = None
+        resolver.client.mkdir.side_effect = [
+            {"cid": "10", "cname": "a"},
+            {"cid": "20", "cname": "b"},
+        ]
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["mkdir", "-p", "/a/b"])
+        assert resolver.client.mkdir.call_count == 2
+
+
+class TestRm:
+    def test_rm_file(self, runner):
+        resolver = _mock_resolver()
+        resolver.resolve_file.return_value = ("fid1", "parent_cid", {"name": "a.txt"})
+        resolver.client.delete.return_value = {"state": True}
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["rm", "/影音/a.txt"])
+        assert result.exit_code == 0
+        resolver.client.delete.assert_called_once_with(["fid1"])
+
+    def test_rm_multiple(self, runner):
+        resolver = _mock_resolver()
+        resolver.resolve_file.side_effect = [
+            ("fid1", "p1", {"name": "a.txt"}),
+            ("fid2", "p1", {"name": "b.txt"}),
+        ]
+        resolver.client.delete.return_value = {"state": True}
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["rm", "/影音/a.txt", "/影音/b.txt"])
+        resolver.client.delete.assert_called_once_with(["fid1", "fid2"])
+
+    def test_rm_dir_requires_r(self, runner):
+        resolver = _mock_resolver()
+        resolver.resolve_file.side_effect = FileNotFoundError
+        resolver.resolve_dir.return_value = "dir_cid"
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["rm", "/影音/somedir"])
+        # 应该报错或输出提示
+        assert result.exit_code != 0 or "-r" in result.output
+
+    def test_rm_dir_with_r(self, runner):
+        resolver = _mock_resolver()
+        resolver.resolve_file.side_effect = FileNotFoundError
+        resolver.resolve_dir.return_value = "dir_cid"
+        resolver.client.delete.return_value = {"state": True}
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["rm", "-r", "/影音/somedir"])
+        assert result.exit_code == 0
+        resolver.client.delete.assert_called_once_with(["dir_cid"])
+
+
+class TestRename:
+    def test_rename_single(self, runner):
+        resolver = _mock_resolver()
+        resolver.resolve_file.return_value = ("fid1", "100", {"name": "old.mkv"})
+        resolver.client.rename.return_value = {"state": True}
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["rename", "/影音/old.mkv", "new.mkv"])
+        assert result.exit_code == 0
+        resolver.client.rename.assert_called_once_with("fid1", "new.mkv")
+
+    def test_rename_batch(self, runner):
+        resolver = _mock_resolver()
+        resolver.resolve_file.side_effect = [
+            ("fid1", "100", {"name": "a.mkv"}),
+            ("fid2", "100", {"name": "b.mkv"}),
+        ]
+        resolver.client.batch_rename.return_value = {"state": True}
+        stdin_data = '[["/影音/a.mkv","new_a.mkv"],["/影音/b.mkv","new_b.mkv"]]'
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["rename", "--batch"], input=stdin_data)
+        assert result.exit_code == 0
+        resolver.client.batch_rename.assert_called_once_with({"fid1": "new_a.mkv", "fid2": "new_b.mkv"})
+
+
+class TestMv:
+    def test_mv_to_dir(self, runner):
+        """mv /a/file /b/ → 移动到目录 b"""
+        resolver = _mock_resolver()
+        resolver.resolve_file.return_value = ("fid1", "cid_a", {"name": "file.mkv"})
+        resolver.resolve_dir.return_value = "cid_b"
+        resolver.client.move.return_value = {"state": True}
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["mv", "/a/file.mkv", "/b/"])
+        assert result.exit_code == 0
+        resolver.client.move.assert_called_once_with(["fid1"], "cid_b")
+
+    def test_mv_multi_to_dir(self, runner):
+        """mv /a /b /c /target/ → 批量移动"""
+        resolver = _mock_resolver()
+        resolver.resolve_file.side_effect = [
+            ("fid1", "p", {}), ("fid2", "p", {}), ("fid3", "p", {}),
+        ]
+        resolver.resolve_dir.return_value = "target_cid"
+        resolver.client.move.return_value = {"state": True}
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["mv", "/a", "/b", "/c", "/target/"])
+        assert result.exit_code == 0
+        resolver.client.move.assert_called_once_with(["fid1", "fid2", "fid3"], "target_cid")
+
+    def test_mv_same_dir_renames(self, runner):
+        """mv /a/old /a/new → 同目录下重命名"""
+        resolver = _mock_resolver()
+        resolver.resolve_file.return_value = ("fid1", "cid_a", {"name": "old.mkv"})
+        # dest 不是已存在目录
+        def resolve_dir_side_effect(path):
+            if path == "/a":
+                return "cid_a"
+            raise FileNotFoundError(path)
+        resolver.resolve_dir.side_effect = resolve_dir_side_effect
+        resolver.client.rename.return_value = {"state": True}
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["mv", "/a/old.mkv", "/a/new.mkv"])
+        assert result.exit_code == 0
+        resolver.client.rename.assert_called_once_with("fid1", "new.mkv")
