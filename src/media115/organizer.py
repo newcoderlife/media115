@@ -172,7 +172,10 @@ def execute_organize_plan(
 
     from media115 import cache as _cache
     from media115.fs import PathResolver
+    from media115.log import get_logger
     from media115.utils import stem as _u_stem
+
+    logger = get_logger()
 
     if resolver is None:
         resolver = PathResolver(client)
@@ -203,7 +206,7 @@ def execute_organize_plan(
 
     # Phase 1: Resolve all fids
     # Pre-populate sub-dir cids from category listing to avoid N get_dir_id calls
-    print(f"  Resolving {len(active_ops)} files...", file=sys.stderr, flush=True)
+    logger.info("  Resolving %d files...", len(active_ops))
     cat_items = client.list_files_all(dir_id=category_cid)
     subdir_cids = {}  # subdir_name → cid
     for item in cat_items:
@@ -244,15 +247,11 @@ def execute_organize_plan(
             continue
         resolved.append((op, fid))
 
-    print(
-        f"  Resolved {len(resolved)}/{len(active_ops)} files",
-        file=sys.stderr,
-        flush=True,
-    )
+    logger.info("  Resolved %d/%d files", len(resolved), len(active_ops))
 
     # Phase 2: Create all target directories
     target_folders = {op.get("new_folder") for op, _ in resolved if op.get("new_folder")}
-    print(f"  Creating {len(target_folders)} directories...", file=sys.stderr, flush=True)
+    logger.info("  Creating %d directories...", len(target_folders))
     for folder in target_folders:
         if folder not in created_dirs:
             try:
@@ -287,11 +286,7 @@ def execute_organize_plan(
 
     failed_fids: set[str] = set()
     total_moves = sum(len(fids) for fids in move_groups.values())
-    print(
-        f"  Moving {total_moves} files to {len(move_groups)} directories...",
-        file=sys.stderr,
-        flush=True,
-    )
+    logger.info("  Moving %d files to %d directories...", total_moves, len(move_groups))
     for target_cid, fids in move_groups.items():
         try:
             client.move(fids, target_cid)
@@ -305,7 +300,7 @@ def execute_organize_plan(
                         resolver.mark_stale(src_cid)
             resolver.mark_stale(target_cid)
         except Exception as e:
-            print(f"  Move failed: {e}", file=sys.stderr)
+            logger.error("  Move failed: %s", e)
             failed_fids.update(fids)
 
     # Phase 4: Batch rename
@@ -318,7 +313,7 @@ def execute_organize_plan(
             rename_map[fid] = new_name
 
     if rename_map:
-        print(f"  Renaming {len(rename_map)} files...", file=sys.stderr, flush=True)
+        logger.info("  Renaming %d files...", len(rename_map))
         try:
             client.batch_rename(rename_map)
             # Mark dirs containing renamed files as stale
@@ -333,12 +328,12 @@ def execute_organize_plan(
             for cid in renamed_cids:
                 resolver.mark_stale(cid)
         except Exception as e:
-            print(f"  Rename failed: {e}", file=sys.stderr)
+            logger.error("  Rename failed: %s", e)
             failed_fids.update(rename_map.keys())
 
     # Phase 5: Upload NFO/poster + update file_map (skip failed files)
     upload_total = len(resolved)
-    print(f"  Uploading NFO/poster ({upload_total} files)...", file=sys.stderr, flush=True)
+    logger.info("  Uploading NFO/poster (%d files)...", upload_total)
     for idx, (op, fid) in enumerate(resolved, 1):
         if fid in failed_fids:
             results.append({**op, "status": "error", "error": "move or rename failed"})
@@ -372,6 +367,7 @@ def execute_organize_plan(
 
         results.append({**op, "status": "ok"})
     print("", file=sys.stderr)  # 换行
+    logger.info("  Uploaded %d NFO/poster files", upload_total)
 
     # Phase 6: Delete old source directories (now empty or metadata-only)
     source_dirs = set()
@@ -384,11 +380,7 @@ def execute_organize_plan(
                 source_dirs.add(parent_leaf)
 
     if source_dirs:
-        print(
-            f"  Cleaning up {len(source_dirs)} old directories...",
-            file=sys.stderr,
-            flush=True,
-        )
+        logger.info("  Cleaning up %d old directories...", len(source_dirs))
         # Refresh category listing to get current cids
         cat_items = client.list_files_all(dir_id=category_cid)
         for item in cat_items:
@@ -407,10 +399,10 @@ def execute_organize_plan(
             if not has_video:
                 try:
                     client.delete([cid])
-                    print(f"    Deleted: {name}", file=sys.stderr)
+                    logger.debug("    Deleted: %s", name)
                     resolver.invalidate(f"/{category_path}/{name}")
                 except Exception as e:
-                    print(f"    Failed to delete {name}: {e}", file=sys.stderr)
+                    logger.error("    Failed to delete %s: %s", name, e)
 
     return results
 

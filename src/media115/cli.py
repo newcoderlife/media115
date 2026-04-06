@@ -104,6 +104,8 @@ def _env_write_path() -> Path:
 def main():
     """media115: Media library management with 115 cloud."""
     _load_env()
+    from media115.log import setup_logging
+    setup_logging()
 
 
 @main.command()

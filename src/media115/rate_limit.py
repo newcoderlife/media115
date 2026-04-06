@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sys
 import threading
 import time
 from pathlib import Path
@@ -106,8 +105,6 @@ class RateLimiter:
             hours, mins = divmod(mins, 60)
             until_str = time.strftime("%H:%M", time.localtime(until))
             dur = f"{hours}h" if hours else f"{mins}m{secs:02d}s"
-            print(
-                f"  429 received: entering {dur} cooldown (until {until_str})",
-                file=sys.stderr,
-                flush=True,
-            )
+            from media115.log import get_logger
+            logger = get_logger()
+            logger.warning("429 received: entering %s cooldown (until %s)", dur, until_str)

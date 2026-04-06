@@ -35,6 +35,8 @@ class BangumiClient:
         self.close()
 
     def search(self, keyword: str, subject_type: int = 2, limit: int = 10) -> list[dict]:
+        from media115.log import get_logger
+        get_logger().debug("Bangumi GET /v0/search/subjects")
         self._limiter.acquire()
         resp = self._http.post(
             "/v0/search/subjects",
@@ -49,6 +51,8 @@ class BangumiClient:
         return data.get("data", [])
 
     def subject(self, subject_id: int) -> dict:
+        from media115.log import get_logger
+        get_logger().debug("Bangumi GET /v0/subjects/%s", subject_id)
         self._limiter.acquire()
         resp = self._http.get(f"/v0/subjects/{subject_id}")
         resp.raise_for_status()
@@ -61,6 +65,8 @@ class BangumiClient:
         limit: int = 100,
         offset: int = 0,
     ) -> list[dict]:
+        from media115.log import get_logger
+        get_logger().debug("Bangumi GET /v0/episodes?subject_id=%s", subject_id)
         self._limiter.acquire()
         params: dict = {
             "subject_id": subject_id,
@@ -74,6 +80,8 @@ class BangumiClient:
         return resp.json().get("data", [])
 
     def subject_persons(self, subject_id: int) -> list[dict]:
+        from media115.log import get_logger
+        get_logger().debug("Bangumi GET /v0/subjects/%s/persons", subject_id)
         self._limiter.acquire()
         resp = self._http.get(f"/v0/subjects/{subject_id}/persons")
         resp.raise_for_status()

@@ -16,6 +16,7 @@ import httpx
 
 from media115._crypto import generate_m115_key, m115_decode, m115_encode
 from media115.cache import _cache_dir
+from media115.log import get_logger
 from media115.rate_limit import RateLimiter, _read_state, _write_state
 
 # API endpoints
@@ -241,6 +242,8 @@ class Cloud115Client:
         limiter: RateLimiter | None = None,
     ) -> dict:
         (limiter or self._limiter).acquire()
+        logger = get_logger()
+        logger.debug("115 %s %s", method, url.split(".com")[-1][:60])
         max_retries = 3
         for attempt in range(max_retries):
             try:
@@ -255,11 +258,13 @@ class Cloud115Client:
             except (httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.ConnectError):
                 if attempt == max_retries - 1:
                     raise
+                logger.warning("115 network error (attempt %d/%d), retrying...", attempt + 1, max_retries)
                 time.sleep(3 * (attempt + 1))
                 continue
         if resp.status_code == 429:
             self._limiter.set_cooldown(3600)
             self._download_limiter.set_cooldown(3600)
+            logger.warning("115 rate limit (429), cooldown 3600s")
             raise RuntimeError("115 API rate limit hit (429). Cooling down for 1 hour.")
         if resp.status_code == 405 and self.renew_cookies():
             resp = self._http.request(
@@ -276,6 +281,7 @@ class Cloud115Client:
             if err == 770004 or "访问上限" in str(result.get("error", "")):
                 self._limiter.set_cooldown(3600)
                 self._download_limiter.set_cooldown(3600)
+                logger.warning("115 rate limit (errNo=%d), cooldown 3600s", err)
                 raise RuntimeError(f"115 API rate limit hit (errNo={err}). Cooling down.")
         return result
 
@@ -469,6 +475,7 @@ class Cloud115Client:
             timeout=30,
         )
         if oss_resp.status_code == 200:
+            get_logger().debug("115 upload %s → dir=%s", fname, target_dir_id)
             return oss_resp.json().get("data")
         return None
 
@@ -514,7 +521,8 @@ class Cloud115Client:
         sign_key = ""
         sign_val = ""
 
-        for _ in range(3):  # 最多重试 3 次（sign_check）
+        for attempt in range(3):  # 最多重试 3 次（sign_check）
+            get_logger().debug("115 rapid_upload %s (attempt %d)", filename, attempt)
             timestamp = str(int(time.time()))
 
             # sig
