@@ -57,7 +57,6 @@ Tree cache is now stale. Run 'export-tree /影音' to refresh.
 | `/scan` | Show what needs scraping + detect anomalies (0 API calls) | Before scraping to plan work |
 | `/scrape` | Batch scrape metadata + agent handles failures | Main scraping workflow |
 | `/organize` | Rename + move + upload NFO + cleanup old dirs | After scraping — this is the main operation |
-| `/upload-nfo` | Upload NFO/poster for already-organized files | Only when organize was NOT used (rare) |
 | `/scrape-fix` | Correct a wrong scrape result + regression test | User says "that's wrong" |
 
 ## CLI Reference
@@ -86,9 +85,6 @@ scrape "满江红" --source bangumi     # Search Bangumi
 organize 电影                        # Dry-run: show plan
 organize 电影 --execute              # Execute: move + rename + upload NFO + cleanup
 organize 电影 --execute --cleanup    # Also delete unrelated empty dirs
-
-# Upload (only when organize was NOT used)
-upload-nfo 电影                      # Upload NFO/poster for already-organized files
 
 # Proxy
 serve --port 9000                    # Start Jellyfin strm-proxy
