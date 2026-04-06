@@ -435,9 +435,22 @@ def _upload_scrape_output(client, op: dict, target_cid: str, new_video_name: str
             if out_dir.name == search_name:
                 from media115.log import get_logger
                 _log = get_logger()
+
+                # Fetch existing filenames in the target directory to avoid duplicates.
+                # 115 does not overwrite same-name files; it creates "(1)", "(2)" copies.
+                existing_names: set[str] = set()
+                try:
+                    items = client.list_files_all(dir_id=target_cid)
+                    existing_names = {item.get("fn", item.get("n", "")) for item in items}
+                except Exception:
+                    pass  # If listing fails, skip dedup and upload anyway
+
                 for f in out_dir.iterdir():
                     if f.suffix in (".nfo", ".jpg", ".png"):
                         remote_name = nfo_name if f.suffix == ".nfo" and nfo_name else f.name
+                        if remote_name in existing_names:
+                            _log.debug("  skip %s (already exists in cid=%s)", remote_name, target_cid)
+                            continue
                         try:
                             client.upload_file(f, target_cid, remote_name)
                             _log.debug("  uploaded %s → cid=%s", remote_name, target_cid)
