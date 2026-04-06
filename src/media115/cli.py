@@ -257,6 +257,14 @@ def export_tree(path):
     )
     click.echo(f"Tree exported: {len(lines)} entries, {video_count} video files")
     click.echo(f"Saved to {tree_path}")
+
+    # Write resolved path → dir_id into PathResolver cache
+    if not path.isdigit():
+        from media115.fs import PathResolver
+
+        resolver = PathResolver(client)
+        resolver._write_path_index(path, dir_id)
+
     click.echo("\nNext: run 'scan-tree <category>' to preview what needs scraping.")
 
 
