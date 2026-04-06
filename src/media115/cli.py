@@ -14,16 +14,18 @@ from media115.utils import trunc as _trunc
 
 
 def _load_env():
-    env_path = Path.cwd() / ".env"
-    if not env_path.exists():
-        return
-    for line in env_path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
+    from media115.cache import _config_root
+    paths = [Path.cwd() / ".env", _config_root() / ".env"]
+    for env_path in paths:
+        if not env_path.exists():
             continue
-        key, val = line.split("=", 1)
-        val = val.strip().strip("'\"")
-        os.environ.setdefault(key.strip(), val)
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, val = line.split("=", 1)
+            val = val.strip().strip("'\"")
+            os.environ.setdefault(key.strip(), val)
 
 
 _DEFAULT_CONFIG = {
@@ -122,8 +124,7 @@ def auth(app, check, renew, force, get_qr, wait_qr):
             "sign": token_data["sign"],
             "app": app,
         }
-        qr_session_path = Path.cwd() / ".cache" / "qr_session.json"
-        qr_session_path.parent.mkdir(parents=True, exist_ok=True)
+        qr_session_path = media_cache._cache_dir() / "qr_session.json"
         qr_session_path.write_text(_json.dumps(session))
         click.echo(f"QR_URL={qr_url}")
         return
@@ -134,7 +135,7 @@ def auth(app, check, renew, force, get_qr, wait_qr):
 
         import httpx as _httpx
 
-        qr_session_path = Path.cwd() / ".cache" / "qr_session.json"
+        qr_session_path = media_cache._cache_dir() / "qr_session.json"
         if not qr_session_path.exists():
             click.echo("No QR session. Run 'auth --get-qr' first.", err=True)
             return
@@ -432,8 +433,8 @@ def scan_tree(category, show_all):
 @click.argument("category")
 @click.option(
     "--output",
-    default=".cache/scrape_output",
-    help="Output directory for NFO + posters",
+    default=None,
+    help="Output directory for NFO + posters (default: ~/.cache/media115/scrape_output)",
 )
 @click.option("--limit", "max_count", default=0, type=int, help="Max files to scrape (0=all)")
 @click.option("--force", is_flag=True, help="Re-scrape even if NFO already exists on 115")
@@ -461,7 +462,10 @@ def batch_scrape(category, output, max_count, force):
         click.echo(f"No files to scrape in category '{category}'.")
         return
 
-    out_dir = Path.cwd() / output / category
+    if output is None:
+        out_dir = media_cache._cache_dir("scrape_output") / category
+    else:
+        out_dir = Path(output) / category
     out_dir.mkdir(parents=True, exist_ok=True)
 
     click.echo(f"Scraping {len(videos)} files in '{category}' → {out_dir}")
@@ -512,8 +516,7 @@ def batch_scrape(category, output, max_count, force):
     import json as _json
     import time as _time
 
-    log_dir = Path.cwd() / ".cache" / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
+    log_dir = media_cache._cache_dir("logs")
     log_file = log_dir / f"scrape_{category}_{int(_time.time())}.json"
     log_file.write_text(_json.dumps(results, ensure_ascii=False, indent=2))
     click.echo(f"Log saved to {log_file}")
@@ -606,8 +609,7 @@ def organize(category, execute, cleanup):
     import json as _json
     import time as _time
 
-    log_dir = Path.cwd() / ".cache" / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
+    log_dir = media_cache._cache_dir("logs")
     log_file = log_dir / f"organize_{category}_{int(_time.time())}.json"
     log_entries = []
     for r in results:

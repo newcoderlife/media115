@@ -48,10 +48,9 @@ def _write_env(base="."):
 
 
 def _write_tree(base=".", content=None):
-    """Write tree_cache.txt inside .cache/."""
-    cache_dir = Path(base) / ".cache"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    tree_path = cache_dir / "tree_cache.txt"
+    """Write tree_cache.txt to the XDG cache location."""
+    from media115 import cache as media_cache
+    tree_path = media_cache.tree_cache_path()
     tree_path.write_text(content or SAMPLE_TREE)
     return tree_path
 
@@ -115,7 +114,8 @@ class TestExportTree:
 
             assert result.exit_code == 0
             assert "Tree exported" in result.output
-            tree_path = Path(".cache") / "tree_cache.txt"
+            from media115 import cache as media_cache
+            tree_path = media_cache.tree_cache_path()
             assert tree_path.exists()
             assert "The Matrix" in tree_path.read_text()
             # Should report video count
@@ -318,7 +318,8 @@ class TestBatchScrape:
             assert result.exit_code == 0
             assert "Log saved to" in result.output
             # Check log dir exists
-            log_dir = Path(".cache") / "logs"
+            from media115 import cache as media_cache
+            log_dir = media_cache._cache_root() / "logs"
             assert log_dir.exists()
             log_files = list(log_dir.glob("scrape_AV_*.json"))
             assert len(log_files) == 1
