@@ -102,7 +102,7 @@ media115 get /影音/电影/a.mkv ./             # 下载
 # 缓存与同步
 media115 sync /影音                          # 刷新目录树缓存（2-3 API 调用）
 media115 cache status                        # 缓存状态
-media115 cache clear                         # 清除所有缓存
+media115 cache clear                         # 清除路径缓存（fs/），不影响刮削缓存和日志
 
 # 批量操作（依赖本地树缓存）
 media115 scan-tree 电影                      # 分析缓存，输出刮削计划 + 异常检测
