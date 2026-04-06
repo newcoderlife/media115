@@ -21,15 +21,31 @@ Structure:
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 
-CACHE_DIR = ".cache"
 NOT_FOUND_TTL = 7 * 24 * 3600  # 7 days
 
 
+def _cache_root() -> Path:
+    """~/.cache/media115/ 或 $XDG_CACHE_HOME/media115/"""
+    base = os.environ.get("XDG_CACHE_HOME", "")
+    if not base:
+        base = str(Path.home() / ".cache")
+    return Path(base) / "media115"
+
+
+def _config_root() -> Path:
+    """~/.config/media115/ 或 $XDG_CONFIG_HOME/media115/"""
+    base = os.environ.get("XDG_CONFIG_HOME", "")
+    if not base:
+        base = str(Path.home() / ".config")
+    return Path(base) / "media115"
+
+
 def _cache_dir(subdir: str = "") -> Path:
-    d = Path.cwd() / CACHE_DIR
+    d = _cache_root()
     if subdir:
         d = d / subdir
     d.mkdir(parents=True, exist_ok=True)

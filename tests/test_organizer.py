@@ -524,9 +524,6 @@ class TestScrapeAvWritesFileMap:
         from media115 import cache as real_cache
         from media115.scraper import scrape as scrape_mod
 
-        # Point cache dir to tmp_path so we don't pollute the real cache
-        monkeypatch.setattr(real_cache, "CACHE_DIR", str(tmp_path / ".cache"))
-
         # Make sure no existing AV cache or not_found cache
         assert real_cache.get("av", "TEST-001") is None
 
@@ -568,8 +565,6 @@ class TestScrapeAvWritesFileMap:
         from media115 import cache as real_cache
         from media115.scraper import scrape as scrape_mod
 
-        monkeypatch.setattr(real_cache, "CACHE_DIR", str(tmp_path / ".cache"))
-
         # Pre-populate AV cache (simulating a previous scrape)
         real_cache.put(
             "av",
@@ -602,8 +597,6 @@ class TestScrapeAvWritesFileMap:
         """When jav321 returns nothing, javfree is tried and file_map written."""
         from media115 import cache as real_cache
         from media115.scraper import scrape as scrape_mod
-
-        monkeypatch.setattr(real_cache, "CACHE_DIR", str(tmp_path / ".cache"))
 
         # jav321 returns nothing
         monkeypatch.setattr("media115.scraper.jav321.fetch_metadata", lambda num: None)
@@ -1021,14 +1014,12 @@ class TestUploadScrapeOutput:
     """test_upload_scrape_output: upload NFO + poster from scrape_output."""
 
     def test_uploads_nfo_and_poster(self, tmp_path, monkeypatch):
+        from media115.cache import _cache_root
         from media115.organizer import _upload_scrape_output
 
-        # Set cwd to tmp_path so the function finds .cache/scrape_output
-        monkeypatch.chdir(tmp_path)
-
-        # Create scrape_output directory structure:
-        # .cache/scrape_output/<category>/<parent_path_with_underscores>/
-        scrape_dir = tmp_path / ".cache" / "scrape_output" / "movie" / "影音_电影_OldDir"
+        # Create scrape_output directory structure in the XDG cache location:
+        # <XDG_CACHE_HOME>/media115/scrape_output/<category>/<parent_path_with_underscores>/
+        scrape_dir = _cache_root() / "scrape_output" / "movie" / "影音_电影_OldDir"
         scrape_dir.mkdir(parents=True)
         nfo_file = scrape_dir / "old.nfo"
         nfo_file.write_text("<movie><title>Test</title></movie>")
@@ -1055,9 +1046,7 @@ class TestUploadScrapeOutput:
     def test_no_scrape_dir_is_noop(self, tmp_path, monkeypatch):
         from media115.organizer import _upload_scrape_output
 
-        monkeypatch.chdir(tmp_path)
-        # No .cache/scrape_output directory exists
-
+        # No scrape_output directory exists in the isolated XDG cache
         client = MagicMock()
         op = {"file": "old.mkv", "parent": "影音/电影/OldDir"}
         _upload_scrape_output(client, op, "target_cid_1", "New Title (2024).mkv")

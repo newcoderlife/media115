@@ -369,11 +369,10 @@ def _upload_scrape_output(client, op: dict, target_cid: str, new_video_name: str
 
     NFO is renamed to match the new video filename so Jellyfin can pair them.
     """
-    import os
-
+    from media115.cache import _cache_root
     from media115.utils import split_ext
 
-    scrape_dir = Path(os.getcwd()) / ".cache" / "scrape_output"
+    scrape_dir = _cache_root() / "scrape_output"
     if not scrape_dir.exists():
         return
 
