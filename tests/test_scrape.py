@@ -9,8 +9,9 @@ from media115.scraper.scrape import _write_av_nfo, scrape_av, scrape_movie, scra
 
 
 @pytest.fixture(autouse=True)
-def _isolate_cache(tmp_path, monkeypatch):
-    monkeypatch.setattr(cache, "CACHE_DIR", str(tmp_path / ".cache"))
+def _isolate_cache_scrape(tmp_path, monkeypatch):
+    # XDG isolation is already provided by conftest._isolate_cache (autouse)
+    pass
 
 
 class TestScrapeMovie:
