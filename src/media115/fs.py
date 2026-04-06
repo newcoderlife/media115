@@ -174,19 +174,20 @@ class PathResolver:
         return data["items"] if data else []
 
     def invalidate(self, path: str):
-        """从 path_index 和 dir listing 中移除。"""
+        """从 path_index 和 dir listing 中移除路径及所有子路径。"""
         path = _normalize(path)
         index = self._read_path_index()
-        if path in index:
-            cid = index[path]["cid"]
-            del index[path]
-            self._path_index_file.write_text(
-                json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            # 删除对应的 dir listing
-            listing_file = self._dir_listing_file(cid)
-            if listing_file.exists():
-                listing_file.unlink()
+        # 收集要删除的路径：精确匹配 + 所有子路径
+        prefix = path + "/"
+        to_remove = [p for p in index if p == path or p.startswith(prefix)]
+        for p in to_remove:
+            entry = index.pop(p, None)
+            if entry:
+                listing_file = self._dir_listing_file(entry["cid"])
+                listing_file.unlink(missing_ok=True)
+        self._path_index_file.write_text(
+            json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
     def mark_stale(self, cid: str):
         """标记 dir listing 为 stale。"""
