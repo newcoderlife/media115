@@ -5,13 +5,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from media115.client import Cloud115Client, RateLimiter
+from media115.client import Cloud115Client, _read_state, _write_state
+from media115.rate_limit import RateLimiter
 
 
 class TestRateLimiter:
     def test_allows_without_env(self):
         """Without env_path, limiter is in-process only and doesn't block."""
-        limiter = RateLimiter(qps=100, qpm=1000, use_state=False)
+        limiter = RateLimiter(qps=100, qpm=1000, state_path=None)
         for _ in range(10):
             limiter.acquire()
 
@@ -20,7 +21,7 @@ class TestRateLimiter:
         import json
 
         state_file = tmp_path / "rate_limit.json"
-        limiter = RateLimiter(qps=10, qpm=1000, use_state=False)
+        limiter = RateLimiter(qps=10, qpm=1000, state_path=None)
         limiter._state_path = state_file  # Override for test
         limiter.acquire()
         assert state_file.exists()
@@ -33,7 +34,7 @@ class TestRateLimiter:
         import json
 
         state_file = tmp_path / "rate_limit.json"
-        limiter = RateLimiter(qps=100, qpm=1000, use_state=False)
+        limiter = RateLimiter(qps=100, qpm=1000, state_path=None)
         limiter._state_path = state_file
         limiter.acquire()
         limiter.acquire()
@@ -44,14 +45,14 @@ class TestRateLimiter:
     def test_cooldown_blocks(self, tmp_path):
         """Cooldown blocks subsequent calls."""
         state_file = tmp_path / "rate_limit.json"
-        limiter = RateLimiter(qps=100, qpm=1000, use_state=False)
+        limiter = RateLimiter(qps=100, qpm=1000, state_path=None)
         limiter._state_path = state_file
         limiter.set_cooldown(3600)
         with pytest.raises(RuntimeError, match="cooldown"):
             limiter.acquire()
 
     def test_tracks_request_count(self):
-        limiter = RateLimiter(qps=100, qpm=1000, use_state=False)
+        limiter = RateLimiter(qps=100, qpm=1000, state_path=None)
         for _ in range(5):
             limiter.acquire()
         assert limiter.request_count >= 5
@@ -188,8 +189,8 @@ class TestCookieModeAPIs:
     @pytest.fixture
     def client(self):
         c = Cloud115Client.from_cookies("UID=1_A1_0; CID=abc; SEID=def")
-        c._limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
-        c._download_limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
+        c._limiter = RateLimiter(qps=100, qpm=10000, state_path=None)
+        c._download_limiter = RateLimiter(qps=100, qpm=10000, state_path=None)
         return c
 
     def _mock_resp(self, json_data, status_code=200):
@@ -371,8 +372,8 @@ class TestListFilesAllAndRecursive:
     @pytest.fixture
     def client(self):
         c = Cloud115Client.from_cookies("UID=1_A1_0; CID=abc; SEID=def")
-        c._limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
-        c._download_limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
+        c._limiter = RateLimiter(qps=100, qpm=10000, state_path=None)
+        c._download_limiter = RateLimiter(qps=100, qpm=10000, state_path=None)
         return c
 
     def test_list_files_all_single_page(self, client):
@@ -423,8 +424,8 @@ class TestResolvePath:
     @pytest.fixture
     def client(self):
         c = Cloud115Client.from_cookies("UID=1_A1_0; CID=abc; SEID=def")
-        c._limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
-        c._download_limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
+        c._limiter = RateLimiter(qps=100, qpm=10000, state_path=None)
+        c._download_limiter = RateLimiter(qps=100, qpm=10000, state_path=None)
         return c
 
     def test_resolve_empty_path(self, client):
@@ -497,7 +498,7 @@ class TestRateLimiterSetCooldown:
         import json
 
         state_file = tmp_path / "rate_limit.json"
-        limiter = RateLimiter(qps=100, qpm=1000, use_state=False)
+        limiter = RateLimiter(qps=100, qpm=1000, state_path=None)
         limiter._state_path = state_file
 
         limiter.set_cooldown(1800)
@@ -517,8 +518,8 @@ class TestExportTree:
     @pytest.fixture
     def client(self):
         c = Cloud115Client.from_cookies("UID=1_A1_0; CID=abc; SEID=def")
-        c._limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
-        c._download_limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
+        c._limiter = RateLimiter(qps=100, qpm=10000, state_path=None)
+        c._download_limiter = RateLimiter(qps=100, qpm=10000, state_path=None)
         return c
 
     def _mock_resp(self, json_data, status_code=200):
@@ -693,8 +694,8 @@ class TestListFilesAllPagination:
     @pytest.fixture
     def client(self):
         c = Cloud115Client.from_cookies("UID=1_A1_0; CID=abc; SEID=def")
-        c._limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
-        c._download_limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
+        c._limiter = RateLimiter(qps=100, qpm=10000, state_path=None)
+        c._download_limiter = RateLimiter(qps=100, qpm=10000, state_path=None)
         return c
 
     def test_list_files_all_pagination(self, client):
