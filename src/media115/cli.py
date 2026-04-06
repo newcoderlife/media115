@@ -62,23 +62,42 @@ _DEFAULT_CONFIG = {
 
 
 def _load_config() -> dict:
-    """Load config.yaml from project root, merged with defaults.
+    """Load config.yaml, checking cwd first then XDG config dir.
 
-    Looks for config.yaml in the current working directory.
+    Search order:
+      1. <cwd>/config.yaml
+      2. ~/.config/media115/config.yaml  (or $XDG_CONFIG_HOME/media115/config.yaml)
     Missing keys fall back to _DEFAULT_CONFIG.
     """
-    config_path = Path.cwd() / "config.yaml"
-    if config_path.exists():
-        user_config = yaml.safe_load(config_path.read_text()) or {}
-        # Shallow merge: top-level keys from user override defaults
-        merged = dict(_DEFAULT_CONFIG)
-        for key, val in user_config.items():
-            if isinstance(val, dict) and isinstance(merged.get(key), dict):
-                merged[key] = {**merged[key], **val}
-            else:
-                merged[key] = val
-        return merged
+    from media115.cache import _config_root
+    paths = [Path.cwd() / "config.yaml", _config_root() / "config.yaml"]
+    for config_path in paths:
+        if config_path.exists():
+            user_config = yaml.safe_load(config_path.read_text()) or {}
+            # Shallow merge: top-level keys from user override defaults
+            merged = dict(_DEFAULT_CONFIG)
+            for key, val in user_config.items():
+                if isinstance(val, dict) and key in merged and isinstance(merged[key], dict):
+                    merged[key] = {**merged[key], **val}
+                else:
+                    merged[key] = val
+            return merged
     return dict(_DEFAULT_CONFIG)
+
+
+def _env_write_path() -> Path:
+    """Determine the .env write path.
+
+    If a .env already exists in cwd, write there (project-local workflow).
+    Otherwise write to the XDG config dir so installed tools can find it.
+    """
+    cwd_env = Path.cwd() / ".env"
+    if cwd_env.exists():
+        return cwd_env
+    from media115.cache import _config_root
+    xdg_env = _config_root() / ".env"
+    xdg_env.parent.mkdir(parents=True, exist_ok=True)
+    return xdg_env
 
 
 @click.group()
@@ -195,9 +214,10 @@ def auth(app, check, renew, force, get_qr, wait_qr):
             cookie_str = str(cookies)
 
         client = Cloud115Client.from_cookies(cookie_str)
-        client.save_cookies_to_env(Path.cwd() / ".env")
+        env_path = _env_write_path()
+        client.save_cookies_to_env(env_path)
         qr_session_path.unlink(missing_ok=True)
-        click.echo("Login success! Cookies saved to .env")
+        click.echo(f"Login success! Cookies saved to {env_path}")
         return
 
     if renew:
@@ -205,7 +225,7 @@ def auth(app, check, renew, force, get_qr, wait_qr):
             click.echo("No existing cookies to renew. Run 'media115 auth' first.", err=True)
             return
         if existing.renew_cookies(app=app):
-            env_path = Path.cwd() / ".env"
+            env_path = _env_write_path()
             existing.save_cookies_to_env(env_path)
             click.echo("Cookies renewed and saved.")
         else:
@@ -217,7 +237,7 @@ def auth(app, check, renew, force, get_qr, wait_qr):
         return
 
     client = Cloud115Client.qr_login(app=app)
-    env_path = Path.cwd() / ".env"
+    env_path = _env_write_path()
     client.save_cookies_to_env(env_path)
     click.echo(f"Cookies saved to {env_path}")
 

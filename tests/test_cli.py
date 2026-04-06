@@ -1095,6 +1095,38 @@ class TestConfigLoading:
         assert config["strm_proxy"]["host"] == "myhost"
         assert config["strm_proxy"]["port"] == 9000
 
+    def test_load_config_xdg_fallback(self, tmp_path, monkeypatch):
+        """When no cwd/config.yaml exists, fall back to XDG config dir."""
+        empty_dir = tmp_path / "empty_dir"
+        empty_dir.mkdir()
+        monkeypatch.chdir(empty_dir)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+        config_dir = tmp_path / "media115"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").write_text("root: /test\n")
+
+        from media115.cli import _load_config
+        config = _load_config()
+        assert config["root"] == "/test"
+
+    def test_load_config_cwd_takes_precedence(self, tmp_path, monkeypatch):
+        """cwd/config.yaml takes precedence over XDG config."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+        # XDG config
+        xdg_dir = tmp_path / "media115"
+        xdg_dir.mkdir()
+        (xdg_dir / "config.yaml").write_text("root: /xdg\n")
+
+        # cwd config (higher priority)
+        (tmp_path / "config.yaml").write_text("root: /cwd\n")
+
+        from media115.cli import _load_config
+        config = _load_config()
+        assert config["root"] == "/cwd"
+
 
 class TestLoadEnv:
     """Cover _load_env (line 17)."""
