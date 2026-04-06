@@ -443,40 +443,61 @@ class Cloud115Client:
         """Upload a small file (NFO, image) to 115 via OSS.
 
         No encryption needed. Works for files up to ~500MB.
+        Retries up to 3 times on network errors.
         """
         import httpx as _httpx
 
+        logger = get_logger()
         fname = filename or local_path.name
         content = local_path.read_bytes()
 
         self._limiter.acquire()
 
         # Step 1: Init upload
-        resp = self._http.post(
-            "https://uplb.115.com/3.0/sampleinitupload.php",
-            data={"filename": fname, "target": f"U_1_{target_dir_id}"},
-            headers={"Cookie": self._cookies},
-        )
-        resp.raise_for_status()
+        for attempt in range(3):
+            try:
+                resp = self._http.post(
+                    "https://uplb.115.com/3.0/sampleinitupload.php",
+                    data={"filename": fname, "target": f"U_1_{target_dir_id}"},
+                    headers={"Cookie": self._cookies},
+                )
+                resp.raise_for_status()
+                break
+            except (httpx.ReadTimeout, httpx.ConnectError, httpx.RemoteProtocolError):
+                if attempt == 2:
+                    raise
+                logger.warning("upload init failed (attempt %d/3), retrying...", attempt + 1)
+                time.sleep(3 * (attempt + 1))
+
         init = resp.json()
 
-        # Step 2: Upload to OSS
+        # Step 2: Upload to OSS (separate client, longer timeout, with retry)
         self._limiter.acquire()
-        oss_resp = _httpx.post(
-            init["host"],
-            data={
-                "key": init["object"],
-                "OSSAccessKeyId": init["accessid"],
-                "policy": init["policy"],
-                "signature": init["signature"],
-                "callback": init["callback"],
-            },
-            files={"file": (fname, content)},
-            timeout=30,
-        )
+        for attempt in range(3):
+            try:
+                oss_resp = _httpx.post(
+                    init["host"],
+                    data={
+                        "key": init["object"],
+                        "OSSAccessKeyId": init["accessid"],
+                        "policy": init["policy"],
+                        "signature": init["signature"],
+                        "callback": init["callback"],
+                    },
+                    files={"file": (fname, content)},
+                    timeout=60,
+                )
+                break
+            except (httpx.ReadTimeout, httpx.ConnectError, httpx.RemoteProtocolError):
+                if attempt == 2:
+                    raise
+                logger.warning("OSS upload failed (attempt %d/3), retrying...", attempt + 1)
+                time.sleep(3 * (attempt + 1))
+
         if oss_resp.status_code == 200:
-            get_logger().debug("115 upload %s → dir=%s", fname, target_dir_id)
+            logger.debug("115 upload %s → dir=%s", fname, target_dir_id)
             return oss_resp.json().get("data")
+        logger.warning("115 upload %s failed: HTTP %d", fname, oss_resp.status_code)
         return None
 
     def upload_info(self) -> dict:

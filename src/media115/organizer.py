@@ -433,12 +433,16 @@ def _upload_scrape_output(client, op: dict, target_cid: str, new_video_name: str
             if not out_dir.is_dir():
                 continue
             if out_dir.name == search_name:
+                from media115.log import get_logger
+                _log = get_logger()
                 for f in out_dir.iterdir():
                     if f.suffix in (".nfo", ".jpg", ".png"):
-                        # Rename NFO to match video; keep image names as-is
                         remote_name = nfo_name if f.suffix == ".nfo" and nfo_name else f.name
-                        with contextlib.suppress(Exception):
+                        try:
                             client.upload_file(f, target_cid, remote_name)
+                            _log.debug("  uploaded %s → cid=%s", remote_name, target_cid)
+                        except Exception as e:
+                            _log.warning("  upload failed %s: %s", remote_name, e)
                 return
 
 
