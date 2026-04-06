@@ -13,6 +13,30 @@ from media115.utils import split_ext as _split_ext
 from media115.utils import trunc as _trunc
 
 
+def _cases_path() -> Path | None:
+    """找到 scrape_cases.json 的路径。
+
+    查找顺序：
+    1. cwd/tests/scrape_cases.json（repo 内开发）
+    2. ~/.cache/media115/scrape_cases.json（用户自定义规则）
+    3. 包内 tests/scrape_cases.json（installed via pip install -e .）
+    """
+    # 1. cwd（repo 内开发）
+    cwd_path = Path.cwd() / "tests" / "scrape_cases.json"
+    if cwd_path.exists():
+        return cwd_path
+    # 2. XDG 缓存（用户自定义）
+    from media115.cache import _cache_root
+    xdg_path = _cache_root() / "scrape_cases.json"
+    if xdg_path.exists():
+        return xdg_path
+    # 3. 包内 tests/（installed via pip install -e .）
+    pkg_path = Path(__file__).resolve().parent.parent.parent / "tests" / "scrape_cases.json"
+    if pkg_path.exists():
+        return pkg_path
+    return None
+
+
 def _load_env():
     from media115.cache import _config_root
     paths = [Path.cwd() / ".env", _config_root() / ".env"]
@@ -319,8 +343,8 @@ def scan_tree(category, show_all):
             v for v in videos if v["path"].startswith(category) or f"/{category}/" in v["path"]
         ]
 
-    cases_path = Path.cwd() / "tests" / "scrape_cases.json"
-    cases = load_cases(cases_path) if cases_path.exists() else []
+    cases_path = _cases_path()
+    cases = load_cases(cases_path) if cases_path else []
 
     click.echo(f"Found {len(videos)} video files (from cached tree).\n")
     click.echo(
@@ -706,8 +730,8 @@ def scan(path, recursive, depth):
             videos.append(item)
 
     # Load regression cases
-    cases_path = Path(__file__).resolve().parent.parent.parent / "tests" / "scrape_cases.json"
-    cases = load_cases(cases_path) if cases_path.exists() else []
+    cases_path = _cases_path()
+    cases = load_cases(cases_path) if cases_path else []
 
     # Analyze each video
     click.echo(f"\nFound {len(videos)} video files.\n")
