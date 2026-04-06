@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import click
@@ -608,6 +609,58 @@ def batch_scrape(category, output, max_count, force):
         click.echo(f"Next: run 'organize {category}' to preview rename plan.")
 
 
+def _upload_missing_nfo(category: str, skipped_ops: list[dict]):
+    """为已命名正确但缺 NFO 的文件补传 NFO/海报。
+
+    检查 skip 的文件是否在 tree cache 中有 NFO，如果没有且本地有 scrape_output，就上传。
+    """
+    from media115.log import get_logger
+    from media115.organizer import _upload_scrape_output
+
+    logger = get_logger()
+
+    # 从 tree cache 找到已有 NFO 的目录
+    entries = media_cache.parse_tree_cache(VIDEO_EXTS)
+    category_path = f"影音/{category}"
+    nfo_parents = {
+        e["parent"] for e in entries if e["is_nfo"] and f"/{category}/" in f"/{e['path']}/"
+    }
+
+    # 找缺 NFO 的 skip 文件
+    missing = [
+        op for op in skipped_ops
+        if op.get("reason") == "already correct" and op["parent"] not in nfo_parents
+    ]
+
+    if not missing:
+        return
+
+    client = _get_115_client()
+    if not client:
+        return
+
+    click.echo(f"\n补传 NFO: {len(missing)} 个文件缺少 NFO")
+
+    uploaded = 0
+    for i, op in enumerate(missing, 1):
+        parent = op["parent"]
+        parent_leaf = parent.split("/")[-1] if "/" in parent else parent
+
+        # 解析目标 cid
+        dir_cid = client.get_dir_id("/" + parent)
+        if not dir_cid:
+            logger.warning("  补传跳过 %s: 目录不存在", parent)
+            continue
+
+        print(f"\r  [{i}/{len(missing)}] {_trunc(parent_leaf, 50)}", end="", file=sys.stderr, flush=True)
+        _upload_scrape_output(client, op, dir_cid, op.get("file"))
+        uploaded += 1
+
+    print("", file=sys.stderr)
+    logger.info("补传完成: %d 个目录", uploaded)
+    click.echo(f"补传完成: {uploaded} 个目录")
+
+
 @main.command()
 @click.argument("category")
 @click.option("--execute", is_flag=True, help="Actually rename/move (default is dry-run)")
@@ -639,6 +692,9 @@ def organize(category, execute, cleanup):
 
     if not renames:
         click.echo("Nothing to rename.")
+        # 但可能有已命名正确却缺 NFO 的文件，检查并补传
+        if execute:
+            _upload_missing_nfo(category, skips)
         return
 
     click.echo(f"| {'#':>3} | {'Current':<40} | {'→ New Name':<30} | {'Source':>10} |")
@@ -708,6 +764,9 @@ def organize(category, execute, cleanup):
         )
     log_file.write_text(_json.dumps(log_entries, ensure_ascii=False, indent=2))
     click.echo(f"Log saved to {log_file}")
+
+    # 补传已命名正确但缺 NFO 的文件
+    _upload_missing_nfo(category, skips)
 
     if ok > 0:
         click.echo(
