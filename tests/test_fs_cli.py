@@ -316,3 +316,59 @@ class TestMv:
             result = runner.invoke(main, ["mv", "/a/old.mkv", "/a/new.mkv"])
         assert result.exit_code == 0
         resolver.client.rename.assert_called_once_with("fid1", "new.mkv")
+
+
+class TestPut:
+    def test_put_uploads_file(self, runner, tmp_path):
+        local_file = tmp_path / "test.nfo"
+        local_file.write_text("<nfo/>")
+        resolver = _mock_resolver()
+        resolver.resolve_dir.return_value = "target_cid"
+        resolver.client.upload_file.return_value = {"data": {"file_id": "new_fid"}}
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["put", str(local_file), "/影音/电影/"])
+        assert result.exit_code == 0
+        resolver.client.upload_file.assert_called_once()
+        resolver.mark_stale.assert_called_once_with("target_cid")
+
+    def test_put_nonexistent_local(self, runner):
+        """本地文件不存在应该报错。"""
+        resolver = _mock_resolver()
+        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+            result = runner.invoke(main, ["put", "/no/such/file.txt", "/影音/"])
+        assert result.exit_code != 0
+
+
+class TestGet:
+    def test_get_downloads_file(self, runner, tmp_path):
+        resolver = _mock_resolver()
+        resolver.resolve_file.return_value = ("fid1", "pcid", {
+            "name": "a.mkv", "fid": "fid1", "pick_code": "pc1", "size": 1000,
+        })
+        resolver.client.download_url.return_value = "https://cdn.115.com/fake"
+        with (
+            patch("media115.fs_cli._get_resolver", return_value=resolver),
+            patch("media115.fs_cli._download_to_file") as mock_dl,
+        ):
+            result = runner.invoke(main, ["get", "/影音/a.mkv", str(tmp_path)])
+        assert result.exit_code == 0
+        mock_dl.assert_called_once()
+        # 检查下载路径包含文件名
+        call_args = mock_dl.call_args
+        assert "a.mkv" in str(call_args)
+
+    def test_get_default_local_dir(self, runner, tmp_path, monkeypatch):
+        """不指定本地目录时，下载到当前目录。"""
+        monkeypatch.chdir(tmp_path)
+        resolver = _mock_resolver()
+        resolver.resolve_file.return_value = ("fid1", "pcid", {
+            "name": "b.mkv", "fid": "fid1", "pick_code": "pc2", "size": 500,
+        })
+        resolver.client.download_url.return_value = "https://cdn.115.com/fake"
+        with (
+            patch("media115.fs_cli._get_resolver", return_value=resolver),
+            patch("media115.fs_cli._download_to_file") as mock_dl,
+        ):
+            result = runner.invoke(main, ["get", "/影音/b.mkv"])
+        assert result.exit_code == 0
+        mock_dl.assert_called_once()
