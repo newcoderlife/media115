@@ -13,17 +13,43 @@ from media115.utils import split_ext as _split_ext
 from media115.utils import trunc as _trunc
 
 
+def _cases_path() -> Path | None:
+    """找到 scrape_cases.json 的路径。
+
+    查找顺序：
+    1. cwd/tests/scrape_cases.json（repo 内开发）
+    2. ~/.cache/media115/scrape_cases.json（用户自定义规则）
+    3. 包内 tests/scrape_cases.json（installed via pip install -e .）
+    """
+    # 1. cwd（repo 内开发）
+    cwd_path = Path.cwd() / "tests" / "scrape_cases.json"
+    if cwd_path.exists():
+        return cwd_path
+    # 2. XDG 缓存（用户自定义）
+    from media115.cache import _cache_root
+    xdg_path = _cache_root() / "scrape_cases.json"
+    if xdg_path.exists():
+        return xdg_path
+    # 3. 包内 tests/（installed via pip install -e .）
+    pkg_path = Path(__file__).resolve().parent.parent.parent / "tests" / "scrape_cases.json"
+    if pkg_path.exists():
+        return pkg_path
+    return None
+
+
 def _load_env():
-    env_path = Path.cwd() / ".env"
-    if not env_path.exists():
-        return
-    for line in env_path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
+    from media115.cache import _config_root
+    paths = [Path.cwd() / ".env", _config_root() / ".env"]
+    for env_path in paths:
+        if not env_path.exists():
             continue
-        key, val = line.split("=", 1)
-        val = val.strip().strip("'\"")
-        os.environ.setdefault(key.strip(), val)
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, val = line.split("=", 1)
+            val = val.strip().strip("'\"")
+            os.environ.setdefault(key.strip(), val)
 
 
 _DEFAULT_CONFIG = {
@@ -60,29 +86,50 @@ _DEFAULT_CONFIG = {
 
 
 def _load_config() -> dict:
-    """Load config.yaml from project root, merged with defaults.
+    """Load config.yaml, checking cwd first then XDG config dir.
 
-    Looks for config.yaml in the current working directory.
+    Search order:
+      1. <cwd>/config.yaml
+      2. ~/.config/media115/config.yaml  (or $XDG_CONFIG_HOME/media115/config.yaml)
     Missing keys fall back to _DEFAULT_CONFIG.
     """
-    config_path = Path.cwd() / "config.yaml"
-    if config_path.exists():
-        user_config = yaml.safe_load(config_path.read_text()) or {}
-        # Shallow merge: top-level keys from user override defaults
-        merged = dict(_DEFAULT_CONFIG)
-        for key, val in user_config.items():
-            if isinstance(val, dict) and isinstance(merged.get(key), dict):
-                merged[key] = {**merged[key], **val}
-            else:
-                merged[key] = val
-        return merged
+    from media115.cache import _config_root
+    paths = [Path.cwd() / "config.yaml", _config_root() / "config.yaml"]
+    for config_path in paths:
+        if config_path.exists():
+            user_config = yaml.safe_load(config_path.read_text()) or {}
+            # Shallow merge: top-level keys from user override defaults
+            merged = dict(_DEFAULT_CONFIG)
+            for key, val in user_config.items():
+                if isinstance(val, dict) and key in merged and isinstance(merged[key], dict):
+                    merged[key] = {**merged[key], **val}
+                else:
+                    merged[key] = val
+            return merged
     return dict(_DEFAULT_CONFIG)
+
+
+def _env_write_path() -> Path:
+    """Determine the .env write path.
+
+    If a .env already exists in cwd, write there (project-local workflow).
+    Otherwise write to the XDG config dir so installed tools can find it.
+    """
+    cwd_env = Path.cwd() / ".env"
+    if cwd_env.exists():
+        return cwd_env
+    from media115.cache import _config_root
+    xdg_env = _config_root() / ".env"
+    xdg_env.parent.mkdir(parents=True, exist_ok=True)
+    return xdg_env
 
 
 @click.group()
 def main():
     """media115: Media library management with 115 cloud."""
     _load_env()
+    from media115.log import setup_logging
+    setup_logging()
 
 
 @main.command()
@@ -122,8 +169,7 @@ def auth(app, check, renew, force, get_qr, wait_qr):
             "sign": token_data["sign"],
             "app": app,
         }
-        qr_session_path = Path.cwd() / ".cache" / "qr_session.json"
-        qr_session_path.parent.mkdir(parents=True, exist_ok=True)
+        qr_session_path = media_cache._cache_dir() / "qr_session.json"
         qr_session_path.write_text(_json.dumps(session))
         click.echo(f"QR_URL={qr_url}")
         return
@@ -134,7 +180,7 @@ def auth(app, check, renew, force, get_qr, wait_qr):
 
         import httpx as _httpx
 
-        qr_session_path = Path.cwd() / ".cache" / "qr_session.json"
+        qr_session_path = media_cache._cache_dir() / "qr_session.json"
         if not qr_session_path.exists():
             click.echo("No QR session. Run 'auth --get-qr' first.", err=True)
             return
@@ -194,9 +240,10 @@ def auth(app, check, renew, force, get_qr, wait_qr):
             cookie_str = str(cookies)
 
         client = Cloud115Client.from_cookies(cookie_str)
-        client.save_cookies_to_env(Path.cwd() / ".env")
+        env_path = _env_write_path()
+        client.save_cookies_to_env(env_path)
         qr_session_path.unlink(missing_ok=True)
-        click.echo("Login success! Cookies saved to .env")
+        click.echo(f"Login success! Cookies saved to {env_path}")
         return
 
     if renew:
@@ -204,7 +251,7 @@ def auth(app, check, renew, force, get_qr, wait_qr):
             click.echo("No existing cookies to renew. Run 'media115 auth' first.", err=True)
             return
         if existing.renew_cookies(app=app):
-            env_path = Path.cwd() / ".env"
+            env_path = _env_write_path()
             existing.save_cookies_to_env(env_path)
             click.echo("Cookies renewed and saved.")
         else:
@@ -216,35 +263,9 @@ def auth(app, check, renew, force, get_qr, wait_qr):
         return
 
     client = Cloud115Client.qr_login(app=app)
-    env_path = Path.cwd() / ".env"
+    env_path = _env_write_path()
     client.save_cookies_to_env(env_path)
     click.echo(f"Cookies saved to {env_path}")
-
-
-@main.command()
-@click.argument("path", default="0")
-@click.option("--tree", is_flag=True, help="Show directory tree recursively")
-@click.option("--depth", default=3, type=int, help="Max depth for tree view")
-def ls(path, tree, depth):
-    """List files in 115 cloud directory. Accepts dir_id or path like /影音/电影/."""
-    client = _get_115_client()
-    if not client:
-        return
-    try:
-        dir_id = _resolve_dir(client, path)
-        if tree:
-            _print_tree(client, dir_id, path, depth=depth)
-        else:
-            files = client.list_files_all(dir_id=dir_id)
-            for f in files:
-                name = f.get("fn", f.get("n", "?"))
-                is_dir = "fid" not in f
-                size = f.get("s", 0)
-                type_mark = "D" if is_dir else "F"
-                click.echo(f"  [{type_mark}] {name:40s}  {size:>12,}")
-            click.echo(f"\n  Total: {len(files)} items")
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
 
 
 VIDEO_EXTS = {".mkv", ".mp4", ".avi", ".ts", ".rmvb", ".wmv", ".flv", ".mov", ".m4v"}
@@ -282,6 +303,14 @@ def export_tree(path):
     )
     click.echo(f"Tree exported: {len(lines)} entries, {video_count} video files")
     click.echo(f"Saved to {tree_path}")
+
+    # Write resolved path → dir_id into PathResolver cache
+    if not path.isdigit():
+        from media115.fs import PathResolver, _normalize
+
+        resolver = PathResolver(client)
+        resolver._write_path_index(_normalize(path), dir_id)
+
     click.echo("\nNext: run 'scan-tree <category>' to preview what needs scraping.")
 
 
@@ -291,7 +320,7 @@ def export_tree(path):
 def scan_tree(category, show_all):
     """Scan media files from cached directory tree (no API calls).
 
-    Run 'export-tree' first. Then: scan-tree [AV|电影|剧目|里番|写真]
+    Run 'media115 sync' first. Then: scan-tree [AV|电影|剧目|里番|写真]
     Default: only show files needing action. Use --all to show everything.
     """
     from media115.scraper.analyzer import (
@@ -302,7 +331,7 @@ def scan_tree(category, show_all):
 
     tree_path = media_cache.tree_cache_path()
     if not tree_path.exists():
-        click.echo("No tree cache. Run 'media115 export-tree' first.", err=True)
+        click.echo("No tree cache. Run 'media115 sync /影音' first.", err=True)
         return
 
     entries = media_cache.parse_tree_cache(VIDEO_EXTS)
@@ -314,8 +343,8 @@ def scan_tree(category, show_all):
             v for v in videos if v["path"].startswith(category) or f"/{category}/" in v["path"]
         ]
 
-    cases_path = Path.cwd() / "tests" / "scrape_cases.json"
-    cases = load_cases(cases_path) if cases_path.exists() else []
+    cases_path = _cases_path()
+    cases = load_cases(cases_path) if cases_path else []
 
     click.echo(f"Found {len(videos)} video files (from cached tree).\n")
     click.echo(
@@ -432,8 +461,8 @@ def scan_tree(category, show_all):
 @click.argument("category")
 @click.option(
     "--output",
-    default=".cache/scrape_output",
-    help="Output directory for NFO + posters",
+    default=None,
+    help="Output directory for NFO + posters (default: ~/.cache/media115/scrape_output)",
 )
 @click.option("--limit", "max_count", default=0, type=int, help="Max files to scrape (0=all)")
 @click.option("--force", is_flag=True, help="Re-scrape even if NFO already exists on 115")
@@ -447,7 +476,7 @@ def batch_scrape(category, output, max_count, force):
     entries = media_cache.parse_tree_cache(VIDEO_EXTS)
     videos = [e for e in entries if e["is_video"]]
 
-    videos = [v for v in videos if category in v["path"]]
+    videos = [v for v in videos if f"/{category}/" in f"/{v['path']}/"]
 
     if not force:
         nfo_names = {e["parent"] + "/" + _split_ext(e["n"])[0] for e in entries if e["is_nfo"]}
@@ -461,7 +490,10 @@ def batch_scrape(category, output, max_count, force):
         click.echo(f"No files to scrape in category '{category}'.")
         return
 
-    out_dir = Path.cwd() / output / category
+    if output is None:
+        out_dir = media_cache._cache_dir("scrape_output") / category
+    else:
+        out_dir = Path(output) / category
     out_dir.mkdir(parents=True, exist_ok=True)
 
     click.echo(f"Scraping {len(videos)} files in '{category}' → {out_dir}")
@@ -512,8 +544,7 @@ def batch_scrape(category, output, max_count, force):
     import json as _json
     import time as _time
 
-    log_dir = Path.cwd() / ".cache" / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
+    log_dir = media_cache._cache_dir("logs")
     log_file = log_dir / f"scrape_{category}_{int(_time.time())}.json"
     log_file.write_text(_json.dumps(results, ensure_ascii=False, indent=2))
     click.echo(f"Log saved to {log_file}")
@@ -538,7 +569,7 @@ def organize(category, execute, cleanup):
 
     tree_path = media_cache.tree_cache_path()
     if not tree_path.exists():
-        click.echo("No tree cache. Run 'media115 export-tree' first.", err=True)
+        click.echo("No tree cache. Run 'media115 sync /影音' first.", err=True)
         return
 
     entries = media_cache.parse_tree_cache(VIDEO_EXTS)
@@ -606,8 +637,7 @@ def organize(category, execute, cleanup):
     import json as _json
     import time as _time
 
-    log_dir = Path.cwd() / ".cache" / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
+    log_dir = media_cache._cache_dir("logs")
     log_file = log_dir / f"organize_{category}_{int(_time.time())}.json"
     log_entries = []
     for r in results:
@@ -626,7 +656,7 @@ def organize(category, execute, cleanup):
 
     if ok > 0:
         click.echo(
-            "\nTree cache is now stale. Run 'export-tree /影音' to refresh.",
+            "\nTree cache is now stale. Run 'media115 sync /影音' to refresh.",
             err=True,
         )
 
@@ -650,112 +680,6 @@ def organize(category, execute, cleanup):
                 except Exception as e:
                     click.echo(f"  Failed to delete {name}: {e}")
             click.echo(f"Cleaned up {len(empty_dirs)} empty directories")
-
-
-@main.command("upload-nfo")
-@click.argument("category")
-def upload_nfo(category):
-    """Upload NFO/poster from local scrape_output to 115 directories.
-
-    Matches scrape_output dirs to 115 cloud directories and uploads
-    .nfo, .jpg, .png files. Skips dirs that already have NFO files.
-
-    CATEGORY: AV, 电影, or 剧目
-    """
-    import sys
-
-    scrape_dir = Path.cwd() / ".cache" / "scrape_output" / category
-    if not scrape_dir.exists():
-        click.echo(f"No scrape output for '{category}'. Run batch-scrape first.", err=True)
-        return
-
-    client = _get_115_client()
-    if not client:
-        return
-
-    category_path = f"影音/{category}"
-    category_cid = client.get_dir_id("/" + category_path)
-    if not category_cid:
-        click.echo(f"Category dir not found: {category_path}", err=True)
-        return
-
-    # List all subdirs on 115 under category
-    print(f"  Listing 115 dirs under {category_path}...", file=sys.stderr, flush=True)
-    cloud_dirs = client.list_files_all(dir_id=category_cid)
-    dir_map = {}  # dirname → cid
-    for item in cloud_dirs:
-        if "fid" not in item:  # is directory
-            dir_map[item.get("n", "")] = str(item.get("cid", ""))
-
-    # Check which dirs already have NFO using tree cache (0 API calls)
-    tree_entries = media_cache.parse_tree_cache(VIDEO_EXTS)
-    dirs_with_nfo = set()
-    for e in tree_entries:
-        if e["is_nfo"] and category_path in e["parent"]:
-            # Extract leaf dir name from parent path like "影音/电影/Title (Year)"
-            leaf = e["parent"].split("/")[-1] if "/" in e["parent"] else e["parent"]
-            dirs_with_nfo.add(leaf)
-
-    # Collect upload tasks: (local_file, target_cid, remote_name)
-    tasks = []
-    skipped = 0
-    already_has = 0
-    for out_dir in sorted(scrape_dir.iterdir()):
-        if not out_dir.is_dir():
-            continue
-        files_to_upload = [f for f in out_dir.iterdir() if f.suffix in (".nfo", ".jpg", ".png")]
-        if not files_to_upload:
-            continue
-
-        # Match to 115 dir: scrape_output dir is named like "影音_电影_Title (Year)"
-        # The 115 dir name is just "Title (Year)"
-        parts = out_dir.name.split("_", 2)  # ["影音", "电影", "Title (Year)"]
-        target_name = parts[-1] if len(parts) >= 3 else out_dir.name
-
-        target_cid = dir_map.get(target_name)
-        if not target_cid:
-            skipped += 1
-            continue
-
-        if target_name in dirs_with_nfo:
-            already_has += 1
-            continue
-
-        for f in files_to_upload:
-            remote_name = f.name
-            # For AV, rename NFO to match video: "番号.nfo" instead of long original name
-            if category == "AV" and f.suffix == ".nfo":
-                remote_name = f"{target_name}.nfo"
-            tasks.append((f, target_cid, remote_name))
-
-    click.echo(
-        f"Found {len(tasks)} files to upload "
-        f"({already_has} dirs already have NFO, {skipped} dirs not matched on 115)"
-    )
-
-    if not tasks:
-        click.echo("Nothing to upload.")
-        return
-
-    uploaded = 0
-    errors = 0
-    for i, (local_file, target_cid, remote_name) in enumerate(tasks, 1):
-        pct = 100 * i // len(tasks)
-        print(
-            f"\r  [{i}/{len(tasks)} {pct}%] {remote_name[:50]}...",
-            end="",
-            file=sys.stderr,
-            flush=True,
-        )
-        try:
-            client.upload_file(local_file, target_cid, remote_name)
-            uploaded += 1
-        except Exception as e:
-            errors += 1
-            print(f" error: {e}", file=sys.stderr)
-
-    print("", file=sys.stderr)
-    click.echo(f"\nDone: {uploaded} uploaded, {errors} errors, {skipped} dirs skipped")
 
 
 @main.command()
@@ -806,8 +730,8 @@ def scan(path, recursive, depth):
             videos.append(item)
 
     # Load regression cases
-    cases_path = Path(__file__).resolve().parent.parent.parent / "tests" / "scrape_cases.json"
-    cases = load_cases(cases_path) if cases_path.exists() else []
+    cases_path = _cases_path()
+    cases = load_cases(cases_path) if cases_path else []
 
     # Analyze each video
     click.echo(f"\nFound {len(videos)} video files.\n")
@@ -899,7 +823,7 @@ def strm(path, output, host, port):
 
     tree_path = media_cache.tree_cache_path()
     if not tree_path.exists():
-        click.echo("No tree cache. Run 'media115 export-tree' first.", err=True)
+        click.echo("No tree cache. Run 'media115 sync /影音' first.", err=True)
         return
 
     # Normalize the filter path (strip leading/trailing slashes)
@@ -915,7 +839,7 @@ def strm(path, output, host, port):
 
     if not matched:
         click.echo(f"No video files found under '{path}' in tree cache.")
-        click.echo("Run 'media115 export-tree' to refresh the cache.")
+        click.echo("Run 'media115 sync /影音' to refresh the cache.")
         return
 
     out_dir = Path(output)
@@ -1019,20 +943,9 @@ def scrape(query, source, language):
 def _get_115_client():
     from media115.client import Cloud115Client
 
-    # Try cookie mode first (from .env)
     cookies = os.environ.get("CLOUD_115_COOKIES", "")
     if cookies:
         return Cloud115Client.from_cookies(cookies)
-
-    # Fall back to OpenAPI mode
-    app_id = os.environ.get("CLOUD_115_APP_ID", "")
-    if app_id:
-        return Cloud115Client.from_openapi(
-            app_id=app_id,
-            app_secret=os.environ.get("CLOUD_115_APP_SECRET", ""),
-            access_token=os.environ.get("CLOUD_115_ACCESS_TOKEN", ""),
-            refresh_token=os.environ.get("CLOUD_115_REFRESH_TOKEN", ""),
-        )
 
     click.echo(
         "Warning: No 115 credentials. Use 'media115 auth' to login or set CLOUD_115_COOKIES.",
@@ -1076,6 +989,9 @@ def _print_tree(client, dir_id: str, label: str, depth: int, prefix: str = ""):
             child_prefix = prefix + ("    " if is_last else "\u2502   ")
             _print_tree(client, child_id, name, depth - 1, child_prefix)
 
+
+from media115 import fs_cli as _fs_cli
+_fs_cli.register(main)
 
 if __name__ == "__main__":
     main()

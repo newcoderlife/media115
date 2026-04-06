@@ -1,17 +1,18 @@
-"""115 client tests. Covers both cookie and OpenAPI modes (all mocked)."""
+"""115 client tests. Cookie mode (all mocked)."""
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from media115.client import Cloud115Client, RateLimiter
+from media115.client import Cloud115Client, _read_state, _write_state
+from media115.rate_limit import RateLimiter
 
 
 class TestRateLimiter:
     def test_allows_without_env(self):
         """Without env_path, limiter is in-process only and doesn't block."""
-        limiter = RateLimiter(qps=100, qpm=1000, use_state=False)
+        limiter = RateLimiter(qps=100, qpm=1000, state_path=None)
         for _ in range(10):
             limiter.acquire()
 
@@ -20,7 +21,7 @@ class TestRateLimiter:
         import json
 
         state_file = tmp_path / "rate_limit.json"
-        limiter = RateLimiter(qps=10, qpm=1000, use_state=False)
+        limiter = RateLimiter(qps=10, qpm=1000, state_path=None)
         limiter._state_path = state_file  # Override for test
         limiter.acquire()
         assert state_file.exists()
@@ -33,7 +34,7 @@ class TestRateLimiter:
         import json
 
         state_file = tmp_path / "rate_limit.json"
-        limiter = RateLimiter(qps=100, qpm=1000, use_state=False)
+        limiter = RateLimiter(qps=100, qpm=1000, state_path=None)
         limiter._state_path = state_file
         limiter.acquire()
         limiter.acquire()
@@ -44,14 +45,14 @@ class TestRateLimiter:
     def test_cooldown_blocks(self, tmp_path):
         """Cooldown blocks subsequent calls."""
         state_file = tmp_path / "rate_limit.json"
-        limiter = RateLimiter(qps=100, qpm=1000, use_state=False)
+        limiter = RateLimiter(qps=100, qpm=1000, state_path=None)
         limiter._state_path = state_file
         limiter.set_cooldown(3600)
         with pytest.raises(RuntimeError, match="cooldown"):
             limiter.acquire()
 
     def test_tracks_request_count(self):
-        limiter = RateLimiter(qps=100, qpm=1000, use_state=False)
+        limiter = RateLimiter(qps=100, qpm=1000, state_path=None)
         for _ in range(5):
             limiter.acquire()
         assert limiter.request_count >= 5
@@ -60,29 +61,16 @@ class TestRateLimiter:
 class TestFactoryMethods:
     def test_from_cookies(self):
         client = Cloud115Client.from_cookies("UID=12345_A1_170000; CID=abc; SEID=def")
-        assert client._mode == "cookie"
         assert client._user_id == "12345"
 
     def test_from_cookies_no_uid(self):
         client = Cloud115Client.from_cookies("CID=abc; SEID=def")
-        assert client._mode == "cookie"
         assert client._user_id == ""
-
-    def test_from_openapi(self):
-        client = Cloud115Client.from_openapi(
-            app_id="test_app",
-            app_secret="test_secret",
-            access_token="test_token",
-            refresh_token="test_refresh",
-        )
-        assert client._mode == "openapi"
-        assert client._access_token == "test_token"
 
     def test_from_cookie_file(self, tmp_path):
         f = tmp_path / "cookies.txt"
         f.write_text("UID=99_A1_170000; CID=xyz; SEID=abc")
         client = Cloud115Client.from_cookie_file(f)
-        assert client._mode == "cookie"
         assert client._user_id == "99"
 
     def test_save_cookies_to_env(self, tmp_path):
@@ -99,6 +87,10 @@ class TestFactoryMethods:
         env = tmp_path / ".env"
         client.save_cookies_to_env(env)
         assert "CLOUD_115_COOKIES=UID=1_A1_0; CID=x; SEID=y" in env.read_text()
+
+    def test_no_openapi_factory(self):
+        """from_openapi 应该已被删除。"""
+        assert not hasattr(Cloud115Client, "from_openapi")
 
 
 class TestRenewCookies:
@@ -126,7 +118,7 @@ class TestRenewCookies:
                 assert "new" in client._cookies
 
     def test_renew_fails_no_cookies(self):
-        client = Cloud115Client.from_openapi(app_id="x", app_secret="y")
+        client = Cloud115Client.from_cookies("")
         assert client.renew_cookies() is False
 
     def test_auto_renew_on_405(self):
@@ -191,75 +183,14 @@ class TestCookieMode:
             assert "Cookie" in call_kwargs.kwargs.get("headers", {})
 
 
-class TestOpenAPIMode:
-    @pytest.fixture
-    def client(self):
-        return Cloud115Client.from_openapi(
-            app_id="test_app",
-            app_secret="test_secret",
-            access_token="test_token",
-            refresh_token="test_refresh",
-        )
-
-    def test_list_files(self, client):
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "state": True,
-            "data": [{"fn": "movie.mkv", "pc": "abc123"}],
-        }
-        mock_resp.raise_for_status = MagicMock()
-        with patch.object(client._http, "request", return_value=mock_resp):
-            files = client.list_files(dir_id="0")
-            assert len(files) == 1
-
-    def test_download_url(self, client):
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "state": True,
-            "data": {"abc123": {"url": {"url": "https://cdn.115.com/download.mkv"}}},
-        }
-        mock_resp.raise_for_status = MagicMock()
-        with patch.object(client._http, "request", return_value=mock_resp):
-            url = client.download_url("abc123")
-            assert "cdn.115.com" in url
-
-    def test_token_refresh(self, client):
-        refresh_response = {
-            "state": True,
-            "data": {
-                "access_token": "new_token",
-                "refresh_token": "new_refresh",
-                "expires_in": 7200,
-            },
-        }
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = refresh_response
-        mock_resp.raise_for_status = MagicMock()
-        with patch.object(client._http, "post", return_value=mock_resp):
-            client.refresh_access_token()
-            assert client._access_token == "new_token"
-            assert client._refresh_token == "new_refresh"
-
-    def test_request_sends_auth_header(self, client):
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"state": True, "data": []}
-        mock_resp.raise_for_status = MagicMock()
-        with patch.object(client._http, "request", return_value=mock_resp) as mock_req:
-            client.list_files()
-            call_kwargs = mock_req.call_args
-            headers = call_kwargs.kwargs.get("headers", {})
-            assert "Authorization" in headers
-            assert headers["Authorization"].startswith("Bearer ")
-
-
 class TestCookieModeAPIs:
     """Test individual API methods in cookie mode with mocked HTTP."""
 
     @pytest.fixture
     def client(self):
         c = Cloud115Client.from_cookies("UID=1_A1_0; CID=abc; SEID=def")
-        c._limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
-        c._download_limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
+        c._limiter = RateLimiter(qps=100, qpm=10000, state_path=None)
+        c._download_limiter = RateLimiter(qps=100, qpm=10000, state_path=None)
         return c
 
     def _mock_resp(self, json_data, status_code=200):
@@ -441,8 +372,8 @@ class TestListFilesAllAndRecursive:
     @pytest.fixture
     def client(self):
         c = Cloud115Client.from_cookies("UID=1_A1_0; CID=abc; SEID=def")
-        c._limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
-        c._download_limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
+        c._limiter = RateLimiter(qps=100, qpm=10000, state_path=None)
+        c._download_limiter = RateLimiter(qps=100, qpm=10000, state_path=None)
         return c
 
     def test_list_files_all_single_page(self, client):
@@ -493,8 +424,8 @@ class TestResolvePath:
     @pytest.fixture
     def client(self):
         c = Cloud115Client.from_cookies("UID=1_A1_0; CID=abc; SEID=def")
-        c._limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
-        c._download_limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
+        c._limiter = RateLimiter(qps=100, qpm=10000, state_path=None)
+        c._download_limiter = RateLimiter(qps=100, qpm=10000, state_path=None)
         return c
 
     def test_resolve_empty_path(self, client):
@@ -512,146 +443,6 @@ class TestResolvePath:
         with patch.object(client, "list_files_all", return_value=items):
             with pytest.raises(FileNotFoundError, match="movies"):
                 client.resolve_path("/movies")
-
-
-class TestOpenAPIModeAPIs:
-    """Test OpenAPI-mode API methods with mocked HTTP."""
-
-    @pytest.fixture
-    def client(self):
-        c = Cloud115Client.from_openapi(
-            app_id="test_app",
-            app_secret="test_secret",
-            access_token="test_token",
-            refresh_token="test_refresh",
-        )
-        c._limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
-        return c
-
-    def _mock_resp(self, json_data, status_code=200):
-        resp = MagicMock()
-        resp.status_code = status_code
-        resp.json.return_value = json_data
-        resp.raise_for_status = MagicMock()
-        return resp
-
-    def test_mkdir(self, client):
-        resp_data = {"state": True, "cid": "888", "cname": "NewDir"}
-        with patch.object(
-            client._http, "request", return_value=self._mock_resp(resp_data)
-        ) as mock_req:
-            result = client.mkdir(parent_id="0", name="NewDir")
-            assert result["cid"] == "888"
-            call_args = mock_req.call_args
-            data = call_args.kwargs.get("data", {})
-            assert data["pid"] == "0"
-            assert data["cname"] == "NewDir"
-
-    def test_move(self, client):
-        resp_data = {"state": True}
-        with patch.object(
-            client._http, "request", return_value=self._mock_resp(resp_data)
-        ) as mock_req:
-            result = client.move(["10", "20"], target_dir_id="100")
-            assert result["state"] is True
-            call_args = mock_req.call_args
-            data = call_args.kwargs.get("data", {})
-            assert data["fid"] == "10,20"
-            assert data["pid"] == "100"
-
-    def test_delete(self, client):
-        resp_data = {"state": True}
-        with patch.object(
-            client._http, "request", return_value=self._mock_resp(resp_data)
-        ) as mock_req:
-            result = client.delete(["30", "40"])
-            assert result["state"] is True
-            call_args = mock_req.call_args
-            data = call_args.kwargs.get("data", {})
-            assert data["fid"] == "30,40"
-
-    def test_rename(self, client):
-        resp_data = {"state": True}
-        with patch.object(
-            client._http, "request", return_value=self._mock_resp(resp_data)
-        ) as mock_req:
-            result = client.rename("50", "new_name.mkv")
-            assert result["state"] is True
-            call_args = mock_req.call_args
-            data = call_args.kwargs.get("data", {})
-            assert data["fid"] == "50"
-            assert data["file_name"] == "new_name.mkv"
-
-    def test_search(self, client):
-        resp_data = {"state": True, "data": [{"n": "hit.mp4", "fid": "60"}]}
-        with patch.object(client._http, "request", return_value=self._mock_resp(resp_data)):
-            results = client.search("hit")
-            assert len(results) == 1
-            assert results[0]["n"] == "hit.mp4"
-
-    def test_download_url_openapi(self, client):
-        resp_data = {
-            "state": True,
-            "data": {"pc1": {"url": {"url": "https://cdn.115.com/dl.mkv"}}},
-        }
-        with patch.object(client._http, "request", return_value=self._mock_resp(resp_data)):
-            url = client.download_url("pc1")
-            assert url == "https://cdn.115.com/dl.mkv"
-
-    def test_download_url_string_format(self, client):
-        """download_url when url value is a plain string, not a dict."""
-        resp_data = {
-            "state": True,
-            "data": {"pc2": {"url": "https://cdn.115.com/direct.mkv"}},
-        }
-        with patch.object(client._http, "request", return_value=self._mock_resp(resp_data)):
-            url = client.download_url("pc2")
-            assert url == "https://cdn.115.com/direct.mkv"
-
-    def test_download_url_no_url_raises(self, client):
-        resp_data = {"state": True, "data": {"pc3": {"url": {}}}}
-        with patch.object(client._http, "request", return_value=self._mock_resp(resp_data)):
-            with pytest.raises(ValueError, match="No download URL"):
-                client.download_url("pc3")
-
-    def test_batch_rename_falls_back_to_individual(self, client):
-        """OpenAPI batch_rename falls back to individual rename calls."""
-        resp_data = {"state": True}
-        with patch.object(client._http, "request", return_value=self._mock_resp(resp_data)):
-            result = client.batch_rename({"1": "a.mkv", "2": "b.mkv"})
-            assert result["state"] is True
-
-    def test_get_dir_id_delegates_to_resolve_path(self, client):
-        """OpenAPI get_dir_id delegates to resolve_path."""
-        with patch.object(client, "resolve_path", return_value="42") as mock_rp:
-            result = client.get_dir_id("/movies")
-            assert result == "42"
-            mock_rp.assert_called_once_with("/movies")
-
-    def test_auto_refresh_expired_token(self, client):
-        """When token is expired, _openapi_request auto-refreshes."""
-        import time as _time
-
-        client._token_expires_at = _time.time() - 10  # expired
-
-        refresh_resp = MagicMock()
-        refresh_resp.json.return_value = {
-            "data": {
-                "access_token": "refreshed",
-                "refresh_token": "new_r",
-                "expires_in": 7200,
-            }
-        }
-        refresh_resp.raise_for_status = MagicMock()
-
-        api_resp = MagicMock()
-        api_resp.json.return_value = {"state": True, "data": []}
-        api_resp.raise_for_status = MagicMock()
-
-        with patch.object(client._http, "post", return_value=refresh_resp):
-            with patch.object(client._http, "request", return_value=api_resp):
-                client.list_files(dir_id="0")
-                assert client._access_token == "refreshed"
 
 
 class TestCheckLogin:
@@ -680,7 +471,7 @@ class TestCheckLogin:
 class TestContextManager:
     def test_context_manager(self):
         with Cloud115Client.from_cookies("UID=1_A1_0; CID=abc") as client:
-            assert client._mode == "cookie"
+            assert client._cookies == "UID=1_A1_0; CID=abc"
         # after __exit__, close has been called (no crash)
 
 
@@ -707,7 +498,7 @@ class TestRateLimiterSetCooldown:
         import json
 
         state_file = tmp_path / "rate_limit.json"
-        limiter = RateLimiter(qps=100, qpm=1000, use_state=False)
+        limiter = RateLimiter(qps=100, qpm=1000, state_path=None)
         limiter._state_path = state_file
 
         limiter.set_cooldown(1800)
@@ -727,8 +518,8 @@ class TestExportTree:
     @pytest.fixture
     def client(self):
         c = Cloud115Client.from_cookies("UID=1_A1_0; CID=abc; SEID=def")
-        c._limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
-        c._download_limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
+        c._limiter = RateLimiter(qps=100, qpm=10000, state_path=None)
+        c._download_limiter = RateLimiter(qps=100, qpm=10000, state_path=None)
         return c
 
     def _mock_resp(self, json_data, status_code=200):
@@ -835,13 +626,6 @@ class TestExportTree:
         assert result is not None
         assert "list_format_tree" in result
 
-    def test_export_tree_openapi_raises(self):
-        """export_tree raises NotImplementedError for OpenAPI mode."""
-        client = Cloud115Client.from_openapi(app_id="x", app_secret="y", access_token="t")
-        with pytest.raises(NotImplementedError, match="cookie mode"):
-            client.export_tree("123")
-
-
 class TestSaveCookiesToEnv:
     def test_save_cookies_to_env_existing(self, tmp_path):
         """Save cookies to .env that already has the key -> replaces it."""
@@ -862,17 +646,10 @@ class TestSaveCookiesToEnv:
         content = env.read_text()
         assert "CLOUD_115_COOKIES=UID=2_A1_0; CID=x; SEID=y" in content
 
-    def test_save_cookies_openapi_raises(self):
-        """save_cookies_to_env raises ValueError for OpenAPI mode."""
-        client = Cloud115Client.from_openapi(app_id="x", app_secret="y", access_token="t")
-        with pytest.raises(ValueError, match="Not in cookie mode"):
-            client.save_cookies_to_env(Path("/tmp/test.env"))
-
-
 class TestRenewCookiesEdgeCases:
     def test_renew_cookies_no_existing(self):
-        """Client with no cookies (openapi mode) returns False."""
-        client = Cloud115Client.from_openapi(app_id="x", app_secret="y")
+        """Client with empty cookies returns False."""
+        client = Cloud115Client.from_cookies("")
         assert client.renew_cookies() is False
 
     def test_renew_cookies_empty_cookies(self):
@@ -917,8 +694,8 @@ class TestListFilesAllPagination:
     @pytest.fixture
     def client(self):
         c = Cloud115Client.from_cookies("UID=1_A1_0; CID=abc; SEID=def")
-        c._limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
-        c._download_limiter = RateLimiter(qps=100, qpm=10000, use_state=False)
+        c._limiter = RateLimiter(qps=100, qpm=10000, state_path=None)
+        c._download_limiter = RateLimiter(qps=100, qpm=10000, state_path=None)
         return c
 
     def test_list_files_all_pagination(self, client):

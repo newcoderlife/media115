@@ -89,5 +89,18 @@
     },
     "added": "2026-04-05",
     "note": "用户指定修正为蓦然回首 tmdb:1244492"
+  },
+  {
+    "id": "case_0008",
+    "filename": "遮天剧场版：背棺战王腾.mkv",
+    "expect": {
+      "type": "movie",
+      "title": "遮天之背棺战王腾",
+      "source": "tmdb",
+      "source_id": "1653994",
+      "year": 2025
+    },
+    "added": "2026-04-06",
+    "note": ""
   }
 ]
