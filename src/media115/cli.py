@@ -222,32 +222,6 @@ def auth(app, check, renew, force, get_qr, wait_qr):
     click.echo(f"Cookies saved to {env_path}")
 
 
-@main.command()
-@click.argument("path", default="0")
-@click.option("--tree", is_flag=True, help="Show directory tree recursively")
-@click.option("--depth", default=3, type=int, help="Max depth for tree view")
-def ls(path, tree, depth):
-    """List files in 115 cloud directory. Accepts dir_id or path like /影音/电影/."""
-    client = _get_115_client()
-    if not client:
-        return
-    try:
-        dir_id = _resolve_dir(client, path)
-        if tree:
-            _print_tree(client, dir_id, path, depth=depth)
-        else:
-            files = client.list_files_all(dir_id=dir_id)
-            for f in files:
-                name = f.get("fn", f.get("n", "?"))
-                is_dir = "fid" not in f
-                size = f.get("s", 0)
-                type_mark = "D" if is_dir else "F"
-                click.echo(f"  [{type_mark}] {name:40s}  {size:>12,}")
-            click.echo(f"\n  Total: {len(files)} items")
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-
-
 VIDEO_EXTS = {".mkv", ".mp4", ".avi", ".ts", ".rmvb", ".wmv", ".flv", ".mov", ".m4v"}
 NFO_EXT = ".nfo"
 
@@ -961,6 +935,9 @@ def _print_tree(client, dir_id: str, label: str, depth: int, prefix: str = ""):
             child_prefix = prefix + ("    " if is_last else "\u2502   ")
             _print_tree(client, child_id, name, depth - 1, child_prefix)
 
+
+from media115 import fs_cli as _fs_cli
+_fs_cli.register(main)
 
 if __name__ == "__main__":
     main()
