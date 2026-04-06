@@ -1296,35 +1296,10 @@ class TestGetClient:
     def test_get_client_no_credentials(self, runner):
         with patch.dict(
             os.environ,
-            {"CLOUD_115_COOKIES": "", "CLOUD_115_APP_ID": ""},
+            {"CLOUD_115_COOKIES": ""},
             clear=False,
         ):
             from media115.cli import _get_115_client
 
             client = _get_115_client()
         assert client is None
-
-    def test_get_client_openapi_mode(self, runner):
-        """_get_115_client should fall back to OpenAPI when no cookies."""
-        with patch("media115.client.Cloud115Client.from_openapi") as mock_from:
-            mock_from.return_value = MagicMock()
-            with patch.dict(
-                os.environ,
-                {
-                    "CLOUD_115_COOKIES": "",
-                    "CLOUD_115_APP_ID": "my_app_id",
-                    "CLOUD_115_APP_SECRET": "my_secret",
-                    "CLOUD_115_ACCESS_TOKEN": "my_token",
-                    "CLOUD_115_REFRESH_TOKEN": "my_refresh",
-                },
-            ):
-                from media115.cli import _get_115_client
-
-                client = _get_115_client()
-            assert client is not None
-            mock_from.assert_called_once_with(
-                app_id="my_app_id",
-                app_secret="my_secret",
-                access_token="my_token",
-                refresh_token="my_refresh",
-            )

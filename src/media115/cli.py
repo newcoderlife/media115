@@ -1019,20 +1019,9 @@ def scrape(query, source, language):
 def _get_115_client():
     from media115.client import Cloud115Client
 
-    # Try cookie mode first (from .env)
     cookies = os.environ.get("CLOUD_115_COOKIES", "")
     if cookies:
         return Cloud115Client.from_cookies(cookies)
-
-    # Fall back to OpenAPI mode
-    app_id = os.environ.get("CLOUD_115_APP_ID", "")
-    if app_id:
-        return Cloud115Client.from_openapi(
-            app_id=app_id,
-            app_secret=os.environ.get("CLOUD_115_APP_SECRET", ""),
-            access_token=os.environ.get("CLOUD_115_ACCESS_TOKEN", ""),
-            refresh_token=os.environ.get("CLOUD_115_REFRESH_TOKEN", ""),
-        )
 
     click.echo(
         "Warning: No 115 credentials. Use 'media115 auth' to login or set CLOUD_115_COOKIES.",
