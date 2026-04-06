@@ -329,6 +329,105 @@ def register(cli: click.Group):
         _download_to_file(url, dest)
         click.echo(f"已下载: {dest}")
 
+    @cli.command("sync")
+    @click.argument("path")
+    @click.option("--deep", is_flag=True, help="额外填充 dir listing 缓存（暂未实现）")
+    def sync(path, deep):
+        """刷新路径缓存：导出目录树并保存到 tree_cache.txt。"""
+        import media115.cache as media_cache
+
+        if deep:
+            click.echo("--deep 暂未实现，已忽略该标志")
+
+        try:
+            resolver = _get_resolver()
+        except click.ClickException as e:
+            raise e
+
+        try:
+            cid = resolver.resolve_dir(path)
+        except FileNotFoundError:
+            raise click.ClickException(f"目录不存在: {path!r}")
+
+        click.echo(f"正在导出目录树 (cid={cid})...")
+        text = resolver.client.export_tree(cid)
+
+        if not text:
+            raise click.ClickException(f"导出失败: {path!r}")
+
+        # 保存到 tree_cache.txt
+        tree_path = media_cache.tree_cache_path()
+        tree_path.write_text(text, encoding="utf-8")
+
+        # 确保 path 本身写入 path_index
+        resolver._write_path_index(path, cid)
+
+        # 统计
+        lines = text.strip().split("\n")
+        VIDEO_EXTS = {".mkv", ".mp4", ".avi", ".ts", ".rmvb", ".wmv", ".flv", ".mov", ".m4v"}
+        video_count = sum(
+            1 for ln in lines if any(ln.rstrip().lower().endswith(ext) for ext in VIDEO_EXTS)
+        )
+        click.echo(f"已保存 tree_cache.txt：{len(lines)} 行，{video_count} 个视频文件")
+
+    @cli.group("cache")
+    def cache_group():
+        """缓存管理命令。"""
+
+    @cache_group.command("status")
+    def cache_status():
+        """显示缓存状态统计。"""
+        import media115.cache as media_cache
+
+        cache_root = media_cache._cache_root()
+        tree_path = media_cache.tree_cache_path()
+        fs_dir = media_cache._cache_dir("fs")
+        dir_dir = media_cache._cache_dir("fs/dir")
+
+        # path_index 条目数
+        path_index_file = fs_dir / "path_index.json"
+        if path_index_file.exists():
+            try:
+                import json as _json
+                index = _json.loads(path_index_file.read_text(encoding="utf-8"))
+                index_count = len(index)
+            except Exception:
+                index_count = 0
+        else:
+            index_count = 0
+
+        # dir listing 文件数
+        dir_listing_count = len(list(dir_dir.glob("*.json"))) if dir_dir.exists() else 0
+
+        # tree_cache.txt
+        if tree_path.exists():
+            tree_size = tree_path.stat().st_size
+            tree_info = f"存在 ({_format_size(tree_size)})"
+        else:
+            tree_info = "不存在"
+
+        click.echo(f"缓存根目录:        {cache_root}")
+        click.echo(f"path_index 条目数: {index_count}")
+        click.echo(f"dir listing 文件数: {dir_listing_count}")
+        click.echo(f"tree_cache.txt:    {tree_info}")
+
+    @cache_group.command("clear")
+    def cache_clear():
+        """清除 fs/ 缓存目录（path_index + dir listings）。"""
+        import shutil
+        import media115.cache as media_cache
+
+        fs_dir = media_cache._cache_dir("fs")
+        if not click.confirm(f"确认删除缓存目录 {fs_dir}？", default=False):
+            click.echo("已取消")
+            return
+
+        if fs_dir.exists():
+            shutil.rmtree(fs_dir)
+            click.echo(f"已删除: {fs_dir}")
+        else:
+            click.echo("缓存目录不存在，无需清理")
+
     @cli.command("mv")
     @click.argument("args", nargs=-1, required=True)
     def mv(args):
