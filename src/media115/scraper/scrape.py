@@ -106,7 +106,8 @@ def scrape_movie(title: str, year: int | None, filename: str, out_dir: Path) -> 
             },
         )
 
-        return {"status": "ok", "match": detail.get("title", ""), "tmdb_id": tmdb_id}
+        match_year = detail.get("release_date", "")[:4] or None
+        return {"status": "ok", "match": detail.get("title", ""), "tmdb_id": tmdb_id, "match_year": match_year}
     finally:
         client.close()
 
@@ -232,7 +233,8 @@ def scrape_tv(
             },
         )
 
-        return {"status": "ok", "match": metadata["title"], "tmdb_id": tmdb_id}
+        match_year = detail.get("first_air_date", "")[:4] or None
+        return {"status": "ok", "match": metadata["title"], "tmdb_id": tmdb_id, "match_year": match_year}
     finally:
         client.close()
 

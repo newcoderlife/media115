@@ -522,7 +522,12 @@ def batch_scrape(category, output, max_count, force):
             else:
                 result = {"status": "skip", "reason": analysis.media_type}
 
-            results.append({"file": name, **result})
+            entry = {"file": name, "_file_year": analysis.year, **result}
+            # Extract match year from result if available
+            match_year = result.get("year") or result.get("match_year")
+            if match_year:
+                entry["_match_year"] = match_year
+            results.append(entry)
             status = result.get("status", "?")
             match_info = result.get("match", "")
             source_id = result.get("tmdb_id", result.get("number", ""))
@@ -534,11 +539,61 @@ def batch_scrape(category, output, max_count, force):
             results.append({"file": name, "status": "error", "error": str(e)})
             click.echo(f" error: {e}")
 
-    # Summary
+    # Summary table for agent review
     ok = sum(1 for r in results if r["status"] == "ok")
     fail = sum(1 for r in results if r["status"] in ("not_found", "error"))
     skip = sum(1 for r in results if r["status"] == "skip")
+
     click.echo(f"\nDone: {ok} scraped, {fail} failed, {skip} skipped")
+    click.echo()
+
+    # Output review table
+    if results:
+        click.echo(f"{'#':>4} | {'Status':<6} | {'File':<45} | {'Match':<30} | Note")
+        click.echo(f"{'':->4}-+-{'':->6}-+-{'':->45}-+-{'':->30}-+------")
+        for i, r in enumerate(results, 1):
+            status = r.get("status", "?")
+            fname = _trunc(r.get("file", ""), 45)
+            match_name = r.get("match", "")
+            source_id = r.get("tmdb_id", r.get("number", ""))
+            file_year = r.get("_file_year")
+            match_year = r.get("_match_year")
+
+            if status == "ok":
+                flag = "✓"
+                match_str = _trunc(f"{match_name} ({source_id})", 30)
+                # Check year mismatch
+                if file_year and match_year and str(file_year) != str(match_year):
+                    note = f"⚠ 年份不匹配: 文件={file_year} 匹配={match_year}"
+                elif not match_year:
+                    note = "⚠ 匹配结果无年份"
+                else:
+                    note = ""
+            elif status == "not_found":
+                flag = "✗"
+                match_str = "—"
+                note = f"query={r.get('query', '?')}"
+            elif status == "error":
+                flag = "✗"
+                match_str = "—"
+                note = _trunc(str(r.get("error", "")), 40)
+            else:
+                flag = "—"
+                match_str = "—"
+                note = r.get("reason", "")
+
+            click.echo(f"{i:>4} | {flag:<6} | {fname:<45} | {match_str:<30} | {note}")
+
+        # Highlight items needing review
+        needs_review = [
+            r for r in results
+            if r.get("status") in ("not_found", "error")
+            or (r.get("_file_year") and r.get("_match_year")
+                and str(r["_file_year"]) != str(r["_match_year"]))
+            or (r.get("status") == "ok" and not r.get("_match_year"))
+        ]
+        if needs_review:
+            click.echo(f"\n⚠ {len(needs_review)} 个结果需要 agent 审查（年份不匹配或未找到）")
 
     # Save scrape log
     import json as _json
@@ -547,10 +602,10 @@ def batch_scrape(category, output, max_count, force):
     log_dir = media_cache._cache_dir("logs")
     log_file = log_dir / f"scrape_{category}_{int(_time.time())}.json"
     log_file.write_text(_json.dumps(results, ensure_ascii=False, indent=2))
-    click.echo(f"Log saved to {log_file}")
+    click.echo(f"\nLog saved to {log_file}")
 
     if ok > 0:
-        click.echo(f"\nNext: run 'organize {category}' to preview rename plan.")
+        click.echo(f"Next: run 'organize {category}' to preview rename plan.")
 
 
 @main.command()
