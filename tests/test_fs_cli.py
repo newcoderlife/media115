@@ -448,6 +448,23 @@ class TestCacheStatus:
         assert "不存在" in result.output
 
 
+class TestInit:
+    def test_init_copies_skills(self, runner, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
+        result = runner.invoke(main, ["init"])
+        assert result.exit_code == 0
+        skills_dir = tmp_path / ".claude" / "skills" / "media115"
+        assert skills_dir.exists()
+
+    def test_init_creates_config(self, runner, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
+        result = runner.invoke(main, ["init"])
+        config = tmp_path / ".config" / "media115" / "config.yaml"
+        assert config.exists()
+
+
 class TestCacheClear:
     def test_cache_clear_confirmed(self, runner, tmp_path, monkeypatch):
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))

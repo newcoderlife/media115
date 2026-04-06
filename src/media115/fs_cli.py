@@ -582,6 +582,51 @@ def register(cli: click.Group):
                 click.echo(f"已移动并重命名: {src} → {dest}")
 
 
+    @cli.command()
+    def init():
+        """初始化 media115：复制 skills 到 ~/.claude/skills/，生成默认配置。"""
+        import shutil
+        from media115.cache import _config_root
+
+        # 查找 _skills 目录
+        skills_src = Path(__file__).parent / "_skills"
+        if not skills_src.exists():
+            raise click.ClickException(f"Skills 目录不存在: {skills_src}")
+
+        # 复制 skills
+        skills_dst = Path.home() / ".claude" / "skills" / "media115"
+        if skills_dst.exists():
+            shutil.rmtree(skills_dst)
+        shutil.copytree(skills_src, skills_dst)
+        click.echo(f"Skills: {skills_dst}")
+
+        # 创建配置目录
+        config_dir = _config_root()
+        config_dir.mkdir(parents=True, exist_ok=True)
+
+        # 生成默认配置
+        config_path = config_dir / "config.yaml"
+        if not config_path.exists():
+            import yaml
+            from media115.cli import _DEFAULT_CONFIG
+            config_path.write_text(yaml.dump(_DEFAULT_CONFIG, allow_unicode=True, default_flow_style=False))
+        click.echo(f"Config: {config_path}")
+
+        # 生成 .env 模板
+        env_path = config_dir / ".env"
+        if not env_path.exists():
+            env_path.write_text(
+                "# media115 credentials\n"
+                "TMDB_READ_ACCESS_TOKEN=\n"
+                "# BANGUMI_ACCESS_TOKEN=\n"
+                "# CLOUD_115_COOKIES= (set by media115 auth)\n"
+            )
+            env_path.chmod(0o600)
+        click.echo(f"Env: {env_path}")
+
+        click.echo("\nNext: media115 auth")
+
+
 def _ls_dir(
     resolver,
     cid: str,
