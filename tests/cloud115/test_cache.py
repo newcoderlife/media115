@@ -211,6 +211,18 @@ class TestWriteThrough:
         assert len(entries) == 1
         assert entries[0]["name"] == "f.txt"
 
+    def test_add_entry_no_dir_meta(self, cache):
+        """add_entry on a dir that was never listed — entry exists but dir_meta is None."""
+        cache.add_entry("orphan_cid", {
+            "name": "file.txt", "type": "file", "node_id": "f1",
+            "size": 100, "pick_code": "pc1",
+        })
+        entry = cache.find_entry("orphan_cid", "file.txt")
+        assert entry is not None
+        assert entry["node_id"] == "f1"
+        # dir_meta should be None (never listed from API)
+        assert cache.get_dir_ts("orphan_cid") is None
+
 
 # ---------------------------------------------------------------------------
 # rate_limit
@@ -263,6 +275,10 @@ class TestRateLimit:
         rl = cache.get_rate_limit("ep")
         assert rl["minute_count"] == 4
         assert rl["cooldown_until"] == 42.0
+
+    def test_unknown_kwarg_raises(self, cache):
+        with pytest.raises(ValueError, match="Unknown rate_limit fields"):
+            cache.set_rate_limit("api", cooldwon_until=5.0)
 
 
 # ---------------------------------------------------------------------------

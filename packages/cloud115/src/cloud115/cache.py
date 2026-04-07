@@ -30,6 +30,8 @@ def _default_db_path() -> Path:
     return d / "cache.db"
 
 
+_RATE_LIMIT_FIELDS = frozenset({"cooldown_until", "last_request", "minute_start", "minute_count"})
+
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS path_index (
     path       TEXT PRIMARY KEY,
@@ -242,6 +244,9 @@ class FileCache:
 
     def set_rate_limit(self, name: str, **kwargs: float | int) -> None:
         """Upsert rate-limit fields, merging *kwargs* with current values."""
+        unknown = set(kwargs) - _RATE_LIMIT_FIELDS
+        if unknown:
+            raise ValueError("Unknown rate_limit fields: %s" % unknown)
         current = self.get_rate_limit(name)
         current.update(kwargs)
         self._conn.execute(
@@ -274,6 +279,18 @@ class FileCache:
         with self._conn:
             for table in ("path_index", "dir_meta", "dir_entry", "rate_limit"):
                 self._conn.execute(f"DELETE FROM {table}")  # noqa: S608
+
+    def close(self) -> None:
+        """Close the database connection."""
+        self._conn.close()
+
+    def __enter__(self) -> FileCache:
+        """Enter context manager."""
+        return self
+
+    def __exit__(self, *args) -> None:
+        """Exit context manager and close the connection."""
+        self.close()
 
     def stats(self) -> dict:
         """Return a summary of cache contents and database size."""
