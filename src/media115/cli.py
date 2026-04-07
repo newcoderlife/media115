@@ -144,9 +144,10 @@ def auth(app, check, renew, force, get_qr, wait_qr):
     """Login to 115 via QR code scan. Saves cookies to .env."""
     import json as _json
 
-    from media115.client import QR_API, Cloud115Client
+    from cloud115 import CachedClient
+    from cloud115.api import QR_API, PASSPORT_API
 
-    existing = _get_115_client()
+    existing = _get_client()
 
     if check:
         if existing and existing.check_login():
@@ -228,8 +229,6 @@ def auth(app, check, renew, force, get_qr, wait_qr):
             else:
                 _time.sleep(1)
 
-        from media115.client import PASSPORT_API
-
         resp = _httpx.post(
             f"{PASSPORT_API}/app/1.0/{qr_app}/1.0/login/qrcode",
             data={"account": uid, "app": qr_app},
@@ -240,9 +239,9 @@ def auth(app, check, renew, force, get_qr, wait_qr):
         else:
             cookie_str = str(cookies)
 
-        client = Cloud115Client.from_cookies(cookie_str)
+        client = CachedClient(cookie_str)
         env_path = _env_write_path()
-        client.save_cookies_to_env(env_path)
+        client.save_cookies(str(env_path))
         qr_session_path.unlink(missing_ok=True)
         click.echo(f"Login success! Cookies saved to {env_path}")
         return
@@ -253,7 +252,7 @@ def auth(app, check, renew, force, get_qr, wait_qr):
             return
         if existing.renew_cookies(app=app):
             env_path = _env_write_path()
-            existing.save_cookies_to_env(env_path)
+            existing.save_cookies(str(env_path))
             click.echo("Cookies renewed and saved.")
         else:
             click.echo("Cookie renewal failed. Run 'media115 auth' to re-login.", err=True)
@@ -263,9 +262,9 @@ def auth(app, check, renew, force, get_qr, wait_qr):
         click.echo("Already logged in to 115.")
         return
 
-    client = Cloud115Client.qr_login(app=app)
+    client = CachedClient.qr_login(app=app)
     env_path = _env_write_path()
-    client.save_cookies_to_env(env_path)
+    client.save_cookies(str(env_path))
     click.echo(f"Cookies saved to {env_path}")
 
 
@@ -277,19 +276,23 @@ NFO_EXT = ".nfo"
 @click.argument("path")
 def export_tree(path):
     """Export 115 directory tree to local cache file. Only needs 2-3 API calls."""
-    client = _get_115_client()
+    client = _get_client()
     if not client:
         return
 
     click.echo(f"Resolving {path}...")
-    dir_id = _resolve_dir(client, path)
+    try:
+        cid = client.resolve_path(path)
+    except FileNotFoundError as e:
+        click.echo(f"Error: {e}", err=True)
+        return
 
-    if dir_id == "0":
+    if cid == "0":
         click.echo("Error: cannot export root directory. Specify a path like /影音", err=True)
         return
 
-    click.echo(f"Exporting directory tree (dir_id={dir_id})...")
-    text = client.export_tree(dir_id)
+    click.echo(f"Exporting directory tree (cid={cid})...")
+    text = client.export_tree(path)
 
     if not text:
         click.echo("Export failed.", err=True)
@@ -304,13 +307,6 @@ def export_tree(path):
     )
     click.echo(f"Tree exported: {len(lines)} entries, {video_count} video files")
     click.echo(f"Saved to {tree_path}")
-
-    # Write resolved path → dir_id into PathResolver cache
-    if not path.isdigit():
-        from media115.fs import PathResolver, _normalize
-
-        resolver = PathResolver(client)
-        resolver._write_path_index(_normalize(path), dir_id)
 
     click.echo("\nNext: run 'scan-tree <category>' to preview what needs scraping.")
 
@@ -635,11 +631,11 @@ def _upload_missing_nfo(category: str, skipped_ops: list[dict]):
     if not missing:
         return
 
-    client = _get_115_client()
+    client = _get_client()
     if not client:
         return
 
-    # 按目录分组，每个目录只处理一次（避免重复 list_files_all）
+    # 按目录分组，每个目录只处理一次（避免重复 list_dir）
     by_parent: dict[str, list[dict]] = {}
     for op in missing:
         by_parent.setdefault(op["parent"], []).append(op)
@@ -650,8 +646,9 @@ def _upload_missing_nfo(category: str, skipped_ops: list[dict]):
     for i, (parent, ops) in enumerate(by_parent.items(), 1):
         parent_leaf = parent.split("/")[-1] if "/" in parent else parent
 
-        dir_cid = client.get_dir_id("/" + parent)
-        if not dir_cid:
+        try:
+            dir_cid = client.resolve_path("/" + parent)
+        except FileNotFoundError:
             logger.warning("  补传跳过 %s: 目录不存在", parent)
             continue
 
@@ -731,7 +728,7 @@ def organize(category, execute, cleanup):
         click.echo(f"\nDry-run complete. Use --execute to apply {len(renames)} renames.")
         return
 
-    client = _get_115_client()
+    client = _get_client()
     if not client:
         return
 
@@ -780,24 +777,28 @@ def organize(category, execute, cleanup):
 
     if cleanup and ok > 0:
         click.echo("\nCleaning up empty directories...")
-        category_cid = client.get_dir_id(f"/影音/{category}")
-        if category_cid:
-            items = client.list_files_all(dir_id=category_cid)
-            empty_dirs = [
-                item
-                for item in items
-                if "fid" not in item  # is directory
-                and not client.list_files(dir_id=str(item.get("cid", "")), limit=1)
-            ]
+        cat_path = f"/影音/{category}"
+        try:
+            items = client.list_dir(cat_path)
+            empty_dirs = []
+            for item in items:
+                if item["type"] != "dir":
+                    continue
+                child_path = cat_path.rstrip("/") + "/" + item["name"]
+                children = client.list_dir(child_path)
+                if not children:
+                    empty_dirs.append(item)
             for d in empty_dirs:
-                name = d.get("n", "")
-                cid = str(d.get("cid", ""))
+                name = d["name"]
+                d_path = cat_path.rstrip("/") + "/" + name
                 try:
-                    client.delete([cid])
+                    client.delete([d_path])
                     click.echo(f"  Deleted empty dir: {name}")
                 except Exception as e:
                     click.echo(f"  Failed to delete {name}: {e}")
             click.echo(f"Cleaned up {len(empty_dirs)} empty directories")
+        except FileNotFoundError:
+            click.echo(f"  Category path {cat_path} not found, skipping cleanup.")
 
 
 @main.command()
@@ -815,37 +816,35 @@ def scan(path, recursive, depth):
         match_against_cases,
     )
 
-    client = _get_115_client()
+    client = _get_client()
     if not client:
         return
 
     try:
-        dir_id = _resolve_dir(client, path)
-        click.echo(f"Scanning dir_id={dir_id} ...")
-    except Exception as e:
+        click.echo(f"Scanning {path} ...")
+        if recursive:
+            dir_results = client.walk(path, max_depth=depth)
+        else:
+            dir_results = [{"path": path, "entries": client.list_dir(path)}]
+    except FileNotFoundError as e:
         click.echo(f"Error resolving path: {e}", err=True)
         return
 
-    # List files
-    if recursive:
-        items = client.list_files_recursive(dir_id=dir_id, max_depth=depth)
-    else:
-        items = client.list_files_all(dir_id=dir_id)
-
-    # Separate videos and NFOs
+    # Flatten and separate videos and NFOs
     videos = []
-    nfo_set: set[str] = set()  # parent_id + basename (without ext) that have .nfo
-    for item in items:
-        name = item.get("fn", item.get("n", ""))
-        is_dir = item.get("_is_dir", "fid" not in item)
-        if is_dir:
-            continue
-        stem, ext = _split_ext(name)
-        parent = str(item.get("_parent_id", item.get("cid", "")))
-        if ext.lower() == NFO_EXT:
-            nfo_set.add(f"{parent}/{stem}")
-        elif ext.lower() in VIDEO_EXTS:
-            videos.append(item)
+    nfo_set: set[str] = set()  # parent_path + basename (without ext) that have .nfo
+    for dr in dir_results:
+        parent_path = dr["path"]
+        for item in dr["entries"]:
+            if item["type"] == "dir":
+                continue
+            name = item["name"]
+            stem, ext = _split_ext(name)
+            if ext.lower() == NFO_EXT:
+                nfo_set.add(f"{parent_path}/{stem}")
+            elif ext.lower() in VIDEO_EXTS:
+                item["_parent_path"] = parent_path
+                videos.append(item)
 
     # Load regression cases
     cases_path = _cases_path()
@@ -859,8 +858,8 @@ def scan(path, recursive, depth):
     click.echo(f"|{'-' * 5}|{'-' * 52}|{'-' * 7}|{'-' * 8}|{'-' * 32}|{'-' * 10}|{'-' * 14}|")
 
     for i, item in enumerate(videos, 1):
-        name = item.get("fn", item.get("n", ""))
-        parent = str(item.get("_parent_id", ""))
+        name = item["name"]
+        parent = item.get("_parent_path", "")
         stem, _ = _split_ext(name)
         has_nfo = f"{parent}/{stem}" in nfo_set
 
@@ -904,7 +903,7 @@ def serve(host, port):
 
     config = _load_config()
     jellyfin_url = config.get("jellyfin_url", "http://localhost:8096")
-    client = _get_115_client()
+    client = _get_client()
     if not client:
         click.echo("Error: 115 credentials required for proxy", err=True)
         return
@@ -997,12 +996,12 @@ def upload(file_path, remote_dir):
     file_size = path.stat().st_size
     click.echo(f"Uploading {path.name} ({file_size:,} bytes)...")
 
-    client = _get_115_client()
+    client = _get_client()
     if not client:
         return
 
     try:
-        result = client.upload_file(path, remote_dir)
+        result = client.upload(str(path), remote_dir)
         if result:
             click.echo("  Upload success!")
         else:
@@ -1058,54 +1057,19 @@ def scrape(query, source, language):
         click.echo("  (network access to javbus.com required)")
 
 
-def _get_115_client():
-    from media115.client import Cloud115Client
+def _get_client():
+    """Get authenticated CachedClient."""
+    from cloud115 import CachedClient
 
     cookies = os.environ.get("CLOUD_115_COOKIES", "")
     if cookies:
-        return Cloud115Client.from_cookies(cookies)
+        return CachedClient(cookies)
 
     click.echo(
         "Warning: No 115 credentials. Use 'media115 auth' to login or set CLOUD_115_COOKIES.",
         err=True,
     )
     return None
-
-
-def _resolve_dir(client, path: str) -> str:
-    """Resolve path or dir_id to a dir_id."""
-    if path.isdigit():
-        return path
-    return client.resolve_path(path)
-
-
-def _print_tree(client, dir_id: str, label: str, depth: int, prefix: str = ""):
-    """Print directory tree recursively."""
-    if depth < 0:
-        return
-    items = client.list_files_all(dir_id=dir_id)
-    dirs = []
-    files = []
-    for item in items:
-        is_dir = "fid" not in item
-        if is_dir:
-            dirs.append(item)
-        else:
-            files.append(item)
-
-    entries = dirs + files
-    for i, item in enumerate(entries):
-        name = item.get("fn", item.get("n", "?"))
-        is_last = i == len(entries) - 1
-        connector = "\u2514\u2500\u2500 " if is_last else "\u251c\u2500\u2500 "
-        is_dir = item in dirs
-        mark = "\U0001f4c1" if is_dir else "\U0001f4c4"
-        click.echo(f"{prefix}{connector}{mark} {name}")
-
-        if is_dir and depth > 0:
-            child_id = str(item.get("cid", item.get("fid", "")))
-            child_prefix = prefix + ("    " if is_last else "\u2502   ")
-            _print_tree(client, child_id, name, depth - 1, child_prefix)
 
 
 from media115 import fs_cli as _fs_cli
