@@ -334,6 +334,7 @@ class Cloud115Client:
             if len(batch) < 1000:
                 break
             offset += len(batch)
+        get_logger().debug("list_files_all cid=%s → %d items", dir_id, len(all_files))
         return all_files
 
     def list_files_recursive(
@@ -389,7 +390,10 @@ class Cloud115Client:
             params={"path": path},
         )
         if result.get("state"):
-            return str(result.get("id", ""))
+            cid = str(result.get("id", ""))
+            get_logger().debug("get_dir_id %s → cid=%s", path, cid)
+            return cid
+        get_logger().debug("get_dir_id %s → not found", path)
         return None
 
     def search(self, keyword: str, dir_id: str = "0") -> list[dict]:
@@ -398,7 +402,9 @@ class Cloud115Client:
             f"{WEB_API}/files/search",
             params={"search_value": keyword, "cid": dir_id, "format": "json"},
         )
-        return result.get("data", [])
+        data = result.get("data", [])
+        get_logger().debug("search '%s' in cid=%s → %d results", keyword, dir_id, len(data))
+        return data
 
     def download_url(self, pick_code: str) -> str:
         return self._download_url_cookie(pick_code)
@@ -431,30 +437,39 @@ class Cloud115Client:
         raise ValueError(f"No download URL for pick_code={pick_code}")
 
     def mkdir(self, parent_id: str, name: str) -> dict:
-        return self._cookie_request(
+        result = self._cookie_request(
             "POST",
             f"{WEB_API}/files/add",
             data={"pid": parent_id, "cname": name},
         )
+        new_cid = result.get("cid", result.get("aid", ""))
+        get_logger().debug("mkdir '%s' in pid=%s → cid=%s", name, parent_id, new_cid)
+        return result
 
     def move(self, file_ids: list[str], target_dir_id: str) -> dict:
         data = {"pid": target_dir_id}
         for i, fid in enumerate(file_ids):
             data[f"fid[{i}]"] = fid
-        return self._cookie_request("POST", f"{WEB_API}/files/move", data=data)
+        result = self._cookie_request("POST", f"{WEB_API}/files/move", data=data)
+        get_logger().debug("move %d files → pid=%s", len(file_ids), target_dir_id)
+        return result
 
     def rename(self, file_id: str, new_name: str) -> dict:
-        return self._cookie_request(
+        result = self._cookie_request(
             "POST",
             f"{WEB_API}/files/edit",
             data={"fid": file_id, "file_name": new_name},
         )
+        get_logger().debug("rename fid=%s → '%s'", file_id, new_name)
+        return result
 
     def delete(self, file_ids: list[str]) -> dict:
         data = {}
         for i, fid in enumerate(file_ids):
             data[f"fid[{i}]"] = fid
-        return self._cookie_request("POST", f"{WEB_API}/rb/delete", data=data)
+        result = self._cookie_request("POST", f"{WEB_API}/rb/delete", data=data)
+        get_logger().debug("delete %d files", len(file_ids))
+        return result
 
     def upload_file(self, local_path: Path, target_dir_id: str, filename: str = "") -> dict | None:
         """Upload a small file (NFO, image) to 115 via OSS.
@@ -512,7 +527,7 @@ class Cloud115Client:
                 time.sleep(3 * (attempt + 1))
 
         if oss_resp.status_code == 200:
-            logger.debug("115 upload %s → dir=%s", fname, target_dir_id)
+            logger.debug("upload '%s' (%d bytes) → dir=%s", fname, len(content), target_dir_id)
             return oss_resp.json().get("data")
         logger.warning("115 upload %s failed: HTTP %d", fname, oss_resp.status_code)
         return None
@@ -622,6 +637,7 @@ class Cloud115Client:
 
             status = result.get("status")
             if status == 2:
+                get_logger().debug("rapid_upload '%s' → 秒传成功 pickcode=%s", filename, result.get("pickcode", ""))
                 return {"status": 2, "pickcode": result.get("pickcode", "")}
             elif status == 7 and result.get("statuscode") == 701 and file_stream:
                 # sign_check: 计算指定范围 SHA1
@@ -635,8 +651,10 @@ class Cloud115Client:
                 ).hexdigest().upper()
                 continue
             else:
+                get_logger().debug("rapid_upload '%s' → status=%s (需要实际上传)", filename, result.get("status"))
                 return {"status": result.get("status", 0)}
 
+        get_logger().debug("rapid_upload '%s' → 超过重试次数", filename)
         return {"status": 0}  # 超过重试次数
 
     def batch_rename(self, renames: dict[str, str]) -> dict:
@@ -645,7 +663,9 @@ class Cloud115Client:
         renames: {file_id: new_name, ...}
         """
         data = {f"files_new_name[{fid}]": name for fid, name in renames.items()}
-        return self._cookie_request("POST", f"{WEB_API}/files/batch_rename", data=data)
+        result = self._cookie_request("POST", f"{WEB_API}/files/batch_rename", data=data)
+        get_logger().debug("batch_rename %d files", len(renames))
+        return result
 
     def export_tree(self, dir_id: str) -> str | None:
         """Export 115 directory tree. Returns tree text (UTF-8) or None on failure.
@@ -654,6 +674,7 @@ class Cloud115Client:
         """
         import httpx as _httpx
 
+        get_logger().debug("export_tree cid=%s starting...", dir_id)
         # Start export
         resp = self._cookie_request(
             "POST",
@@ -711,7 +732,9 @@ class Cloud115Client:
             with contextlib.suppress(Exception):
                 self.delete([str(file_id)])
 
-        return dl.content.decode("utf-16-le", errors="replace")
+        text = dl.content.decode("utf-16-le", errors="replace")
+        get_logger().debug("export_tree cid=%s → %d lines", dir_id, text.count("\n"))
+        return text
 
 
 def _print_qr(content: str, image_url: str):
