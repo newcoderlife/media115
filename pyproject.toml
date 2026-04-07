@@ -4,6 +4,7 @@ version = "0.1.0"
 requires-python = ">=3.9"
 license = "MIT"
 dependencies = [
+    "cloud115",
     "httpx[socks]",
     "lxml",
     "click",
@@ -18,6 +19,9 @@ dependencies = [
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.uv.sources]
+cloud115 = { path = "packages/cloud115", editable = true }
 
 [tool.setuptools.packages.find]
 where = ["src"]
