@@ -326,15 +326,17 @@ class Cloud115Client:
         """List all files in a directory (handles pagination)."""
         all_files = []
         offset = 0
+        pages = 0
         while True:
             batch = self.list_files(dir_id=dir_id, limit=1000, offset=offset)
+            pages += 1
             if not batch:
                 break
             all_files.extend(batch)
             if len(batch) < 1000:
                 break
             offset += len(batch)
-        get_logger().debug("list_files_all cid=%s → %d items", dir_id, len(all_files))
+        get_logger().debug("list_files_all cid=%s → %d items (%d pages)", dir_id, len(all_files), pages)
         return all_files
 
     def list_files_recursive(

@@ -639,21 +639,25 @@ def _upload_missing_nfo(category: str, skipped_ops: list[dict]):
     if not client:
         return
 
-    click.echo(f"\n补传 NFO: {len(missing)} 个文件缺少 NFO")
+    # 按目录分组，每个目录只处理一次（避免重复 list_files_all）
+    by_parent: dict[str, list[dict]] = {}
+    for op in missing:
+        by_parent.setdefault(op["parent"], []).append(op)
+
+    click.echo(f"\n补传 NFO: {len(by_parent)} 个目录缺少 NFO（共 {len(missing)} 个文件）")
 
     uploaded = 0
-    for i, op in enumerate(missing, 1):
-        parent = op["parent"]
+    for i, (parent, ops) in enumerate(by_parent.items(), 1):
         parent_leaf = parent.split("/")[-1] if "/" in parent else parent
 
-        # 解析目标 cid
         dir_cid = client.get_dir_id("/" + parent)
         if not dir_cid:
             logger.warning("  补传跳过 %s: 目录不存在", parent)
             continue
 
-        print(f"\r  [{i}/{len(missing)}] {_trunc(parent_leaf, 50)}", end="", file=sys.stderr, flush=True)
-        _upload_scrape_output(client, op, dir_cid, op.get("file"))
+        print(f"\r  [{i}/{len(by_parent)}] {_trunc(parent_leaf, 50)}", end="", file=sys.stderr, flush=True)
+        # 只用第一个 op 触发上传（_upload_scrape_output 会上传整个 scrape_output 目录）
+        _upload_scrape_output(client, ops[0], dir_cid, ops[0].get("file"))
         uploaded += 1
 
     print("", file=sys.stderr)
