@@ -908,7 +908,7 @@ def serve(host, port):
         click.echo("Error: 115 credentials required for proxy", err=True)
         return
 
-    app = create_app(jellyfin_url=jellyfin_url, cloud115_client=client)
+    app = create_app(jellyfin_url=jellyfin_url, client=client)
     click.echo(f"Starting strm-proxy on {host}:{port}")
     click.echo(f"Jellyfin upstream: {jellyfin_url}")
     uvicorn.run(app, host=host, port=port)
