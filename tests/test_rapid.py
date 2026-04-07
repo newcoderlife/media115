@@ -20,14 +20,14 @@ from media115.cli import main
 
 class TestEC115Cipher:
     def test_cipher_creates_keys(self):
-        from media115._ec115 import EC115Cipher
+        from cloud115.ec115 import EC115Cipher
 
         ec = EC115Cipher()
         assert len(ec._aes_key) == 16
         assert len(ec._aes_iv) == 16
 
     def test_pub_key_length(self):
-        from media115._ec115 import EC115Cipher
+        from cloud115.ec115 import EC115Cipher
 
         ec = EC115Cipher()
         # 0x1d prefix (1 byte) + compressed P-224 SEC1 (29 bytes) = 30 bytes
@@ -35,7 +35,7 @@ class TestEC115Cipher:
         assert ec._pub_key[0] == 0x1D
 
     def test_encode_produces_ciphertext(self):
-        from media115._ec115 import EC115Cipher
+        from cloud115.ec115 import EC115Cipher
 
         ec = EC115Cipher()
         plaintext = b"test data for encryption"
@@ -44,35 +44,35 @@ class TestEC115Cipher:
         assert len(encrypted) % 16 == 0
 
     def test_encode_pads_to_16_boundary(self):
-        from media115._ec115 import EC115Cipher
+        from cloud115.ec115 import EC115Cipher
 
         ec = EC115Cipher()
-        # 7 bytes → should pad to 16
+        # 7 bytes -> should pad to 16
         encrypted = ec.encode(b"1234567")
         assert len(encrypted) == 16
 
     def test_encode_already_aligned_not_padded_further(self):
-        from media115._ec115 import EC115Cipher
+        from cloud115.ec115 import EC115Cipher
 
         ec = EC115Cipher()
-        # 32 bytes (already aligned) → should stay 32
+        # 32 bytes (already aligned) -> should stay 32
         encrypted = ec.encode(b"A" * 32)
         assert len(encrypted) == 32
 
     def test_encode_token_is_base64(self):
-        from media115._ec115 import EC115Cipher
+        from cloud115.ec115 import EC115Cipher
 
         ec = EC115Cipher()
         token = ec.encode_token()
         assert isinstance(token, str)
         # Valid base64
         raw = base64.b64decode(token)
-        # 44 bytes token + 4 bytes CRC = 48 bytes → base64 len 64
+        # 44 bytes token + 4 bytes CRC = 48 bytes -> base64 len 64
         assert len(raw) == 48
 
     def test_encode_token_different_each_call(self):
         """Two calls should produce different tokens (random bytes + timestamp)."""
-        from media115._ec115 import EC115Cipher
+        from cloud115.ec115 import EC115Cipher
 
         ec = EC115Cipher()
         t1 = ec.encode_token()
@@ -94,52 +94,35 @@ class TestRapidCommand:
     def test_rapid_success(self, runner, tmp_path):
         local_file = tmp_path / "test.mkv"
         local_file.write_bytes(b"x" * 1000)
-        resolver = MagicMock()
-        resolver.resolve_dir.return_value = "target_cid"
-        resolver.client.rapid_upload.return_value = {
+        mock_client = MagicMock()
+        mock_client.rapid_upload.return_value = {
             "status": 2,
             "pickcode": "abc123",
         }
-        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+        with patch("media115.fs_cli._get_client", return_value=mock_client):
             result = runner.invoke(main, ["rapid", str(local_file), "/影音/"])
         assert result.exit_code == 0
         assert "秒传成功" in result.output
         assert "abc123" in result.output
-        resolver.mark_stale.assert_called_once_with("target_cid")
+        mock_client.rapid_upload.assert_called_once_with(
+            str(local_file), "/影音/"
+        )
 
     def test_rapid_fails_status_1(self, runner, tmp_path):
         local_file = tmp_path / "test.mkv"
         local_file.write_bytes(b"x" * 1000)
-        resolver = MagicMock()
-        resolver.resolve_dir.return_value = "target_cid"
-        resolver.client.rapid_upload.return_value = {"status": 1}
-        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+        mock_client = MagicMock()
+        mock_client.rapid_upload.return_value = {"status": 1}
+        with patch("media115.fs_cli._get_client", return_value=mock_client):
             result = runner.invoke(main, ["rapid", str(local_file), "/影音/"])
         assert result.exit_code != 0 or "失败" in result.output
-
-    def test_rapid_passes_correct_sha1(self, runner, tmp_path):
-        """rapid command must pass the correct (uppercase) SHA1 to rapid_upload."""
-        content = b"hello 115 rapid upload test"
-        local_file = tmp_path / "hello.txt"
-        local_file.write_bytes(content)
-        expected_sha1 = hashlib.sha1(content).hexdigest().upper()
-
-        resolver = MagicMock()
-        resolver.resolve_dir.return_value = "cid"
-        resolver.client.rapid_upload.return_value = {"status": 2, "pickcode": "pc1"}
-        with patch("media115.fs_cli._get_resolver", return_value=resolver):
-            runner.invoke(main, ["rapid", str(local_file), "/影音/"])
-
-        call_kwargs = resolver.client.rapid_upload.call_args
-        # positional: (dir_id, filename, file_size, file_sha1, file_stream=...)
-        assert call_kwargs[0][3] == expected_sha1
 
     def test_rapid_remote_dir_not_found(self, runner, tmp_path):
         local_file = tmp_path / "test.mkv"
         local_file.write_bytes(b"x" * 100)
-        resolver = MagicMock()
-        resolver.resolve_dir.side_effect = FileNotFoundError("/missing/")
-        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+        mock_client = MagicMock()
+        mock_client.rapid_upload.side_effect = FileNotFoundError("/missing/")
+        with patch("media115.fs_cli._get_client", return_value=mock_client):
             result = runner.invoke(main, ["rapid", str(local_file), "/missing/"])
         assert result.exit_code != 0
 
@@ -157,81 +140,58 @@ class TestPutWithRapid:
     def test_put_tries_rapid_first(self, runner, tmp_path):
         local_file = tmp_path / "test.nfo"
         local_file.write_text("<nfo/>")
-        resolver = MagicMock()
-        resolver.resolve_dir.return_value = "target_cid"
-        resolver.client.rapid_upload.return_value = {"status": 2, "pickcode": "abc"}
-        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+        mock_client = MagicMock()
+        mock_client.rapid_upload.return_value = {"status": 2, "pickcode": "abc"}
+        with patch("media115.fs_cli._get_client", return_value=mock_client):
             result = runner.invoke(main, ["put", str(local_file), "/影音/"])
         assert result.exit_code == 0
         assert "秒传" in result.output
-        # rapid succeeded → no fallback to upload_file
-        resolver.client.upload_file.assert_not_called()
+        # rapid succeeded -> no fallback to upload
+        mock_client.upload.assert_not_called()
 
     def test_put_falls_back_when_rapid_fails(self, runner, tmp_path):
         local_file = tmp_path / "test.nfo"
         local_file.write_text("<nfo/>")
-        resolver = MagicMock()
-        resolver.resolve_dir.return_value = "target_cid"
+        mock_client = MagicMock()
         # rapid returns status 1 (not on 115)
-        resolver.client.rapid_upload.return_value = {"status": 1}
-        resolver.client.upload_file.return_value = {}
-        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+        mock_client.rapid_upload.return_value = {"status": 1}
+        mock_client.upload.return_value = {}
+        with patch("media115.fs_cli._get_client", return_value=mock_client):
             result = runner.invoke(main, ["put", str(local_file), "/影音/"])
         assert result.exit_code == 0
-        resolver.client.upload_file.assert_called_once()
+        mock_client.upload.assert_called_once()
 
     def test_put_no_rapid_flag_skips_rapid(self, runner, tmp_path):
         local_file = tmp_path / "test.nfo"
         local_file.write_text("<nfo/>")
-        resolver = MagicMock()
-        resolver.resolve_dir.return_value = "target_cid"
-        resolver.client.upload_file.return_value = {}
-        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+        mock_client = MagicMock()
+        mock_client.upload.return_value = {}
+        with patch("media115.fs_cli._get_client", return_value=mock_client):
             result = runner.invoke(main, ["put", "--no-rapid", str(local_file), "/影音/"])
         assert result.exit_code == 0
-        resolver.client.rapid_upload.assert_not_called()
-        resolver.client.upload_file.assert_called_once()
-
-    def test_put_mark_stale_after_rapid_success(self, runner, tmp_path):
-        local_file = tmp_path / "test.mkv"
-        local_file.write_bytes(b"data")
-        resolver = MagicMock()
-        resolver.resolve_dir.return_value = "cid99"
-        resolver.client.rapid_upload.return_value = {"status": 2, "pickcode": "xyz"}
-        with patch("media115.fs_cli._get_resolver", return_value=resolver):
-            runner.invoke(main, ["put", str(local_file), "/影音/"])
-        resolver.mark_stale.assert_called_with("cid99")
-
-    def test_put_mark_stale_after_regular_upload(self, runner, tmp_path):
-        local_file = tmp_path / "test.mkv"
-        local_file.write_bytes(b"data")
-        resolver = MagicMock()
-        resolver.resolve_dir.return_value = "cid88"
-        resolver.client.rapid_upload.return_value = {"status": 1}
-        resolver.client.upload_file.return_value = {}
-        with patch("media115.fs_cli._get_resolver", return_value=resolver):
-            runner.invoke(main, ["put", "--no-rapid", str(local_file), "/影音/"])
-        resolver.mark_stale.assert_called_with("cid88")
+        mock_client.rapid_upload.assert_not_called()
+        mock_client.upload.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
-# rapid_upload method unit tests (client layer, no network)
+# rapid_upload method unit tests (CloudAPI layer, no network)
 # ---------------------------------------------------------------------------
 
 
 class TestRapidUploadMethod:
-    def _make_client(self):
-        from media115.client import Cloud115Client
+    def _make_api(self):
+        from cloud115.api import CloudAPI
 
-        c = Cloud115Client()
-        c._cookies = "UID=12345_test; CID=abc; SEID=xyz"
-        c._user_id = "12345"
-        return c
+        api = CloudAPI.__new__(CloudAPI)
+        api._cookies = "UID=12345_test; CID=abc; SEID=xyz"
+        api._http = MagicMock()
+        api._limiter = MagicMock()
+        return api
 
     def test_rapid_upload_calls_upload_info(self):
         """rapid_upload should call upload_info() once."""
-        client = self._make_client()
-        client.upload_info = MagicMock(
+        api = self._make_api()
+        api.upload_info = MagicMock(
             return_value={"user_id": "12345", "user_key": "TESTKEY"}
         )
 
@@ -244,21 +204,19 @@ class TestRapidUploadMethod:
         mock_resp = MagicMock()
         mock_resp.content = b"encrypted_response"
         mock_resp.raise_for_status = MagicMock()
-        client._http = MagicMock()
-        client._http.post.return_value = mock_resp
-        client._limiter = MagicMock()
+        api._http.post.return_value = mock_resp
 
-        with patch("media115._ec115.EC115Cipher", return_value=mock_ec):
-            result = client.rapid_upload("123", "test.mkv", 1000, "A" * 40)
+        with patch("cloud115.ec115.EC115Cipher", return_value=mock_ec):
+            result = api.rapid_upload("123", "test.mkv", 1000, "A" * 40)
 
-        client.upload_info.assert_called_once()
+        api.upload_info.assert_called_once()
         assert result["status"] == 2
         assert result["pickcode"] == "pc_test"
 
     def test_rapid_upload_status1_returns_correctly(self):
         """status=1 means file not on 115."""
-        client = self._make_client()
-        client.upload_info = MagicMock(
+        api = self._make_api()
+        api.upload_info = MagicMock(
             return_value={"user_id": "12345", "user_key": "KEY"}
         )
 
@@ -270,23 +228,21 @@ class TestRapidUploadMethod:
         mock_resp = MagicMock()
         mock_resp.content = b"resp"
         mock_resp.raise_for_status = MagicMock()
-        client._http = MagicMock()
-        client._http.post.return_value = mock_resp
-        client._limiter = MagicMock()
+        api._http.post.return_value = mock_resp
 
-        with patch("media115._ec115.EC115Cipher", return_value=mock_ec):
-            result = client.rapid_upload("123", "test.mkv", 1000, "B" * 40)
+        with patch("cloud115.ec115.EC115Cipher", return_value=mock_ec):
+            result = api.rapid_upload("123", "test.mkv", 1000, "B" * 40)
 
         assert result["status"] == 1
 
     def test_rapid_upload_sign_check_reads_range(self):
         """On status=7/701, should seek and read the sign_check range."""
-        client = self._make_client()
-        client.upload_info = MagicMock(
+        api = self._make_api()
+        api.upload_info = MagicMock(
             return_value={"user_id": "12345", "user_key": "KEY"}
         )
 
-        # First call → sign_check; second call → success
+        # First call -> sign_check; second call -> success
         import json as _json
 
         responses = [
@@ -313,15 +269,13 @@ class TestRapidUploadMethod:
         mock_resp = MagicMock()
         mock_resp.content = b"resp"
         mock_resp.raise_for_status = MagicMock()
-        client._http = MagicMock()
-        client._http.post.return_value = mock_resp
-        client._limiter = MagicMock()
+        api._http.post.return_value = mock_resp
 
         file_content = b"0123456789abcdef"
         stream = io.BytesIO(file_content)
 
-        with patch("media115._ec115.EC115Cipher", return_value=mock_ec):
-            result = client.rapid_upload(
+        with patch("cloud115.ec115.EC115Cipher", return_value=mock_ec):
+            result = api.rapid_upload(
                 "123", "test.mkv", len(file_content), "C" * 40, file_stream=stream
             )
 
