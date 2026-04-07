@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import httpx
 
-from media115.cache import _cache_dir
-from media115.rate_limit import RateLimiter
+from cloud115.rate_limit import RateLimiter
 
 BASE_URL = "https://api.bgm.tv"
 
@@ -16,8 +15,7 @@ class BangumiClient:
         if access_token:
             headers["Authorization"] = f"Bearer {access_token}"
         self._limiter = RateLimiter(
-            qps=0.8, qpm=40,
-            state_path=_cache_dir() / "rate_limit_bangumi.json",
+            "bangumi", qps=0.8, qpm=40
         )
         self._http = httpx.Client(
             base_url=BASE_URL,
