@@ -11,7 +11,7 @@ import click
 from media115.log import get_logger
 
 if TYPE_CHECKING:
-    from media115.fs import PathResolver
+    from cloud115 import CachedClient
 
 
 def _download_to_file(url: str, local_path: Path):
@@ -24,15 +24,15 @@ def _download_to_file(url: str, local_path: Path):
                 f.write(chunk)
 
 
-def _get_resolver() -> "PathResolver":
-    """获取已认证的 PathResolver。"""
-    from media115.cli import _get_115_client
-    from media115.fs import PathResolver
+def _get_client() -> "CachedClient":
+    """获取已认证的 CachedClient。"""
+    import os
+    from cloud115 import CachedClient
 
-    client = _get_115_client()
-    if not client:
+    cookies = os.environ.get("CLOUD_115_COOKIES", "")
+    if not cookies:
         raise click.ClickException("未登录。请先运行: media115 auth")
-    return PathResolver(client)
+    return CachedClient(cookies)
 
 
 def _format_size(size: int) -> str:
@@ -55,44 +55,36 @@ def register(cli: click.Group):
     def ls(path, long_fmt, recursive, depth):
         """列出 115 网盘目录内容。"""
         try:
-            resolver = _get_resolver()
+            client = _get_client()
         except click.ClickException as e:
             raise e
 
         try:
-            cid = resolver.resolve_dir(path)
+            items = client.list_dir(path)
         except FileNotFoundError:
             raise click.ClickException(f"目录不存在: {path!r}")
 
-        _ls_dir(resolver, cid, path, long_fmt, recursive, depth, indent=0)
+        _ls_dir(client, items, path, long_fmt, recursive, depth, indent=0)
 
     @cli.command("stat")
     @click.argument("path")
     def stat(path):
         """显示文件或目录的元数据（JSON 格式）。"""
         try:
-            resolver = _get_resolver()
+            client = _get_client()
         except click.ClickException as e:
             raise e
 
-        # 先尝试解析为文件
         try:
-            fid, parent_cid, meta = resolver.resolve_file(path)
-            click.echo(json.dumps(meta, ensure_ascii=False, indent=2))
-            return
+            info = client.stat(path)
         except FileNotFoundError:
-            pass
+            raise click.ClickException(f"路径不存在: {path!r}")
 
-        # 再尝试解析为目录
-        try:
-            cid = resolver.resolve_dir(path)
-            result = {"type": "directory", "cid": cid, "path": path}
+        if info.get("type") == "dir":
+            result = {"type": "directory", "cid": info.get("cid", ""), "path": path}
             click.echo(json.dumps(result, ensure_ascii=False, indent=2))
-            return
-        except FileNotFoundError:
-            pass
-
-        raise click.ClickException(f"路径不存在: {path!r}")
+        else:
+            click.echo(json.dumps(info, ensure_ascii=False, indent=2))
 
     @cli.command("find")
     @click.argument("keyword")
@@ -100,16 +92,15 @@ def register(cli: click.Group):
     def find(keyword, path):
         """在 115 网盘中搜索文件。"""
         try:
-            resolver = _get_resolver()
+            client = _get_client()
         except click.ClickException as e:
             raise e
 
         try:
-            cid = resolver.resolve_dir(path)
+            results = client.search(keyword, path)
         except FileNotFoundError:
             raise click.ClickException(f"目录不存在: {path!r}")
 
-        results = resolver.client.search(keyword, dir_id=cid)
         for item in results:
             name = item.get("fn", item.get("n", "?"))
             click.echo(name)
@@ -119,10 +110,8 @@ def register(cli: click.Group):
     @click.option("-p", "parents", is_flag=True, help="递归创建中间目录")
     def mkdir(path, parents):
         """在 115 网盘中创建目录。"""
-        import posixpath
-
         try:
-            resolver = _get_resolver()
+            client = _get_client()
         except click.ClickException as e:
             raise e
 
@@ -134,56 +123,20 @@ def register(cli: click.Group):
         if parents:
             # 先检查目标是否已存在
             try:
-                resolver.resolve_dir(path)
+                client.resolve_path(path)
                 click.echo(f"目录已存在: {path}")
                 return
             except FileNotFoundError:
                 pass
-            # 找到第一个存在的祖先目录，然后逐级创建
-            parts = [p for p in path.split("/") if p]
-            # 从父目录往上找第一个存在的（跳过目标本身，从 len(parts)-1 往下）
-            existing_cid = None
-            existing_idx = -1
-            for i in range(len(parts) - 1, -1, -1):
-                ancestor = "/" + "/".join(parts[:i]) if i > 0 else "/"
-                try:
-                    existing_cid = resolver.resolve_dir(ancestor)
-                    existing_idx = i
-                    break
-                except FileNotFoundError:
-                    continue
 
-            if existing_cid is None:
-                raise click.ClickException("无法解析根目录")
+        try:
+            client.mkdir(path, parents=parents)
+        except FileNotFoundError:
+            parent = path.rpartition("/")[0] or "/"
+            raise click.ClickException(f"父目录不存在: {parent!r}，可以使用 -p 递归创建")
 
-            # 逐级创建缺失的目录
-            current_cid = existing_cid
-            current_path = "/" + "/".join(parts[:existing_idx]) if existing_idx > 0 else "/"
-            for part in parts[existing_idx:]:
-                result = resolver.client.mkdir(current_cid, part)
-                new_cid = str(result["cid"])
-                resolver.update_dir_entry(current_path, current_cid, part, new_cid)
-                current_path = current_path.rstrip("/") + "/" + part
-                current_cid = new_cid
-            get_logger().info("mkdir %s", path)
-            click.echo(f"已创建: {path}")
-        else:
-            # 普通模式：解析父目录，创建最后一段
-            parent, _, name = path.rpartition("/")
-            parent = parent or "/"
-            if not name:
-                raise click.ClickException(f"无效路径: {path!r}")
-
-            try:
-                parent_cid = resolver.resolve_dir(parent)
-            except FileNotFoundError:
-                raise click.ClickException(f"父目录不存在: {parent!r}，可以使用 -p 递归创建")
-
-            result = resolver.client.mkdir(parent_cid, name)
-            new_cid = str(result["cid"])
-            resolver.update_dir_entry(parent, parent_cid, name, new_cid)
-            get_logger().info("mkdir %s", path)
-            click.echo(f"已创建: {path}")
+        get_logger().info("mkdir %s", path)
+        click.echo(f"已创建: {path}")
 
     @cli.command("rm")
     @click.argument("paths", nargs=-1, required=True)
@@ -191,62 +144,34 @@ def register(cli: click.Group):
     def rm(paths, recursive):
         """删除 115 网盘中的文件或目录。"""
         try:
-            resolver = _get_resolver()
+            client = _get_client()
         except click.ClickException as e:
             raise e
 
-        ids = []
-        # (parent_cid, name) pairs for cache update
-        cache_entries = []
-
+        # Validate all paths first, check if dirs need -r
+        resolved = []
         total = len(paths)
         for i, path in enumerate(paths, 1):
             if total > 1:
                 print(f"\r  [{i}/{total}] {path[:60]}", end="", file=sys.stderr, flush=True)
-            # 先尝试解析为文件
             try:
-                fid, parent_cid, meta = resolver.resolve_file(path)
-                ids.append(fid)
-                name = meta.get("name", path.rsplit("/", 1)[-1])
-                cache_entries.append((parent_cid, name))
-                continue
+                info = client.stat(path)
             except FileNotFoundError:
-                pass
+                raise click.ClickException(f"路径不存在: {path!r}")
 
-            # 再尝试解析为目录
-            try:
-                cid = resolver.resolve_dir(path)
-                if not recursive:
-                    raise click.ClickException(f"{path!r} 是目录，需要 -r")
-                ids.append(cid)
-                parent = path.rstrip("/").rpartition("/")[0] or "/"
-                name = path.rstrip("/").rsplit("/", 1)[-1]
-                # 目录删除后需要 invalidate，记录 parent_cid 稍后处理
-                cache_entries.append((None, path))  # sentinel for dir
-                continue
-            except FileNotFoundError:
-                pass
+            if info.get("type") == "dir" and not recursive:
+                raise click.ClickException(f"{path!r} 是目录，需要 -r")
+            resolved.append(path)
 
-            raise click.ClickException(f"路径不存在: {path!r}")
-
-        if not ids:
+        if not resolved:
             return
 
         if total > 1:
             print("", file=sys.stderr)
-        resolver.client.delete(ids)
 
-        # 更新缓存
-        for entry in cache_entries:
-            parent_cid, name_or_path = entry
-            if parent_cid is None:
-                # 目录：从 path_index 中移除
-                resolver.invalidate(name_or_path)
-            else:
-                resolver.remove_from_listing(parent_cid, name_or_path)
-
-        get_logger().info("rm %d items", len(ids))
-        click.echo(f"已删除 {len(ids)} 个项目")
+        client.delete(resolved)
+        get_logger().info("rm %d items", len(resolved))
+        click.echo(f"已删除 {len(resolved)} 个项目")
 
     @cli.command("rename")
     @click.argument("path", required=False)
@@ -255,54 +180,35 @@ def register(cli: click.Group):
     def rename(path, new_name, batch):
         """重命名 115 网盘中的文件。"""
         try:
-            resolver = _get_resolver()
+            client = _get_client()
         except click.ClickException as e:
             raise e
 
         if batch:
-            import sys
             raw = click.get_text_stream("stdin").read()
             try:
                 pairs = json.loads(raw)
             except json.JSONDecodeError as e:
                 raise click.ClickException(f"JSON 解析失败: {e}")
 
-            renames = {}
-            cache_updates = []
             total = len(pairs)
-            for i, (item_path, item_new_name) in enumerate(pairs, 1):
+            for i, (item_path, _) in enumerate(pairs, 1):
                 if total > 1:
                     print(f"\r  [{i}/{total}] {item_path[:60]}", end="", file=sys.stderr, flush=True)
-                try:
-                    fid, parent_cid, meta = resolver.resolve_file(item_path)
-                except FileNotFoundError:
-                    raise click.ClickException(f"文件不存在: {item_path!r}")
-                old_name = meta.get("name", item_path.rsplit("/", 1)[-1])
-                renames[fid] = item_new_name
-                cache_updates.append((parent_cid, old_name, fid, item_new_name))
             if total > 1:
                 print("", file=sys.stderr)
 
-            resolver.client.batch_rename(renames)
-
-            for parent_cid, old_name, fid, item_new_name in cache_updates:
-                resolver.remove_from_listing(parent_cid, old_name)
-                resolver.mark_stale(parent_cid)
-
-            click.echo(f"已批量重命名 {len(renames)} 个文件")
+            client.batch_rename(pairs)
+            click.echo(f"已批量重命名 {len(pairs)} 个文件")
         else:
             if not path or not new_name:
                 raise click.ClickException("需要提供 PATH 和 NEW_NAME，或使用 --batch 模式")
 
+            old_name = path.rsplit("/", 1)[-1]
             try:
-                fid, parent_cid, meta = resolver.resolve_file(path)
+                client.rename(path, new_name)
             except FileNotFoundError:
                 raise click.ClickException(f"文件不存在: {path!r}")
-
-            old_name = meta.get("name", path.rsplit("/", 1)[-1])
-            resolver.client.rename(fid, new_name)
-            resolver.remove_from_listing(parent_cid, old_name)
-            resolver.mark_stale(parent_cid)
             get_logger().info("rename %s → %s", old_name, new_name)
             click.echo(f"已重命名: {old_name} → {new_name}")
 
@@ -311,42 +217,23 @@ def register(cli: click.Group):
     @click.argument("remote_dir")
     def rapid(local_path, remote_dir):
         """秒传：只传哈希，115 端去重。失败不 fallback。"""
-        import hashlib as _hl
-
         try:
-            resolver = _get_resolver()
+            client = _get_client()
         except click.ClickException as e:
             raise e
 
         try:
-            cid = resolver.resolve_dir(remote_dir)
+            result = client.rapid_upload(local_path, remote_dir)
         except FileNotFoundError:
             raise click.ClickException(f"远程目录不存在: {remote_dir!r}")
 
-        local = Path(local_path)
-
-        # 计算文件完整 SHA1
-        h = _hl.sha1()
-        with open(local, "rb") as f:
-            while chunk := f.read(1024 * 1024):
-                h.update(chunk)
-        file_sha1 = h.hexdigest().upper()
-
-        with open(local, "rb") as f:
-            result = resolver.client.rapid_upload(
-                cid,
-                local.name,
-                local.stat().st_size,
-                file_sha1,
-                file_stream=f,
-            )
-
         if result.get("status") == 2:
-            pickcode = result['pickcode']
+            pickcode = result.get("pickcode", "")
+            local = Path(local_path)
             get_logger().info("rapid %s → %s (pickcode=%s)", local.name, remote_dir, pickcode)
             click.echo(f"秒传成功: {local.name} (pickcode={pickcode})")
-            resolver.mark_stale(cid)
         else:
+            local = Path(local_path)
             raise click.ClickException(f"秒传失败: {local.name} (115 上没有此文件)")
 
     @cli.command("put")
@@ -356,46 +243,29 @@ def register(cli: click.Group):
                   help="跳过秒传，直接走普通上传")
     def put(local_path, remote_dir, no_rapid):
         """上传本地文件到 115 网盘目录。默认先尝试秒传，失败则走普通上传。"""
-        import hashlib as _hl
-
         try:
-            resolver = _get_resolver()
+            client = _get_client()
         except click.ClickException as e:
             raise e
-
-        try:
-            cid = resolver.resolve_dir(remote_dir)
-        except FileNotFoundError:
-            raise click.ClickException(f"远程目录不存在: {remote_dir!r}")
 
         local = Path(local_path)
 
         if not no_rapid:
-            # 先尝试秒传
-            h = _hl.sha1()
-            with open(local, "rb") as f:
-                while chunk := f.read(1024 * 1024):
-                    h.update(chunk)
-            file_sha1 = h.hexdigest().upper()
-
-            with open(local, "rb") as f:
-                rapid_result = resolver.client.rapid_upload(
-                    cid,
-                    local.name,
-                    local.stat().st_size,
-                    file_sha1,
-                    file_stream=f,
-                )
+            try:
+                rapid_result = client.rapid_upload(local_path, remote_dir)
+            except FileNotFoundError:
+                raise click.ClickException(f"远程目录不存在: {remote_dir!r}")
 
             if rapid_result.get("status") == 2:
                 get_logger().info("put %s → %s", local.name, remote_dir)
                 click.echo(f"已上传（秒传）: {local.name}")
-                resolver.mark_stale(cid)
                 return
 
         # 普通上传
-        resolver.client.upload_file(local, cid)
-        resolver.mark_stale(cid)
+        try:
+            client.upload(local_path, remote_dir)
+        except FileNotFoundError:
+            raise click.ClickException(f"远程目录不存在: {remote_dir!r}")
         get_logger().info("put %s → %s", local.name, remote_dir)
         click.echo(f"已上传: {local.name}")
 
@@ -405,12 +275,12 @@ def register(cli: click.Group):
     def get(remote_path, local_dir):
         """从 115 网盘下载文件到本地目录。"""
         try:
-            resolver = _get_resolver()
+            client = _get_client()
         except click.ClickException as e:
             raise e
 
         try:
-            fid, parent_cid, meta = resolver.resolve_file(remote_path)
+            meta = client.find_file(remote_path)
         except FileNotFoundError:
             raise click.ClickException(f"远程文件不存在: {remote_path!r}")
 
@@ -419,7 +289,7 @@ def register(cli: click.Group):
             raise click.ClickException(f"文件缺少 pick_code: {remote_path!r}")
 
         filename = meta.get("name") or remote_path.rsplit("/", 1)[-1]
-        url = resolver.client.download_url(pick_code)
+        url = client.download_url(pick_code)
         dest = Path(local_dir) / filename
         _download_to_file(url, dest)
         get_logger().info("get %s → %s", remote_path, local_dir)
@@ -436,17 +306,14 @@ def register(cli: click.Group):
             click.echo("--deep 暂未实现，已忽略该标志")
 
         try:
-            resolver = _get_resolver()
+            client = _get_client()
         except click.ClickException as e:
             raise e
 
         try:
-            cid = resolver.resolve_dir(path)
+            text = client.export_tree(path)
         except FileNotFoundError:
             raise click.ClickException(f"目录不存在: {path!r}")
-
-        click.echo(f"正在导出目录树 (cid={cid})...")
-        text = resolver.client.export_tree(cid)
 
         if not text:
             raise click.ClickException(f"导出失败: {path!r}")
@@ -454,10 +321,6 @@ def register(cli: click.Group):
         # 保存到 tree_cache.txt
         tree_path = media_cache.tree_cache_path()
         tree_path.write_text(text, encoding="utf-8")
-
-        # 确保 path 本身写入 path_index（规范化路径以避免缓存 miss）
-        from media115.fs import _normalize
-        resolver._write_path_index(_normalize(path), cid)
 
         # 统计
         lines = text.strip().split("\n")
@@ -479,23 +342,16 @@ def register(cli: click.Group):
 
         cache_root = media_cache._cache_root()
         tree_path = media_cache.tree_cache_path()
-        fs_dir = media_cache._cache_dir("fs")
-        dir_dir = media_cache._cache_dir("fs/dir")
 
-        # path_index 条目数
-        path_index_file = fs_dir / "path_index.json"
-        if path_index_file.exists():
-            try:
-                import json as _json
-                index = _json.loads(path_index_file.read_text(encoding="utf-8"))
-                index_count = len(index)
-            except Exception:
-                index_count = 0
-        else:
-            index_count = 0
-
-        # dir listing 文件数
-        dir_listing_count = len(list(dir_dir.glob("*.json"))) if dir_dir.exists() else 0
+        # cloud115 SQLite cache stats
+        try:
+            client = _get_client()
+            stats = client.cache_status()
+            paths_count = stats.get("paths", 0)
+            dirs_count = stats.get("dirs", 0)
+        except Exception:
+            paths_count = "?"
+            dirs_count = "?"
 
         # tree_cache.txt
         if tree_path.exists():
@@ -505,8 +361,8 @@ def register(cli: click.Group):
             tree_info = "不存在"
 
         click.echo(f"缓存根目录:        {cache_root}")
-        click.echo(f"path_index 条目数: {index_count}")
-        click.echo(f"dir listing 文件数: {dir_listing_count}")
+        click.echo(f"path_index 条目数: {paths_count}")
+        click.echo(f"dir listing 文件数: {dirs_count}")
         click.echo(f"tree_cache.txt:    {tree_info}")
 
     @cache_group.command("clear")
@@ -529,6 +385,13 @@ def register(cli: click.Group):
             targets.append(("刮削输出 (scrape_output/)", root / "scrape_output"))
         if clear_all:
             targets.append(("日志 (logs/)", root / "logs"))
+
+        # Also clear cloud115 SQLite cache
+        try:
+            client = _get_client()
+            client.cache_clear()
+        except Exception:
+            pass
 
         existing = [(name, path) for name, path in targets if path.exists()]
         if not existing:
@@ -554,7 +417,7 @@ def register(cli: click.Group):
     def mv(args):
         """移动或重命名 115 网盘中的文件。"""
         try:
-            resolver = _get_resolver()
+            client = _get_client()
         except click.ClickException as e:
             raise e
 
@@ -567,63 +430,23 @@ def register(cli: click.Group):
         if len(args) >= 3:
             # 多个源文件 → 目标必须是目录
             try:
-                target_cid = resolver.resolve_dir(dest)
+                client.resolve_path(dest)
             except FileNotFoundError:
                 raise click.ClickException(f"目标目录不存在: {dest!r}")
 
-            fids = []
-            cache_entries = []
-            for src in srcs:
-                try:
-                    fid, parent_cid, meta = resolver.resolve_file(src)
-                    name = meta.get("name", src.rsplit("/", 1)[-1])
-                except FileNotFoundError:
-                    # 可能是目录
-                    try:
-                        cid = resolver.resolve_dir(src)
-                        fid = cid
-                        src_parent = src.rstrip("/").rpartition("/")[0] or "/"
-                        parent_cid = resolver.resolve_dir(src_parent)
-                        name = src.rstrip("/").rsplit("/", 1)[-1]
-                    except FileNotFoundError:
-                        raise click.ClickException(f"文件或目录不存在: {src!r}")
-                fids.append(fid)
-                cache_entries.append((parent_cid, name))
-
-            resolver.client.move(fids, target_cid)
-
-            for parent_cid, name in cache_entries:
-                resolver.remove_from_listing(parent_cid, name)
-            resolver.mark_stale(target_cid)
+            client.move(srcs, dest)
             get_logger().info("mv %s → %s", srcs, dest)
-            click.echo(f"已移动 {len(fids)} 个文件到 {dest}")
+            click.echo(f"已移动 {len(srcs)} 个文件到 {dest}")
 
         else:
             # 两个参数：src dest
             src = srcs[0]
 
-            is_dir = False
-            try:
-                fid, src_parent_cid, meta = resolver.resolve_file(src)
-                src_name = meta.get("name", src.rsplit("/", 1)[-1])
-            except FileNotFoundError:
-                # 可能是目录
-                try:
-                    fid = resolver.resolve_dir(src)
-                    is_dir = True
-                    src_parent = src.rstrip("/").rpartition("/")[0] or "/"
-                    src_parent_cid = resolver.resolve_dir(src_parent)
-                    src_name = src.rstrip("/").rsplit("/", 1)[-1]
-                except FileNotFoundError:
-                    raise click.ClickException(f"文件或目录不存在: {src!r}")
-
             # 1. 先试 dest 是否已存在的目录
             try:
-                target_cid = resolver.resolve_dir(dest)
+                client.resolve_path(dest)
                 # dest 是已存在的目录 → 移动
-                resolver.client.move([fid], target_cid)
-                resolver.remove_from_listing(src_parent_cid, src_name)
-                resolver.mark_stale(target_cid)
+                client.move([src], dest)
                 get_logger().info("mv %s → %s", src, dest)
                 click.echo(f"已移动: {src} → {dest}")
                 return
@@ -635,23 +458,29 @@ def register(cli: click.Group):
             dest_parent = dest_parent or "/"
 
             try:
-                dest_parent_cid = resolver.resolve_dir(dest_parent)
+                client.resolve_path(dest_parent)
             except FileNotFoundError:
                 raise click.ClickException(f"目标父目录不存在: {dest_parent!r}")
 
-            if src_parent_cid == dest_parent_cid:
+            # 确定 src 的父目录
+            src_parent = src.rstrip("/").rpartition("/")[0] or "/"
+
+            # 规范化比较
+            src_parent_n = src_parent.rstrip("/") or "/"
+            dest_parent_n = dest_parent.rstrip("/") or "/"
+
+            if src_parent_n == dest_parent_n:
                 # 同目录 → 重命名
-                resolver.client.rename(fid, dest_name)
-                resolver.remove_from_listing(src_parent_cid, src_name)
-                resolver.mark_stale(src_parent_cid)
+                client.rename(src, dest_name)
+                src_name = src.rstrip("/").rsplit("/", 1)[-1]
                 get_logger().info("mv %s → %s", src, dest)
                 click.echo(f"已重命名: {src_name} → {dest_name}")
             else:
-                # 跨目录 + 改名 → 先移动，再重命名
-                resolver.client.move([fid], dest_parent_cid)
-                resolver.client.rename(fid, dest_name)
-                resolver.remove_from_listing(src_parent_cid, src_name)
-                resolver.mark_stale(dest_parent_cid)
+                # 跨目录 + 改名 → 先移动到目标父目录，再重命名
+                src_name = src.rstrip("/").rsplit("/", 1)[-1]
+                client.move([src], dest_parent)
+                new_path = dest_parent.rstrip("/") + "/" + src_name
+                client.rename(new_path, dest_name)
                 get_logger().info("mv %s → %s", src, dest)
                 click.echo(f"已移动并重命名: {src} → {dest}")
 
@@ -746,24 +575,15 @@ def register(cli: click.Group):
         click.echo("缓存:")
         click.echo(f"  缓存根目录:    {cache_root}")
 
-        # path_index
-        pi = cache_root / "fs" / "path_index.json"
-        if pi.exists():
-            try:
-                count = len(_json.loads(pi.read_text()))
-            except Exception:
-                count = "?"
-            click.echo(f"  path_index:    {count} 条目")
-        else:
-            click.echo("  path_index:    ✗ 不存在")
-
-        # dir listings
-        dir_cache = cache_root / "fs" / "dir"
-        if dir_cache.exists():
-            count = len(list(dir_cache.glob("*.json")))
-            click.echo(f"  dir listings:  {count} 文件")
-        else:
-            click.echo("  dir listings:  ✗ 不存在")
+        # cloud115 SQLite cache
+        try:
+            client = _get_client()
+            stats = client.cache_status()
+            click.echo(f"  path_index:    {stats.get('paths', 0)} 条目")
+            click.echo(f"  dir listings:  {stats.get('dirs', 0)} 目录")
+        except Exception:
+            click.echo("  path_index:    ? (需要登录)")
+            click.echo("  dir listings:  ? (需要登录)")
 
         # tree_cache
         tc = cache_root / "tree_cache.txt"
@@ -822,75 +642,76 @@ def register(cli: click.Group):
         from collections import defaultdict
 
         try:
-            resolver = _get_resolver()
+            client = _get_client()
         except click.ClickException as e:
             raise e
 
         try:
-            cid = resolver.resolve_dir(path)
+            items = client.list_dir(path)
         except FileNotFoundError:
             raise click.ClickException(f"目录不存在: {path!r}")
 
-        items = resolver.client.list_files_all(dir_id=cid)
         subdirs = [
-            (item.get("n", ""), str(item.get("cid", "")))
+            (item["name"], path.rstrip("/") + "/" + item["name"])
             for item in items
-            if "fid" not in item and item.get("cid")
+            if item.get("type") == "dir"
         ]
 
         total_dupes = 0
-        all_dupe_fids: list[str] = []
+        all_dupe_paths: list[str] = []
 
-        for dir_name, dir_cid in subdirs:
-            files = resolver.client.list_files_all(dir_id=dir_cid)
+        for dir_name, dir_path in subdirs:
+            files = client.list_dir(dir_path)
             # 按文件名分组
-            by_name: dict[str, list[str]] = defaultdict(list)
+            by_name: dict[str, list[dict]] = defaultdict(list)
             for f in files:
-                if "fid" not in f:
+                if f.get("type") != "file":
                     continue
-                name = f.get("fn", f.get("n", ""))
-                by_name[name].append(str(f["fid"]))
+                by_name[f["name"]].append(f)
 
             # 同名文件 > 1 个的，保留第一个，其余是重复
             dupes = []
-            for name, fids in by_name.items():
-                if len(fids) > 1:
-                    dupes.extend((name, fid) for fid in fids[1:])  # 保留 fids[0]
+            for name, file_list in by_name.items():
+                if len(file_list) > 1:
+                    # Keep first, mark rest as dupes
+                    for f in file_list[1:]:
+                        dupe_path = dir_path.rstrip("/") + "/" + f["name"]
+                        dupes.append((name, dupe_path, f.get("fid", "")))
 
             if dupes:
                 click.echo(f"{dir_name}/: {len(dupes)} 个重复文件")
                 shown = set()
-                for name, _fid in dupes[:5]:
+                for name, _, _ in dupes[:5]:
                     if name not in shown:
-                        count = sum(1 for n, _ in dupes if n == name)
+                        count = sum(1 for n, _, _ in dupes if n == name)
                         click.echo(f"  {name} (x{count} 副本)")
                         shown.add(name)
                 if len(dupes) > 5:
                     click.echo(f"  ...")
                 total_dupes += len(dupes)
-                all_dupe_fids.extend(fid for _, fid in dupes)
+                all_dupe_paths.extend(dp for _, dp, _ in dupes)
 
         click.echo(f"\n共 {total_dupes} 个重复文件待清理")
 
-        if not all_dupe_fids:
+        if not all_dupe_paths:
             return
 
         if execute:
             batch_size = 50
             deleted = 0
-            for i in range(0, len(all_dupe_fids), batch_size):
-                batch = all_dupe_fids[i:i + batch_size]
-                resolver.client.delete(batch)
+            for i in range(0, len(all_dupe_paths), batch_size):
+                batch = all_dupe_paths[i:i + batch_size]
+                client.delete(batch)
                 deleted += len(batch)
-                click.echo(f"  已删除 {deleted}/{len(all_dupe_fids)}")
-            click.echo(f"清理完成: 删除 {len(all_dupe_fids)} 个重复文件")
+                click.echo(f"  已删除 {deleted}/{len(all_dupe_paths)}")
+            click.echo(f"清理完成: 删除 {len(all_dupe_paths)} 个重复文件")
         else:
             click.echo("(dry-run) 使用 --execute 执行删除")
 
 
 def _ls_dir(
-    resolver,
-    cid: str,
+    client,
+    items: list,
     label: str,
     long_fmt: bool,
     recursive: bool,
@@ -898,11 +719,10 @@ def _ls_dir(
     indent: int,
 ):
     """递归打印目录内容。"""
-    items = resolver.listing(cid)
     prefix = "  " * indent
 
     for item in items:
-        is_dir = "cid" in item and "fid" not in item
+        is_dir = item.get("type") == "dir"
         name = item["name"]
 
         if long_fmt:
@@ -918,5 +738,6 @@ def _ls_dir(
                 click.echo(f"{prefix}{name}")
 
         if recursive and is_dir and depth > 0:
-            child_cid = item["cid"]
-            _ls_dir(resolver, child_cid, name, long_fmt, recursive, depth - 1, indent + 1)
+            child_path = label.rstrip("/") + "/" + name
+            child_items = client.list_dir(child_path)
+            _ls_dir(client, child_items, child_path, long_fmt, recursive, depth - 1, indent + 1)
