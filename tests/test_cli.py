@@ -42,7 +42,7 @@ SAMPLE_TREE = """\
 
 
 def _write_env(base="."):
-    """Write a minimal .env so _load_env / _get_115_client can find credentials."""
+    """Write a minimal .env so _load_env / _get_client can find credentials."""
     env_path = Path(base) / ".env"
     env_path.write_text("CLOUD_115_COOKIES=UID=test;CID=test\n")
 
@@ -67,7 +67,7 @@ class TestCLI:
         assert "QR" in result.output or "login" in result.output
 
     def test_auth_check_not_logged_in(self, runner):
-        with patch("media115.cli._get_115_client", return_value=None):
+        with patch("media115.cli._get_client", return_value=None):
             result = runner.invoke(main, ["auth", "--check"])
             assert result.exit_code == 0
             assert "Not logged in" in result.output
@@ -75,7 +75,7 @@ class TestCLI:
     def test_auth_check_logged_in(self, runner):
         mock_client = MagicMock()
         mock_client.check_login.return_value = True
-        with patch("media115.cli._get_115_client", return_value=mock_client):
+        with patch("media115.cli._get_client", return_value=mock_client):
             result = runner.invoke(main, ["auth", "--check"])
             assert result.exit_code == 0
             assert "Already logged in" in result.output
@@ -109,7 +109,7 @@ class TestExportTree:
 
         with runner.isolated_filesystem():
             _write_env()
-            with patch("media115.cli._get_115_client", return_value=mock_client):
+            with patch("media115.cli._get_client", return_value=mock_client):
                 result = runner.invoke(main, ["export-tree", "/影音"])
 
             assert result.exit_code == 0
@@ -124,7 +124,7 @@ class TestExportTree:
     def test_export_tree_no_client(self, runner):
         with runner.isolated_filesystem():
             _write_env()
-            with patch("media115.cli._get_115_client", return_value=None):
+            with patch("media115.cli._get_client", return_value=None):
                 result = runner.invoke(main, ["export-tree", "/影音"])
             assert result.exit_code == 0  # Click still returns 0
 
@@ -135,19 +135,18 @@ class TestExportTree:
 
         with runner.isolated_filesystem():
             _write_env()
-            with patch("media115.cli._get_115_client", return_value=mock_client):
+            with patch("media115.cli._get_client", return_value=mock_client):
                 result = runner.invoke(main, ["export-tree", "/影音"])
             assert "Export failed" in result.output
 
     def test_export_tree_root_rejected(self, runner):
         mock_client = MagicMock()
-        # path "0" => root, _resolve_dir returns "0"
+        # resolve_path("0") returns "0" (root cid)
         mock_client.resolve_path.return_value = "0"
 
         with runner.isolated_filesystem():
             _write_env()
-            with patch("media115.cli._get_115_client", return_value=mock_client):
-                # "0" is a digit so _resolve_dir returns it directly
+            with patch("media115.cli._get_client", return_value=mock_client):
                 result = runner.invoke(main, ["export-tree", "0"])
             assert "cannot export root" in result.output
 
@@ -444,127 +443,128 @@ class TestOrganize:
 
 class TestUpload:
     def test_upload_success(self, runner, tmp_path):
-        """Upload command should call client.upload_file."""
+        """Upload command should call client.upload."""
         mock_client = MagicMock()
-        mock_client.upload_file.return_value = {"status": "ok"}
+        mock_client.upload.return_value = {"status": "ok"}
 
         test_file = tmp_path / "test_video.mkv"
         test_file.write_bytes(b"\x00" * 1024)
 
-        with patch("media115.cli._get_115_client", return_value=mock_client):
+        with patch("media115.cli._get_client", return_value=mock_client):
             result = runner.invoke(main, ["upload", str(test_file)])
 
         assert result.exit_code == 0
         assert "Upload success" in result.output
-        mock_client.upload_file.assert_called_once()
-        call_args = mock_client.upload_file.call_args
+        mock_client.upload.assert_called_once()
+        call_args = mock_client.upload.call_args
+        assert call_args[0][0] == str(test_file)
         assert call_args[0][1] == "0"  # default remote_dir
 
     def test_upload_with_remote_dir(self, runner, tmp_path):
         mock_client = MagicMock()
-        mock_client.upload_file.return_value = {"status": "ok"}
+        mock_client.upload.return_value = {"status": "ok"}
 
         test_file = tmp_path / "test.mkv"
         test_file.write_bytes(b"\x00" * 100)
 
-        with patch("media115.cli._get_115_client", return_value=mock_client):
+        with patch("media115.cli._get_client", return_value=mock_client):
             result = runner.invoke(main, ["upload", str(test_file), "--remote-dir", "99999"])
 
         assert result.exit_code == 0
-        call_args = mock_client.upload_file.call_args
+        call_args = mock_client.upload.call_args
         assert call_args[0][1] == "99999"
 
     def test_upload_no_client(self, runner, tmp_path):
         test_file = tmp_path / "test.mkv"
         test_file.write_bytes(b"\x00" * 100)
 
-        with patch("media115.cli._get_115_client", return_value=None):
+        with patch("media115.cli._get_client", return_value=None):
             result = runner.invoke(main, ["upload", str(test_file)])
         assert result.exit_code == 0
 
     def test_upload_not_implemented(self, runner, tmp_path):
         mock_client = MagicMock()
-        mock_client.upload_file.side_effect = NotImplementedError("no cookie mode")
+        mock_client.upload.side_effect = NotImplementedError("no cookie mode")
 
         test_file = tmp_path / "test.mkv"
         test_file.write_bytes(b"\x00" * 100)
 
-        with patch("media115.cli._get_115_client", return_value=mock_client):
+        with patch("media115.cli._get_client", return_value=mock_client):
             result = runner.invoke(main, ["upload", str(test_file)])
         assert "cookie mode" in result.output.lower() or "auth" in result.output.lower()
 
     def test_upload_failure(self, runner, tmp_path):
         mock_client = MagicMock()
-        mock_client.upload_file.return_value = None
+        mock_client.upload.return_value = None
 
         test_file = tmp_path / "test.mkv"
         test_file.write_bytes(b"\x00" * 100)
 
-        with patch("media115.cli._get_115_client", return_value=mock_client):
+        with patch("media115.cli._get_client", return_value=mock_client):
             result = runner.invoke(main, ["upload", str(test_file)])
         assert "failed" in result.output.lower()
 
     def test_upload_exception(self, runner, tmp_path):
         mock_client = MagicMock()
-        mock_client.upload_file.side_effect = RuntimeError("disk full")
+        mock_client.upload.side_effect = RuntimeError("disk full")
 
         test_file = tmp_path / "test.mkv"
         test_file.write_bytes(b"\x00" * 100)
 
-        with patch("media115.cli._get_115_client", return_value=mock_client):
+        with patch("media115.cli._get_client", return_value=mock_client):
             result = runner.invoke(main, ["upload", str(test_file)])
         assert "failed" in result.output.lower()
 
 
 class TestLs:
-    """Tests for the new PathResolver-based ls command."""
+    """Tests for the CachedClient-based ls command."""
 
-    def _mock_resolver(self, items=None):
+    def _mock_client(self, items=None):
         from unittest.mock import MagicMock
-        r = MagicMock()
-        r.resolve_dir.return_value = "0"
-        r.listing.return_value = items or []
-        return r
+        c = MagicMock()
+        c.list_dir.return_value = items or []
+        return c
 
     def test_ls_lists_files(self, runner):
-        resolver = self._mock_resolver([
-            {"name": "movie.mkv", "fid": "f1", "size": 1048576, "pick_code": "pc"},
-            {"name": "subdir", "cid": "c1"},
+        mock = self._mock_client([
+            {"name": "movie.mkv", "type": "file", "fid": "f1", "size": 1048576, "pick_code": "pc"},
+            {"name": "subdir", "type": "dir", "cid": "c1"},
         ])
-        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+        with patch("media115.fs_cli._get_client", return_value=mock):
             result = runner.invoke(main, ["ls", "/影音"])
         assert result.exit_code == 0
         assert "movie.mkv" in result.output
         assert "subdir" in result.output
 
     def test_ls_default_root(self, runner):
-        resolver = self._mock_resolver([])
-        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+        mock = self._mock_client([])
+        with patch("media115.fs_cli._get_client", return_value=mock):
             result = runner.invoke(main, ["ls"])
         assert result.exit_code == 0
-        resolver.resolve_dir.assert_called_with("/")
+        mock.list_dir.assert_called_with("/")
 
     def test_ls_no_client(self, runner):
-        with patch("media115.fs_cli._get_resolver", side_effect=Exception("ClickException: 未登录")):
+        import click as _click
+        with patch("media115.fs_cli._get_client", side_effect=_click.ClickException("未登录")):
             result = runner.invoke(main, ["ls"])
         assert result.exit_code != 0
 
     def test_ls_error_handling(self, runner):
-        resolver = self._mock_resolver()
-        resolver.resolve_dir.side_effect = FileNotFoundError("path not found")
-        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+        mock = self._mock_client()
+        mock.list_dir.side_effect = FileNotFoundError("path not found")
+        with patch("media115.fs_cli._get_client", return_value=mock):
             result = runner.invoke(main, ["ls", "/no/such/path"])
         assert result.exit_code != 0
 
     def test_ls_path_resolution(self, runner):
-        """Path should be passed to resolve_dir."""
-        resolver = self._mock_resolver([
-            {"name": "file.txt", "fid": "f1", "size": 42, "pick_code": "pc"},
+        """Path should be passed to list_dir."""
+        mock = self._mock_client([
+            {"name": "file.txt", "type": "file", "fid": "f1", "size": 42, "pick_code": "pc"},
         ])
-        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+        with patch("media115.fs_cli._get_client", return_value=mock):
             result = runner.invoke(main, ["ls", "/影音/电影"])
         assert result.exit_code == 0
-        resolver.resolve_dir.assert_called_with("/影音/电影")
+        mock.list_dir.assert_called_with("/影音/电影")
 
 
 class TestStrm:
@@ -658,7 +658,7 @@ class TestScrapeCommand:
 class TestAuthRenew:
     def test_auth_renew_no_existing(self, runner):
         """Renew without existing cookies should error."""
-        with patch("media115.cli._get_115_client", return_value=None):
+        with patch("media115.cli._get_client", return_value=None):
             result = runner.invoke(main, ["auth", "--renew"])
         assert "No existing cookies" in result.output
 
@@ -668,7 +668,7 @@ class TestAuthRenew:
 
         with runner.isolated_filesystem():
             _write_env()
-            with patch("media115.cli._get_115_client", return_value=mock_client):
+            with patch("media115.cli._get_client", return_value=mock_client):
                 result = runner.invoke(main, ["auth", "--renew"])
         assert "renewed" in result.output.lower()
 
@@ -678,7 +678,7 @@ class TestAuthRenew:
 
         with runner.isolated_filesystem():
             _write_env()
-            with patch("media115.cli._get_115_client", return_value=mock_client):
+            with patch("media115.cli._get_client", return_value=mock_client):
                 result = runner.invoke(main, ["auth", "--renew"])
         assert "failed" in result.output.lower() or "re-login" in result.output.lower()
 
@@ -686,7 +686,7 @@ class TestAuthRenew:
         mock_client = MagicMock()
         mock_client.check_login.return_value = True
 
-        with patch("media115.cli._get_115_client", return_value=mock_client):
+        with patch("media115.cli._get_client", return_value=mock_client):
             result = runner.invoke(main, ["auth"])
         assert "Already logged in" in result.output
 
@@ -817,7 +817,7 @@ class TestOrganizeExecute:
                     "media115.organizer.execute_organize_plan",
                     return_value=mock_exec_results,
                 ),
-                patch("media115.cli._get_115_client", return_value=mock_client),
+                patch("media115.cli._get_client", return_value=mock_client),
             ):
                 result = runner.invoke(main, ["organize", "AV", "--execute"])
 
@@ -846,7 +846,7 @@ class TestOrganizeExecute:
 
             with (
                 patch("media115.organizer.build_organize_plan", return_value=plan),
-                patch("media115.cli._get_115_client", return_value=None),
+                patch("media115.cli._get_client", return_value=None),
             ):
                 result = runner.invoke(main, ["organize", "AV", "--execute"])
 
@@ -895,7 +895,7 @@ class TestOrganizeExecute:
                     "media115.organizer.execute_organize_plan",
                     return_value=mock_exec_results,
                 ),
-                patch("media115.cli._get_115_client", return_value=mock_client),
+                patch("media115.cli._get_client", return_value=mock_client),
             ):
                 result = runner.invoke(main, ["organize", "AV", "--execute"])
 
@@ -935,7 +935,7 @@ class TestOrganizeExecute:
                     "media115.organizer.execute_organize_plan",
                     return_value=mock_exec_results,
                 ),
-                patch("media115.cli._get_115_client", return_value=mock_client),
+                patch("media115.cli._get_client", return_value=mock_client),
             ):
                 result = runner.invoke(main, ["organize", "AV", "--execute"])
 
@@ -1039,19 +1039,18 @@ class TestLsTree:
 
     def test_ls_recursive(self, runner):
         root_items = [
-            {"name": "电影", "cid": "100"},
-            {"name": "readme.txt", "fid": "f1", "size": 100, "pick_code": "pc"},
+            {"name": "电影", "type": "dir", "cid": "100"},
+            {"name": "readme.txt", "type": "file", "fid": "f1", "size": 100, "pick_code": "pc"},
         ]
         child_items = [
-            {"name": "The Matrix.mkv", "fid": "f2", "size": 5000000, "pick_code": "pc2"},
+            {"name": "The Matrix.mkv", "type": "file", "fid": "f2", "size": 5000000, "pick_code": "pc2"},
         ]
-        resolver = MagicMock()
-        resolver.resolve_dir.return_value = "0"
-        resolver.listing.side_effect = lambda cid: (
-            child_items if cid == "100" else root_items
+        mock_client = MagicMock()
+        mock_client.list_dir.side_effect = lambda path: (
+            child_items if path.rstrip("/").endswith("电影") else root_items
         )
 
-        with patch("media115.fs_cli._get_resolver", return_value=resolver):
+        with patch("media115.fs_cli._get_client", return_value=mock_client):
             result = runner.invoke(main, ["ls", "-R", "--depth", "1", "/"])
 
         assert result.exit_code == 0
@@ -1152,17 +1151,17 @@ class TestLoadEnv:
 
 class TestGetClient:
     def test_get_client_from_cookies(self, runner):
-        """_get_115_client should use CLOUD_115_COOKIES env var."""
+        """_get_client should use CLOUD_115_COOKIES env var."""
         with runner.isolated_filesystem():
             _write_env()
-            with patch("media115.client.Cloud115Client.from_cookies") as mock_from:
-                mock_from.return_value = MagicMock()
+            with patch("cloud115.CachedClient") as mock_cls:
+                mock_cls.return_value = MagicMock()
                 with patch.dict(os.environ, {"CLOUD_115_COOKIES": "test_cookie"}):
-                    from media115.cli import _get_115_client
+                    from media115.cli import _get_client
 
-                    client = _get_115_client()
+                    client = _get_client()
                 assert client is not None
-                mock_from.assert_called_once_with("test_cookie")
+                mock_cls.assert_called_once_with("test_cookie")
 
     def test_get_client_no_credentials(self, runner):
         with patch.dict(
@@ -1170,7 +1169,7 @@ class TestGetClient:
             {"CLOUD_115_COOKIES": ""},
             clear=False,
         ):
-            from media115.cli import _get_115_client
+            from media115.cli import _get_client
 
-            client = _get_115_client()
+            client = _get_client()
         assert client is None
