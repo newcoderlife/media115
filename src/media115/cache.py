@@ -1,15 +1,13 @@
-"""Simple file-based cache for scraped metadata and rate limit state.
+"""Simple file-based cache for scraped metadata.
 
 All cache files live in .cache/ directory (gitignored).
 
 Cache policy (follows MetaTube pattern):
 - Successful scrape → cached forever (metadata is immutable)
 - not_found → cached 7 days (new releases get added to databases)
-- Rate limit state → cross-process persistence
 
 Structure:
   .cache/
-  ├── rate_limit.json          # QPS/QPM/cooldown state
   ├── tree_cache.txt           # 115 directory tree export
   └── scrape/                  # Scraped metadata cache
       ├── tmdb/
@@ -94,11 +92,6 @@ def is_not_found(source: str, key: str) -> bool:
 def has(source: str, key: str) -> bool:
     """Check if a cache entry exists (ignores TTL)."""
     return (_cache_dir(f"scrape/{source}") / f"{key}.json").exists()
-
-
-def rate_limit_path() -> Path:
-    """Path to rate limit state file."""
-    return _cache_dir() / "rate_limit.json"
 
 
 def tree_cache_path() -> Path:
