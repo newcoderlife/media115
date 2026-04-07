@@ -243,7 +243,24 @@ class Cloud115Client:
     ) -> dict:
         (limiter or self._limiter).acquire()
         logger = get_logger()
-        logger.debug("115 %s %s", method, url.split(".com")[-1][:60])
+        # 构建可读的日志：方法 + 路径 + 关键参数
+        api_path = url.split(".com")[-1][:40]
+        key_params = ""
+        if params:
+            parts = []
+            for k in ("cid", "path", "search_value", "pick_code", "pickcode"):
+                if k in params:
+                    parts.append(f"{k}={params[k]}")
+            if parts:
+                key_params = " " + " ".join(parts)
+        if data:
+            parts = []
+            for k in ("pid", "cname", "fid", "file_name", "filename", "target"):
+                if k in data:
+                    parts.append(f"{k}={data[k]}")
+            if parts:
+                key_params += " " + " ".join(parts)
+        logger.debug("115 %s %s%s", method, api_path, key_params)
         max_retries = 3
         for attempt in range(max_retries):
             try:
