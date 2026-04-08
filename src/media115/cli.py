@@ -147,7 +147,10 @@ def auth(app, check, renew, force, get_qr, wait_qr):
     from cloud115 import CachedClient
     from cloud115.api import QR_API, PASSPORT_API
 
-    existing = _get_client()
+    try:
+        existing = _get_client()
+    except click.ClickException:
+        existing = None
 
     if check:
         if existing and existing.check_login():
@@ -277,8 +280,6 @@ NFO_EXT = ".nfo"
 def export_tree(path):
     """Export 115 directory tree to local cache file. Only needs 2-3 API calls."""
     client = _get_client()
-    if not client:
-        return
 
     click.echo(f"Resolving {path}...")
     try:
@@ -632,8 +633,6 @@ def _upload_missing_nfo(category: str, skipped_ops: list[dict]):
         return
 
     client = _get_client()
-    if not client:
-        return
 
     # 按目录分组，每个目录只处理一次（避免重复 list_dir）
     by_parent: dict[str, list[dict]] = {}
@@ -730,8 +729,6 @@ def organize(category, execute, cleanup):
         return
 
     client = _get_client()
-    if not client:
-        return
 
     click.echo(f"\nExecuting {len(renames)} renames...")
     category_path = f"影音/{category}"
@@ -818,8 +815,6 @@ def scan(path, recursive, depth):
     )
 
     client = _get_client()
-    if not client:
-        return
 
     try:
         click.echo(f"Scanning {path} ...")
@@ -905,9 +900,6 @@ def serve(host, port):
     config = _load_config()
     jellyfin_url = config.get("jellyfin_url", "http://localhost:8096")
     client = _get_client()
-    if not client:
-        click.echo("Error: 115 credentials required for proxy", err=True)
-        return
 
     app = create_app(jellyfin_url=jellyfin_url, client=client)
     click.echo(f"Starting strm-proxy on {host}:{port}")
@@ -998,8 +990,6 @@ def upload(file_path, remote_dir):
     click.echo(f"Uploading {path.name} ({file_size:,} bytes)...")
 
     client = _get_client()
-    if not client:
-        return
 
     try:
         result = client.upload(str(path), remote_dir)
@@ -1060,17 +1050,13 @@ def scrape(query, source, language):
 
 def _get_client():
     """Get authenticated CachedClient."""
+    import os
     from cloud115 import CachedClient
 
     cookies = os.environ.get("CLOUD_115_COOKIES", "")
-    if cookies:
-        return CachedClient(cookies)
-
-    click.echo(
-        "Warning: No 115 credentials. Use 'media115 auth' to login or set CLOUD_115_COOKIES.",
-        err=True,
-    )
-    return None
+    if not cookies:
+        raise click.ClickException("未登录。请先运行: media115 auth")
+    return CachedClient(cookies)
 
 
 from media115 import fs_cli as _fs_cli

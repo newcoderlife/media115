@@ -35,6 +35,15 @@ def _get_client() -> "CachedClient":
     return CachedClient(cookies)
 
 
+def _get_cache_only():
+    """获取 FileCache，不需要登录。用于 cache status/clear。"""
+    from cloud115.cache import FileCache, _default_db_path
+    db_path = _default_db_path()
+    if not db_path.exists():
+        return None
+    return FileCache(db_path)
+
+
 def _format_size(size: int) -> str:
     """把字节数格式化为人类可读的大小。"""
     for unit in ("B", "K", "M", "G", "T"):
@@ -339,13 +348,18 @@ def register(cli: click.Group):
 
         # cloud115 SQLite stats
         try:
-            client = _get_client()
-            stats = client.cache_status()
-            path_count = stats.get("path_count", 0)
-            dir_count = stats.get("dir_count", 0)
-            entry_count = stats.get("entry_count", 0)
-            db_size = stats.get("db_size_bytes", 0)
-            rate_limit = stats.get("rate_limit", {})
+            file_cache = _get_cache_only()
+            if file_cache is not None:
+                stats = file_cache.stats()
+                path_count = stats.get("path_count", 0)
+                dir_count = stats.get("dir_count", 0)
+                entry_count = stats.get("entry_count", 0)
+                db_size = stats.get("db_size_bytes", 0)
+                rate_limit = stats.get("rate_limit", {})
+            else:
+                path_count = dir_count = entry_count = 0
+                db_size = 0
+                rate_limit = {}
         except Exception:
             path_count = dir_count = entry_count = "?"
             db_size = 0
@@ -390,12 +404,13 @@ def register(cli: click.Group):
 
         # cloud115 SQLite cache is always included
         try:
-            client = _get_client()
-            stats = client.cache_status()
-            desc = "cloud115 路径/目录缓存 (%d paths, %d dirs, %d entries)" % (
-                stats.get("path_count", 0), stats.get("dir_count", 0), stats.get("entry_count", 0)
-            )
-            targets.append(("cloud115", desc, lambda: client.cache_clear()))
+            file_cache = _get_cache_only()
+            if file_cache is not None:
+                stats = file_cache.stats()
+                desc = "cloud115 路径/目录缓存 (%d paths, %d dirs, %d entries)" % (
+                    stats.get("path_count", 0), stats.get("dir_count", 0), stats.get("entry_count", 0)
+                )
+                targets.append(("cloud115", desc, lambda fc=file_cache: fc.clear_metadata()))
         except Exception:
             pass
 
@@ -665,7 +680,7 @@ def register(cli: click.Group):
         all_dupe_paths: list[str] = []
 
         for dir_name, dir_path in subdirs:
-            files = client.list_dir(dir_path)
+            files = client.list_dir_uncached(dir_path)
             # 按文件名分组
             by_name: dict[str, list[dict]] = defaultdict(list)
             for f in files:
