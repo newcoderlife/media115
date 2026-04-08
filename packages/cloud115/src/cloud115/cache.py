@@ -274,11 +274,51 @@ class FileCache:
 
     # ---- management ------------------------------------------------------
 
+    def clear_metadata(self) -> None:
+        """清除缓存元数据（path_index + dir_meta + dir_entry）。不动 rate_limit。"""
+        with self._conn:
+            self._conn.execute("DELETE FROM path_index")
+            self._conn.execute("DELETE FROM dir_meta")
+            self._conn.execute("DELETE FROM dir_entry")
+
     def clear(self) -> None:
         """Delete **all** cached data from every table."""
         with self._conn:
             for table in ("path_index", "dir_meta", "dir_entry", "rate_limit"):
                 self._conn.execute(f"DELETE FROM {table}")  # noqa: S608
+
+    def try_acquire_slot(self, name: str, now: float, min_interval: float, qpm: int) -> bool:
+        """原子尝试获取限流 slot。单条 SQL 完成检查+更新。
+        SQLite 写锁保证跨进程互斥。成功返回 True，失败返回 False。
+        """
+        self._conn.execute(
+            "INSERT OR IGNORE INTO rate_limit (name) VALUES (?)", (name,)
+        )
+        cursor = self._conn.execute("""
+            UPDATE rate_limit SET
+                minute_count = CASE
+                    WHEN ? - minute_start > 60 THEN 1
+                    ELSE minute_count + 1
+                END,
+                minute_start = CASE
+                    WHEN ? - minute_start > 60 THEN ?
+                    ELSE minute_start
+                END,
+                last_request = ?
+            WHERE name = ?
+              AND (cooldown_until <= ? OR cooldown_until = 0)
+              AND (? - last_request >= ? OR last_request = 0)
+              AND (CASE WHEN ? - minute_start > 60 THEN 0 ELSE minute_count END) < ?
+        """, (now, now, now, now, name, now, now, min_interval, now, qpm))
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def stale_dir_count(self, listing_ttl: int) -> int:
+        """返回过期目录数。"""
+        cutoff = int(time.time()) - listing_ttl
+        return self._conn.execute(
+            "SELECT COUNT(*) FROM dir_meta WHERE ts < ?", (cutoff,)
+        ).fetchone()[0]
 
     def close(self) -> None:
         """Close the database connection."""
@@ -307,9 +347,21 @@ class FileCache:
             db_size = self._db_path.stat().st_size
         except OSError:
             db_size = 0
+
+        rate_states = {}
+        for row in self._conn.execute(
+            "SELECT name, cooldown_until, last_request, minute_count FROM rate_limit"
+        ).fetchall():
+            rate_states[row[0]] = {
+                "cooldown_until": row[1],
+                "last_request": row[2],
+                "minute_count": row[3],
+            }
+
         return {
             "path_count": path_count,
             "dir_count": dir_count,
             "entry_count": entry_count,
             "db_size_bytes": db_size,
+            "rate_limit": rate_states,
         }
