@@ -391,7 +391,7 @@ class FileCache:
         with self._conn:
             self._conn.execute("DELETE FROM tree_entry")
             self._conn.executemany(
-                "INSERT INTO tree_entry (path, name, parent, is_video, is_nfo) VALUES (?, ?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO tree_entry (path, name, parent, is_video, is_nfo) VALUES (?, ?, ?, ?, ?)",
                 [
                     (e["path"], e["n"], e["parent"], int(e["is_video"]), int(e["is_nfo"]))
                     for e in entries
