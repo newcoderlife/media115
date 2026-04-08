@@ -591,9 +591,10 @@ class CachedClient:
     def invalidate(self, path: str) -> None:
         """Invalidate cache for *path* and everything below it."""
         path = _normalize(path)
+        # Get cid BEFORE deleting from path_index
+        cached = self._cache.get_path(path)
         self._cache.delete_path_prefix(path)
         # Also invalidate the directory listing if it is one
-        cached = self._cache.get_path(path)
         if cached is not None:
             self._cache.invalidate_dir(cached[0])
 

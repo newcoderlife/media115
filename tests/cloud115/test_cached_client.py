@@ -461,6 +461,19 @@ class TestCacheManagement:
 
         assert client._cache.get_path("/movies") is None
 
+    def test_invalidate_clears_dir_listing(self, client):
+        """invalidate() must also remove the dir listing (dir_meta + entries)."""
+        client.list_dir("/movies")
+        # Verify listing is cached
+        assert client._cache.get_dir_ts("100") is not None
+        assert len(client._cache.get_dir_entries("100")) == 2
+
+        client.invalidate("/movies")
+
+        # Dir listing must be gone
+        assert client._cache.get_dir_ts("100") is None
+        assert client._cache.get_dir_entries("100") == []
+
     def test_cache_status(self, client):
         s = client.cache_status()
         assert "path_count" in s
