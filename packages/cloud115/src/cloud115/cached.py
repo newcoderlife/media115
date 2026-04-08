@@ -630,18 +630,36 @@ class CachedClient:
         """清除缓存元数据。不清除限流状态。"""
         self._cache.clear_metadata()
 
-    def warm(self, path, depth=3):
+    def warm(self, path, depth=3, _progress_cb=None):
         """主动预热：递归 list_dir 到指定深度，填充全部缓存。
 
         每层 list_dir 自动写入 SQLite（path_index + dir_meta + dir_entry）。
+        利用父 listing 中已知的 cid 避免重复 get_dir_id 调用。
         """
         path = _normalize(path)
-        items = self.list_dir(path)
+        cid = self.resolve_path(path)
+        self._warm_by_cid(cid, path, depth, _progress_cb)
+
+    def _warm_by_cid(self, cid, path, depth, _progress_cb=None):
+        """内部预热：直接用 cid 调 _list_dir_by_cid，跳过 resolve_path。"""
+        items = self._list_dir_by_cid(cid, label=path)
+
+        # Write path_index for all child directories so future resolve_path hits cache
+        for item in items:
+            if item["type"] == "dir":
+                child_path = path.rstrip("/") + "/" + item["name"]
+                child_cid = item["cid"]
+                self._cache.set_path(child_path, child_cid)
+
+        if _progress_cb:
+            _progress_cb(path, len(items))
+
         if depth > 0:
             for item in items:
                 if item["type"] == "dir":
                     child_path = path.rstrip("/") + "/" + item["name"]
-                    self.warm(child_path, depth - 1)
+                    child_cid = item["cid"]
+                    self._warm_by_cid(child_cid, child_path, depth - 1, _progress_cb)
 
     def refresh_dir(self, path):
         """强制刷新目录缓存，忽略 TTL。"""

@@ -321,6 +321,31 @@ def register(cli: click.Group):
             raise click.ClickException(f"导出失败: {path!r}")
 
         tree_path = media_cache.tree_cache_path()
+
+        # Guard against accidentally overwriting a full tree with a subtree export
+        existing_lines = 0
+        if tree_path.exists():
+            existing_lines = tree_path.read_text(encoding="utf-8").count("\n")
+
+        new_lines = text.count("\n")
+        if existing_lines > 0 and new_lines < existing_lines * 0.5:
+            click.echo(f"⚠ 当前 tree_cache 有 {existing_lines} 行，新导出只有 {new_lines} 行")
+            click.echo(f"  这通常意味着你导出了子目录而非根目录。")
+            if not click.confirm("  确认覆盖？", default=False):
+                click.echo("已取消。建议用根目录路径（如 'media115 sync /影音'）导出完整树。")
+                if deep:
+                    count = [0]
+                    def _progress(p, num_items):
+                        count[0] += 1
+                        leaf = p.rsplit("/", 1)[-1] if "/" in p else p
+                        print(f"\r  预热中: {count[0]} 个目录 — {leaf[:40]}", end="", file=sys.stderr, flush=True)
+                    click.echo(f"正在预热缓存 (深度={depth})...")
+                    client.warm(path, depth=depth, _progress_cb=_progress)
+                    print("", file=sys.stderr)
+                    stats = client.cache_status()
+                    click.echo(f"预热完成：{stats['path_count']} 路径，{stats['dir_count']} 目录，{stats['entry_count']} 条目")
+                return
+
         tree_path.write_text(text, encoding="utf-8")
 
         lines = text.strip().split("\n")
@@ -331,8 +356,14 @@ def register(cli: click.Group):
         click.echo(f"已保存 tree_cache.txt：{len(lines)} 行，{video_count} 个视频文件")
 
         if deep:
+            count = [0]
+            def _progress(p, num_items):
+                count[0] += 1
+                leaf = p.rsplit("/", 1)[-1] if "/" in p else p
+                print(f"\r  预热中: {count[0]} 个目录 — {leaf[:40]}", end="", file=sys.stderr, flush=True)
             click.echo(f"正在预热缓存 (深度={depth})...")
-            client.warm(path, depth=depth)
+            client.warm(path, depth=depth, _progress_cb=_progress)
+            print("", file=sys.stderr)
             stats = client.cache_status()
             click.echo(f"预热完成：{stats['path_count']} 路径，{stats['dir_count']} 目录，{stats['entry_count']} 条目")
 
