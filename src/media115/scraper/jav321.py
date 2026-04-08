@@ -7,14 +7,21 @@ from lxml import html as lxml_html
 from media115.scraper.base import ThrottledClient
 
 BASE_URL = "https://www.jav321.com"
-_client = ThrottledClient()
+_client = None
+
+
+def _get_client():
+    global _client
+    if _client is None:
+        _client = ThrottledClient()
+    return _client
 
 
 def fetch_metadata(number: str) -> dict | None:
     """Fetch AV metadata from JAV321 by number."""
 
     try:
-        resp = _client.post(
+        resp = _get_client().post(
             f"{BASE_URL}/search",
             data={"sn": number},
             follow_redirects=False,
@@ -27,7 +34,7 @@ def fetch_metadata(number: str) -> dict | None:
             return None
 
         url = location if location.startswith("http") else f"{BASE_URL}{location}"
-        detail_resp = _client.get(url, follow_redirects=True)
+        detail_resp = _get_client().get(url, follow_redirects=True)
         if detail_resp.status_code != 200 or len(detail_resp.content) < 500:
             return None
 
