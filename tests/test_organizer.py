@@ -694,8 +694,8 @@ class TestExecuteOrganizePlanBasic:
             [{"name": "poster.jpg", "type": "file", "fid": "fid_poster"}],
         ]
 
-        # Stub _upload_scrape_output to avoid filesystem access
-        monkeypatch.setattr("media115.organizer._upload_scrape_output", lambda *a, **kw: None)
+        # Stub _plan_scrape_upload to avoid filesystem access (no sidecar files)
+        monkeypatch.setattr("media115.organizer._plan_scrape_upload", lambda *a, **kw: [])
 
         ops = [_make_op()]
         results = execute_organize_plan(ops, client, "影音/电影")
@@ -726,7 +726,7 @@ class TestExecuteOrganizePlanRenameOnly:
             # Phase 1: list files inside OldDir
             [{"name": "old.mkv", "type": "file", "fid": "fid_1"}],
         ]
-        monkeypatch.setattr("media115.organizer._upload_scrape_output", lambda *a, **kw: None)
+        monkeypatch.setattr("media115.organizer._plan_scrape_upload", lambda *a, **kw: [])
 
         ops = [_make_op(new_folder=None, new_name="New Title (2024).mkv")]
         results = execute_organize_plan(ops, client, "影音/电影")
@@ -761,7 +761,7 @@ class TestExecuteOrganizePlanMoveFailure:
         ]
         client.move.side_effect = Exception("115 API error")
 
-        monkeypatch.setattr("media115.organizer._upload_scrape_output", lambda *a, **kw: None)
+        monkeypatch.setattr("media115.organizer._plan_scrape_upload", lambda *a, **kw: [])
 
         ops = [_make_op()]
         results = execute_organize_plan(ops, client, "影音/电影")
@@ -791,7 +791,7 @@ class TestExecuteOrganizePlanRenameFailure:
         # No new_folder so no move happens; only rename
         client.batch_rename.side_effect = Exception("rename API error")
 
-        monkeypatch.setattr("media115.organizer._upload_scrape_output", lambda *a, **kw: None)
+        monkeypatch.setattr("media115.organizer._plan_scrape_upload", lambda *a, **kw: [])
 
         ops = [_make_op(new_folder=None, new_name="New Title (2024).mkv")]
         results = execute_organize_plan(ops, client, "影音/电影")
@@ -820,7 +820,7 @@ class TestExecuteOrganizePlanPhase6Cleanup:
             # Phase 6: OldDir contents -- only metadata, no video
             [{"name": "poster.jpg", "type": "file", "fid": "fid_poster"}],
         ]
-        monkeypatch.setattr("media115.organizer._upload_scrape_output", lambda *a, **kw: None)
+        monkeypatch.setattr("media115.organizer._plan_scrape_upload", lambda *a, **kw: [])
 
         ops = [_make_op()]
         results = execute_organize_plan(ops, client, "影音/电影")
@@ -848,7 +848,7 @@ class TestExecuteOrganizePlanPhase6SkipVideo:
             # Phase 6: OldDir still has a video file
             [{"name": "other_video.mp4", "type": "file", "fid": "fid_other"}],
         ]
-        monkeypatch.setattr("media115.organizer._upload_scrape_output", lambda *a, **kw: None)
+        monkeypatch.setattr("media115.organizer._plan_scrape_upload", lambda *a, **kw: [])
 
         ops = [_make_op()]
         results = execute_organize_plan(ops, client, "影音/电影")
@@ -872,7 +872,7 @@ class TestExecuteOrganizePlanNotFound:
             # Files in OldDir -- does NOT include old.mkv
             [{"name": "different.mkv", "type": "file", "fid": "fid_other"}],
         ]
-        monkeypatch.setattr("media115.organizer._upload_scrape_output", lambda *a, **kw: None)
+        monkeypatch.setattr("media115.organizer._plan_scrape_upload", lambda *a, **kw: [])
 
         ops = [_make_op()]
         results = execute_organize_plan(ops, client, "影音/电影")
@@ -914,7 +914,7 @@ class TestExecuteOrganizePlanSkipAction:
         monkeypatch.setattr(_cache, "put", lambda *a, **kw: None)
 
         client = make_mock_client()
-        monkeypatch.setattr("media115.organizer._upload_scrape_output", lambda *a, **kw: None)
+        monkeypatch.setattr("media115.organizer._plan_scrape_upload", lambda *a, **kw: [])
 
         ops = [_make_op(action="skip", new_folder=None, new_name=None, reason="already correct")]
         results = execute_organize_plan(ops, client, "影音/电影")
@@ -945,7 +945,7 @@ class TestExecuteOrganizePlanMkdirException:
             # Phase 6: OldDir contents
             [{"name": "poster.jpg", "type": "file", "fid": "fid_poster"}],
         ]
-        monkeypatch.setattr("media115.organizer._upload_scrape_output", lambda *a, **kw: None)
+        monkeypatch.setattr("media115.organizer._plan_scrape_upload", lambda *a, **kw: [])
 
         ops = [_make_op()]
         results = execute_organize_plan(ops, client, "影音/电影")
@@ -1030,3 +1030,78 @@ class TestUploadScrapeOutput:
         _upload_scrape_output(client, op, "/影音/电影/Target", "New Title (2024).mkv")
 
         client.upload.assert_not_called()
+
+    def test_existing_files_batch_deleted(self, tmp_path, monkeypatch):
+        """When old sidecars exist, _upload_scrape_output issues ONE batch delete."""
+        from media115.cache import _cache_root
+        from media115.organizer import _upload_scrape_output
+
+        scrape_dir = _cache_root() / "scrape_output" / "movie" / "影音_电影_OldDir"
+        scrape_dir.mkdir(parents=True)
+        (scrape_dir / "old.nfo").write_text("<movie/>")
+        (scrape_dir / "poster.jpg").write_bytes(b"\xff\xd8fake")
+
+        client = MagicMock()
+        # Both sidecar names already exist remotely
+        client.list_dir.return_value = [
+            {"type": "file", "name": "New Title (2024).nfo"},
+            {"type": "file", "name": "poster.jpg"},
+        ]
+        op = {"file": "old.mkv", "parent": "影音/电影/OldDir"}
+        target_dir = "/影音/电影/New Title (2024)"
+
+        _upload_scrape_output(client, op, target_dir, "New Title (2024).mkv")
+
+        # One batch delete call (not two individual calls)
+        client.delete.assert_called_once()
+        deleted_paths = client.delete.call_args[0][0]
+        assert len(deleted_paths) == 2
+        assert all(p.startswith(target_dir) for p in deleted_paths)
+        # Both uploads still happen
+        assert client.upload.call_count == 2
+
+
+class TestPlanScrapeUpload:
+    """_plan_scrape_upload: pure filesystem planner, no API calls."""
+
+    def test_returns_pairs_for_nfo_and_poster(self, tmp_path):
+        from media115.cache import _cache_root
+        from media115.organizer import _plan_scrape_upload
+
+        scrape_dir = _cache_root() / "scrape_output" / "movie" / "影音_电影_OldDir"
+        scrape_dir.mkdir(parents=True)
+        nfo_file = scrape_dir / "old.nfo"
+        nfo_file.write_text("<movie/>")
+        poster_file = scrape_dir / "poster.jpg"
+        poster_file.write_bytes(b"fake")
+
+        op = {"file": "old.mkv", "parent": "影音/电影/OldDir"}
+        pairs = _plan_scrape_upload(op, "New Title (2024).mkv")
+
+        assert len(pairs) == 2
+        remote_names = {remote for _, remote in pairs}
+        assert "New Title (2024).nfo" in remote_names
+        assert "poster.jpg" in remote_names
+
+    def test_no_scrape_dir_returns_empty(self):
+        from media115.organizer import _plan_scrape_upload
+
+        op = {"file": "nonexistent.mkv", "parent": "影音/电影/NoSuchDir"}
+        pairs = _plan_scrape_upload(op, "Whatever (2024).mkv")
+        assert pairs == []
+
+    def test_nfo_without_new_video_name_keeps_original(self):
+        """When new_video_name is None, NFO keeps its original filename."""
+        from media115.cache import _cache_root
+        from media115.organizer import _plan_scrape_upload
+
+        scrape_dir = _cache_root() / "scrape_output" / "av" / "影音_AV_ABC-001"
+        scrape_dir.mkdir(parents=True, exist_ok=True)
+        (scrape_dir / "ABC-001.nfo").write_text("<movie/>")
+
+        op = {"file": "ABC-001.mkv", "parent": "影音/AV/ABC-001"}
+        pairs = _plan_scrape_upload(op, new_video_name=None)
+
+        assert len(pairs) == 1
+        _, remote_name = pairs[0]
+        assert remote_name == "ABC-001.nfo"
