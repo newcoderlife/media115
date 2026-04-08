@@ -1133,3 +1133,47 @@ def test_plan_scrape_upload_filters_by_video_stem(tmp_path, monkeypatch):
     nfo_names = [n for n in names if n.endswith(".nfo")]
     assert len(nfo_names) == 2  # only ep1 NFO + tvshow.nfo
     assert "NewShow S01E02.nfo" not in names
+
+
+def test_phase5_deduplicates_shared_sidecars(tmp_path, monkeypatch):
+    """tvshow.nfo and poster.jpg should only be uploaded once per target dir."""
+    from media115.organizer import _plan_scrape_upload
+    from media115 import cache as media_cache
+
+    scrape_dir = tmp_path / "scrape_output" / "剧目" / "剧目_ShowFolder"
+    scrape_dir.mkdir(parents=True)
+    (scrape_dir / "Show S01E01.nfo").write_text("<ep1/>")
+    (scrape_dir / "Show S01E02.nfo").write_text("<ep2/>")
+    (scrape_dir / "tvshow.nfo").write_text("<tvshow/>")
+    (scrape_dir / "poster.jpg").write_bytes(b"img")
+
+    monkeypatch.setattr(media_cache, "_cache_root", lambda: tmp_path)
+
+    # Simulate what Phase 5 does: call _plan_scrape_upload for each episode
+    op1 = {"file": "Show S01E01.mkv", "parent": "剧目/ShowFolder"}
+    op2 = {"file": "Show S01E02.mkv", "parent": "剧目/ShowFolder"}
+
+    pairs1 = _plan_scrape_upload(op1, "NewShow S01E01.mkv")
+    pairs2 = _plan_scrape_upload(op2, "NewShow S01E02.mkv")
+
+    # Simulate Phase 5 dedup logic
+    upload_groups: dict = {}
+    target = "/影音/剧目/NewShow (2024)"
+    existing = upload_groups.setdefault(target, [])
+    existing_names = {name for _, name in existing}
+    for local_path, remote_name in pairs1:
+        if remote_name not in existing_names:
+            existing.append((local_path, remote_name))
+            existing_names.add(remote_name)
+    for local_path, remote_name in pairs2:
+        if remote_name not in existing_names:
+            existing.append((local_path, remote_name))
+            existing_names.add(remote_name)
+
+    names = [name for _, name in upload_groups[target]]
+    # Each episode NFO appears once
+    assert names.count("NewShow S01E01.nfo") == 1
+    assert names.count("NewShow S01E02.nfo") == 1
+    # Shared files appear only once
+    assert names.count("tvshow.nfo") == 1
+    assert names.count("poster.jpg") == 1
