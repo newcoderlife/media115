@@ -417,7 +417,11 @@ class TestSync:
         with patch("media115.fs_cli._get_client", return_value=client):
             result = runner.invoke(main, ["sync", "--deep", "/影音"])
         assert result.exit_code == 0
-        client.warm.assert_called_once_with("/影音", depth=3)
+        call_kwargs = client.warm.call_args[1]
+        call_args = client.warm.call_args[0]
+        assert call_args[0] == "/影音"
+        assert call_kwargs.get("depth") == 3
+        assert "_progress_cb" in call_kwargs
         assert "预热完成" in result.output
 
     def test_sync_deep_custom_depth(self, runner):
@@ -430,7 +434,8 @@ class TestSync:
         with patch("media115.fs_cli._get_client", return_value=client):
             result = runner.invoke(main, ["sync", "--deep", "--depth", "5", "/影音"])
         assert result.exit_code == 0
-        client.warm.assert_called_once_with("/影音", depth=5)
+        assert client.warm.call_args[1].get("depth") == 5
+        assert "_progress_cb" in client.warm.call_args[1]
 
 
 def _mock_file_cache(stats=None):

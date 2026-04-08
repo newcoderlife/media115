@@ -563,7 +563,7 @@ def batch_scrape(category, output, max_count, force):
                 # Check year mismatch
                 if file_year and match_year and str(file_year) != str(match_year):
                     note = f"⚠ 年份不匹配: 文件={file_year} 匹配={match_year}"
-                elif not match_year:
+                elif not match_year and "number" not in r:
                     note = "⚠ 匹配结果无年份"
                 else:
                     note = ""
@@ -588,7 +588,7 @@ def batch_scrape(category, output, max_count, force):
             if r.get("status") in ("not_found", "error")
             or (r.get("_file_year") and r.get("_match_year")
                 and str(r["_file_year"]) != str(r["_match_year"]))
-            or (r.get("status") == "ok" and not r.get("_match_year"))
+            or (r.get("status") == "ok" and not r.get("_match_year") and "number" not in r)
         ]
         if needs_review:
             click.echo(f"\n⚠ {len(needs_review)} 个结果需要 agent 审查（年份不匹配或未找到）")
@@ -626,7 +626,8 @@ def _upload_missing_nfo(category: str, skipped_ops: list[dict]):
     # 找缺 NFO 的 skip 文件
     missing = [
         op for op in skipped_ops
-        if op.get("reason") == "already correct" and op["parent"] not in nfo_parents
+        if op.get("reason") in ("already correct", "already in standard format")
+        and op["parent"] not in nfo_parents
     ]
 
     if not missing:
