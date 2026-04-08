@@ -679,3 +679,70 @@ class CachedClient:
             if path not in seen:
                 seen.add(path)
                 self.refresh_dir(path)
+
+    # ================================================================
+    # TREE CACHE (export_tree → SQLite tree_entry)
+    # ================================================================
+
+    def save_tree(self, tree_text: str, video_exts: set[str], nfo_ext: str = ".nfo") -> int:
+        """Parse export_tree text and save to SQLite tree_entry table.
+
+        Returns the number of entries saved.
+        """
+        entries = self._parse_tree_text(tree_text, video_exts, nfo_ext)
+        self._cache.set_tree(entries)
+        return len(entries)
+
+    def get_tree_entries(self, category: str = "") -> list[dict]:
+        """Get tree entries from SQLite, optionally filtered by category path prefix."""
+        return self._cache.get_tree_entries(category)
+
+    def tree_stats(self) -> dict:
+        """Return tree entry counts: {total, videos, nfos}."""
+        return self._cache.tree_stats()
+
+    @staticmethod
+    def _parse_tree_text(
+        text: str, video_exts: set[str], nfo_ext: str = ".nfo"
+    ) -> list[dict]:
+        """Parse export_tree text format into entry dicts.
+
+        Only video and NFO files are included (directories are skipped).
+        Each entry: {path, name, parent, is_video, is_nfo}.
+        """
+        entries = []
+        path_stack: list[str] = []
+
+        for line in text.strip().split("\n"):
+            stripped = line.rstrip()
+            if "|-" not in stripped:
+                continue
+
+            depth = stripped.count("| ")
+            name = stripped.split("|-", 1)[1].strip() if "|-" in stripped else ""
+            if not name:
+                continue
+
+            while len(path_stack) >= depth and path_stack:
+                path_stack.pop()
+            path_stack.append(name)
+
+            full_path = "/".join(path_stack)
+            dot = name.rfind(".")
+            ext = name[dot:] if dot != -1 else ""
+            is_video = ext.lower() in video_exts
+            is_nfo = ext.lower() == nfo_ext
+
+            if is_video or is_nfo:
+                parent = "/".join(path_stack[:-1]) if len(path_stack) > 1 else ""
+                entries.append(
+                    {
+                        "path": full_path,
+                        "n": name,
+                        "parent": parent,
+                        "is_video": is_video,
+                        "is_nfo": is_nfo,
+                    }
+                )
+
+        return entries
