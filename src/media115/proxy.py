@@ -25,12 +25,13 @@ def create_app(jellyfin_url: str, client) -> FastAPI:
     app.state.client = client
 
     @app.get("/play/{pick_code}")
-    async def play_redirect(pick_code: str):
-        url = app.state.client.download_url(pick_code)
+    async def play_redirect(request: Request, pick_code: str):
+        ua = request.headers.get("user-agent")
+        url = app.state.client.download_url(pick_code, user_agent=ua)
         return RedirectResponse(url=url, status_code=302)
 
     @app.get("/redirect/{file_path:path}")
-    async def redirect_by_path(file_path: str):
+    async def redirect_by_path(request: Request, file_path: str):
         """Resolve a 115 cloud path to a download URL and 302 redirect.
 
         Used by STRM files: the path is the full 115 path like
@@ -42,11 +43,8 @@ def create_app(jellyfin_url: str, client) -> FastAPI:
             decoded_path = "/" + decoded_path
 
         try:
-            info = app.state.client.find_file(decoded_path)
-            pick_code = info.get("pick_code", "")
-            if not pick_code:
-                return Response(content=f"No pick_code for: {decoded_path}", status_code=404)
-            url = app.state.client.download_url(pick_code)
+            ua = request.headers.get("user-agent")
+            url = app.state.client.stream_url(decoded_path, user_agent=ua)
             return RedirectResponse(url=url, status_code=302)
         except FileNotFoundError as e:
             return Response(content=str(e), status_code=404)
@@ -85,11 +83,12 @@ def create_app(jellyfin_url: str, client) -> FastAPI:
         if not path.lower().endswith(".strm"):
             return await _proxy_to_jellyfin(app, request)
 
+        ua = request.headers.get("user-agent")
         for ms in item.get("MediaSources", []):
             ms_path = ms.get("Path", "")
             pick_code = _extract_pick_code(ms_path)
             if pick_code:
-                url = app.state.client.download_url(pick_code)
+                url = app.state.client.download_url(pick_code, user_agent=ua)
                 return RedirectResponse(url=url, status_code=302)
 
         return await _proxy_to_jellyfin(app, request)

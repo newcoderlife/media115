@@ -367,29 +367,68 @@ class CloudAPI:
         get_logger().debug("search '%s' in cid=%s -> %d results", keyword, dir_id, len(data))
         return data
 
-    def download_url(self, pick_code: str) -> str:
-        return self._download_url_cookie(pick_code)
+    def download_url(self, pick_code: str, user_agent: str | None = None) -> str:
+        return self._download_url_cookie(pick_code, user_agent=user_agent)
 
-    def _download_url_cookie(self, pick_code: str) -> str:
+    def _download_url_cookie(self, pick_code: str, user_agent: str | None = None) -> str:
         """Get download URL using M115 encryption (cookie mode)."""
+        logger = get_logger()
         key = generate_m115_key()
         payload = json.dumps({"pickcode": pick_code})
         encrypted = m115_encode(key, payload)
 
         self._download_limiter.acquire()
-        resp = self._http.post(
-            f"{PRO_API}/app/chrome/downurl",
-            params={"t": int(time.time())},
-            data={"data": encrypted},
-            headers={"Cookie": self._cookies},
-        )
+
+        request_headers: dict[str, str] = {"Cookie": self._cookies}
+        if user_agent:
+            request_headers["User-Agent"] = user_agent
+
+        url = f"{PRO_API}/app/chrome/downurl"
+        params = {"t": int(time.time())}
+        data = {"data": encrypted}
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                resp = self._http.post(
+                    url,
+                    params=params,
+                    data=data,
+                    headers=request_headers,
+                )
+                break
+            except (httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.ConnectError):
+                if attempt == max_retries - 1:
+                    raise
+                logger.warning(
+                    "115 download network error (attempt %d/%d), retrying...",
+                    attempt + 1, max_retries,
+                )
+                time.sleep(3 * (attempt + 1))
+                continue
+
+        if resp.status_code == 429:
+            self._limiter.set_cooldown(3600)
+            self._download_limiter.set_cooldown(3600)
+            logger.warning("115 rate limit (429) on download, cooldown 3600s")
+            raise RuntimeError("115 API rate limit hit (429). Cooling down for 1 hour.")
+
+        if resp.status_code == 405 and self.renew_cookies():
+            request_headers["Cookie"] = self._cookies
+            resp = self._http.post(
+                url,
+                params=params,
+                data=data,
+                headers=request_headers,
+            )
+
         resp.raise_for_status()
         result = resp.json()
 
         decrypted = m115_decode(key, result["data"])
-        data = json.loads(decrypted)
+        data_decoded = json.loads(decrypted)
 
-        for val in data.values():
+        for val in data_decoded.values():
             url_info = val.get("url", {})
             if isinstance(url_info, dict) and "url" in url_info:
                 return url_info["url"]
