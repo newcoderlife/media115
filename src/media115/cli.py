@@ -616,18 +616,18 @@ def _upload_missing_nfo(category: str, skipped_ops: list[dict]):
 
     logger = get_logger()
 
-    # 从 tree cache 找到已有 NFO 的目录
+    # 从 tree cache 找已有匹配 NFO 的视频（按文件名 stem 匹配，不是按目录）
     entries = media_cache.parse_tree_cache(VIDEO_EXTS)
-    category_path = f"影音/{category}"
-    nfo_parents = {
-        e["parent"] for e in entries if e["is_nfo"] and f"/{category}/" in f"/{e['path']}/"
+    nfo_stems = {
+        e["parent"] + "/" + _split_ext(e["n"])[0]
+        for e in entries if e["is_nfo"] and f"/{category}/" in f"/{e['path']}/"
     }
 
-    # 找缺 NFO 的 skip 文件
+    # 找缺匹配 NFO 的 skip 文件（目录里可能有旧英文名 NFO，但和中文视频名不匹配）
     missing = [
         op for op in skipped_ops
         if op.get("reason") in ("already correct", "already in standard format")
-        and op["parent"] not in nfo_parents
+        and op["parent"] + "/" + _split_ext(op["file"])[0] not in nfo_stems
     ]
 
     if not missing:
