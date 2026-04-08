@@ -652,3 +652,12 @@ class CachedClient:
         self._cache.set_dir_listing(cid, normalized)
         get_logger().debug("REFRESH    list_dir %s cid=%s → %d items", path, cid, len(normalized))
         return [_entry_to_public(e) for e in normalized]
+
+    def refresh_paths(self, paths) -> None:
+        """批量强制刷新多个目录。去重后逐个 refresh。"""
+        seen: set[str] = set()
+        for path in paths:
+            path = _normalize(path)
+            if path not in seen:
+                seen.add(path)
+                self.refresh_dir(path)

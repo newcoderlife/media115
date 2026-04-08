@@ -624,3 +624,49 @@ def test_normalize_item_fid_and_cid():
     result = _normalize_item(item)
     assert result["type"] == "file"
     assert result["node_id"] == "f1"
+
+
+# ---------------------------------------------------------------------------
+# refresh_paths
+# ---------------------------------------------------------------------------
+
+class TestRefreshPaths:
+    def test_calls_refresh_dir_for_each_unique_path(self, client):
+        """refresh_paths calls the API once per unique normalized path."""
+        client._api.list_files_all.return_value = [_raw_file("a.mkv", "f1")]
+        # Pre-resolve /movies so resolve_path hits cache
+        client._api.get_dir_id.return_value = "100"
+
+        client.refresh_paths(["/movies", "/movies/", "movies"])
+
+        # All three are the same path after normalization — one API call
+        client._api.list_files_all.assert_called_once_with("100")
+
+    def test_deduplicates_paths(self, client):
+        """Duplicate paths result in a single refresh each."""
+        client._api.list_files_all.return_value = []
+        client._api.get_dir_id.return_value = "100"
+
+        client.refresh_paths(["/movies", "/movies", "/movies"])
+
+        client._api.list_files_all.assert_called_once()
+
+    def test_multiple_distinct_paths(self, client):
+        """Each distinct path triggers its own refresh."""
+        call_count = {"n": 0}
+
+        def _list(cid):
+            call_count["n"] += 1
+            return []
+
+        client._api.list_files_all.side_effect = _list
+        client._api.get_dir_id.side_effect = lambda p: {"100": "100", "/movies": "100", "/archive": "200"}.get(p, "100")
+
+        client.refresh_paths(["/movies", "/archive"])
+
+        assert call_count["n"] == 2
+
+    def test_empty_list_is_noop(self, client):
+        """Empty paths list makes no API calls."""
+        client.refresh_paths([])
+        client._api.list_files_all.assert_not_called()
