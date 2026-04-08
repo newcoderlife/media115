@@ -7,14 +7,21 @@ from lxml import html as lxml_html
 from media115.scraper.base import ThrottledClient
 
 BASE_URL = "https://javfree.me"
-_client = ThrottledClient()
+_client = None
+
+
+def _get_client():
+    global _client
+    if _client is None:
+        _client = ThrottledClient()
+    return _client
 
 
 def fetch_metadata(number: str) -> dict | None:
     """Fetch AV metadata from JavFree by number."""
 
     try:
-        resp = _client.get(f"{BASE_URL}/{number.lower()}/", follow_redirects=True)
+        resp = _get_client().get(f"{BASE_URL}/{number.lower()}/", follow_redirects=True)
         if resp.status_code != 200 or len(resp.content) < 1000:
             return None
 

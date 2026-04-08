@@ -40,7 +40,7 @@ def _normalize_item(item: dict) -> dict:
     A *file* has ``fid`` in the raw dict. A *dir* has ``cid``.
     """
     name = item.get("n") or item.get("fn") or item.get("name", "")
-    if "fid" in item and "cid" not in item:
+    if "fid" in item:
         # file
         return {
             "name": name,
@@ -97,9 +97,9 @@ class CachedClient:
         path_ttl: int = 86400,
     ) -> None:
         cd = Path(cache_dir) if cache_dir else None
-        self._api = CloudAPI(cookies=cookies, cache_dir=cd)
         db_path = (cd / "cache.db") if cd else _default_db_path()
         self._cache = FileCache(db_path)
+        self._api = CloudAPI(cookies=cookies, file_cache=self._cache)
         self._listing_ttl = listing_ttl
         self._path_ttl = path_ttl
 
@@ -544,7 +544,16 @@ class CachedClient:
         local = Path(local_path)
 
         file_size = local.stat().st_size
-        sha1 = hashlib.sha1(local.read_bytes()).hexdigest().upper()
+
+        # Streaming SHA1 — no full-file memory load
+        h = hashlib.sha1()
+        with open(local, "rb") as f:
+            while True:
+                chunk = f.read(1024 * 1024)
+                if not chunk:
+                    break
+                h.update(chunk)
+        sha1 = h.hexdigest().upper()
 
         with open(local, "rb") as f:
             result = self._api.rapid_upload(
