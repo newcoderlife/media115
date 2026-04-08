@@ -329,6 +329,19 @@ def _save_tmdb_poster(images: dict, out_dir: Path):
             save_poster(images["posters"][0]["file_path"], out_dir, filename="poster.jpg")
 
 
+def _safe_int(value, chars=None):
+    """Safely parse an integer from a string. Returns None on failure."""
+    if not value:
+        return None
+    s = str(value)
+    if chars:
+        s = s[:chars]
+    try:
+        return int(s)
+    except (ValueError, TypeError):
+        return None
+
+
 def _write_av_nfo(meta: dict, filename: str, out_dir: Path, source: str):
     """Generate NFO + download cover for AV."""
 
@@ -336,9 +349,9 @@ def _write_av_nfo(meta: dict, filename: str, out_dir: Path, source: str):
     metadata = {
         "title": meta.get("title", ""),
         "originaltitle": meta.get("title", ""),
-        "year": int(meta["release_date"][:4]) if meta.get("release_date") else None,
+        "year": _safe_int(meta.get("release_date"), 4),
         "plot": "",
-        "runtime": int(meta["runtime"]) if meta.get("runtime") else None,
+        "runtime": _safe_int(meta.get("runtime")),
         "genres": meta.get("genres", []),
         "directors": [meta["director"]] if meta.get("director") else [],
         "actors": [{"name": a} for a in meta.get("actors", [])],

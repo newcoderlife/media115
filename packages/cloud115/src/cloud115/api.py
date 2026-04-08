@@ -319,13 +319,16 @@ class CloudAPI:
                 time.sleep(3 * (attempt + 1))
                 continue
         if self._handle_response_errors(resp):
+            headers = {"Cookie": self._cookies}
             resp = self._http.request(
                 method,
                 url,
                 params=params,
                 data=data,
-                headers={"Cookie": self._cookies},
+                headers=headers,
             )
+            if self._handle_response_errors(resp):
+                pass  # shouldn't happen twice but be safe
         resp.raise_for_status()
         result = resp.json()
         self._check_business_errors(result)
@@ -440,6 +443,8 @@ class CloudAPI:
                 data=data,
                 headers=request_headers,
             )
+            if self._handle_response_errors(resp):
+                pass  # shouldn't happen twice but be safe
 
         resp.raise_for_status()
         result = resp.json()
