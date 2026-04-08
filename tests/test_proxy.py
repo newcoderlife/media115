@@ -59,6 +59,17 @@ class TestPlayEndpoint:
         client.get("/play/bbb", follow_redirects=False)
         assert app.state.client.download_url.call_count == 2
 
+    def test_ua_forwarded(self, client, app):
+        """User-Agent from client request is forwarded to download_url."""
+        app.state.client.download_url.return_value = "https://cdn.115.com/video.mkv"
+        client.get(
+            "/play/abc123",
+            follow_redirects=False,
+            headers={"User-Agent": "VLC/3.0.20"},
+        )
+        call_kwargs = app.state.client.download_url.call_args
+        assert call_kwargs.kwargs.get("user_agent") == "VLC/3.0.20"
+
 
 class TestVideoStreamIntercept:
     def test_strm_item_redirects(self, client, app):
@@ -80,6 +91,28 @@ class TestVideoStreamIntercept:
             follow_redirects=False,
         )
         assert resp.status_code == 302
+
+    def test_strm_item_ua_forwarded(self, client, app):
+        """User-Agent is forwarded to download_url for strm items."""
+        jellyfin_item = {
+            "Items": [
+                {
+                    "Path": "/media/movies/test.strm",
+                    "MediaSources": [{"Id": "src1", "Path": "http://proxy:9000/play/xyz789"}],
+                }
+            ]
+        }
+        app.state.client.download_url.return_value = "https://cdn.115.com/real.mkv"
+        app.state.http = AsyncMock(spec=httpx.AsyncClient)
+        app.state.http.get.return_value = _mock_async_response(json_data=jellyfin_item)
+
+        client.get(
+            "/Videos/abc/stream?mediasourceid=src1&api_key=test",
+            follow_redirects=False,
+            headers={"User-Agent": "Jellyfin/10.8"},
+        )
+        call_kwargs = app.state.client.download_url.call_args
+        assert call_kwargs.kwargs.get("user_agent") == "Jellyfin/10.8"
 
     def test_non_strm_item_proxies(self, client, app):
         """When Jellyfin item is local file, should proxy to Jellyfin."""
@@ -123,17 +156,9 @@ class TestRedirectByPath:
     """Tests for /redirect/{file_path} endpoint."""
 
     def test_redirect_success(self):
-        """CachedClient.find_file resolves path, download_url gets URL, verify 302."""
+        """stream_url resolves path and returns CDN URL, verify 302."""
         mock = MagicMock()
-        mock.find_file.return_value = {
-            "name": "Test Movie (2024).mkv",
-            "type": "file",
-            "fid": "fid_1",
-            "size": 1024,
-            "pick_code": "pick_abc",
-            "parent_cid": "dir_123",
-        }
-        mock.download_url.return_value = "https://cdn.115.com/test.mkv"
+        mock.stream_url.return_value = "https://cdn.115.com/test.mkv"
 
         app = create_app(jellyfin_url="http://jellyfin:8096", client=mock)
         tc = TestClient(app)
@@ -145,13 +170,12 @@ class TestRedirectByPath:
 
         assert resp.status_code == 302
         assert resp.headers["location"] == "https://cdn.115.com/test.mkv"
-        mock.find_file.assert_called_once()
-        mock.download_url.assert_called_once_with("pick_abc")
+        mock.stream_url.assert_called_once()
 
     def test_redirect_not_found(self):
-        """When find_file raises FileNotFoundError, should return 404."""
+        """When stream_url raises FileNotFoundError, should return 404."""
         mock = MagicMock()
-        mock.find_file.side_effect = FileNotFoundError("File not found: /影音/电影/Missing/missing.mkv")
+        mock.stream_url.side_effect = FileNotFoundError("File not found: /影音/电影/Missing/missing.mkv")
 
         app = create_app(jellyfin_url="http://jellyfin:8096", client=mock)
         tc = TestClient(app)
@@ -163,33 +187,10 @@ class TestRedirectByPath:
 
         assert resp.status_code == 404
 
-    def test_redirect_no_pick_code(self):
-        """File found but has no pick_code, should 404."""
-        mock = MagicMock()
-        mock.find_file.return_value = {
-            "name": "no_pc.mkv",
-            "type": "file",
-            "fid": "fid_1",
-            "size": 0,
-            "pick_code": "",
-            "parent_cid": "dir_123",
-        }
-
-        app = create_app(jellyfin_url="http://jellyfin:8096", client=mock)
-        tc = TestClient(app)
-
-        resp = tc.get(
-            "/redirect/影音/电影/SomeDir/no_pc.mkv",
-            follow_redirects=False,
-        )
-
-        assert resp.status_code == 404
-        assert "No pick_code" in resp.text
-
     def test_redirect_exception(self):
-        """When client raises, should return 500."""
+        """When stream_url raises, should return 500."""
         mock = MagicMock()
-        mock.find_file.side_effect = Exception("connection refused")
+        mock.stream_url.side_effect = Exception("connection refused")
 
         app = create_app(jellyfin_url="http://jellyfin:8096", client=mock)
         tc = TestClient(app)
@@ -201,3 +202,20 @@ class TestRedirectByPath:
 
         assert resp.status_code == 500
         assert "connection refused" in resp.text
+
+    def test_redirect_ua_forwarded(self):
+        """User-Agent is forwarded to stream_url."""
+        mock = MagicMock()
+        mock.stream_url.return_value = "https://cdn.115.com/test.mkv"
+
+        app = create_app(jellyfin_url="http://jellyfin:8096", client=mock)
+        tc = TestClient(app)
+
+        tc.get(
+            "/redirect/影音/电影/movie.mkv",
+            follow_redirects=False,
+            headers={"User-Agent": "Infuse/7.0"},
+        )
+
+        call_kwargs = mock.stream_url.call_args
+        assert call_kwargs.kwargs.get("user_agent") == "Infuse/7.0"
