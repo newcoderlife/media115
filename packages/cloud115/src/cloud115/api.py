@@ -243,6 +243,36 @@ class CloudAPI:
 
     # ── Internal request methods ─────────────────────────────────────
 
+    def _handle_response_errors(self, resp) -> bool:
+        """Handle 429, 405, and business error codes. Shared between _cookie_request and download.
+
+        Returns True if the caller should retry with fresh cookies (405 + renew succeeded).
+        Raises RuntimeError on rate limit (429).
+        """
+        if resp.status_code == 429:
+            self._limiter.set_cooldown(3600)
+            self._download_limiter.set_cooldown(3600)
+            get_logger().warning("115 rate limit (429), cooldown 3600s")
+            raise RuntimeError("115 API rate limit hit (429). Cooling down for 1 hour.")
+
+        if resp.status_code == 405 and self.renew_cookies():
+            return True  # signal to retry with new cookies
+
+        return False  # no retry needed
+
+    def _check_business_errors(self, result: dict) -> None:
+        """Check for business-level rate limiting (errNo 770004, 访问上限).
+
+        Raises RuntimeError if a rate-limit error code is detected.
+        """
+        if isinstance(result, dict) and "errNo" in result:
+            err = result["errNo"]
+            if err == 770004 or "访问上限" in str(result.get("error", "")):
+                self._limiter.set_cooldown(3600)
+                self._download_limiter.set_cooldown(3600)
+                get_logger().warning("115 rate limit (errNo=%d), cooldown 3600s", err)
+                raise RuntimeError(f"115 API rate limit hit (errNo={err}). Cooling down.")
+
     def _cookie_request(
         self,
         method: str,
@@ -288,12 +318,7 @@ class CloudAPI:
                 logger.warning("115 network error (attempt %d/%d), retrying...", attempt + 1, max_retries)
                 time.sleep(3 * (attempt + 1))
                 continue
-        if resp.status_code == 429:
-            self._limiter.set_cooldown(3600)
-            self._download_limiter.set_cooldown(3600)
-            logger.warning("115 rate limit (429), cooldown 3600s")
-            raise RuntimeError("115 API rate limit hit (429). Cooling down for 1 hour.")
-        if resp.status_code == 405 and self.renew_cookies():
+        if self._handle_response_errors(resp):
             resp = self._http.request(
                 method,
                 url,
@@ -303,13 +328,7 @@ class CloudAPI:
             )
         resp.raise_for_status()
         result = resp.json()
-        if isinstance(result, dict) and "errNo" in result:
-            err = result["errNo"]
-            if err == 770004 or "访问上限" in str(result.get("error", "")):
-                self._limiter.set_cooldown(3600)
-                self._download_limiter.set_cooldown(3600)
-                logger.warning("115 rate limit (errNo=%d), cooldown 3600s", err)
-                raise RuntimeError(f"115 API rate limit hit (errNo={err}). Cooling down.")
+        self._check_business_errors(result)
         return result
 
     # ── Public API ───────────────────────────────────────────────────
@@ -413,13 +432,7 @@ class CloudAPI:
                 time.sleep(3 * (attempt + 1))
                 continue
 
-        if resp.status_code == 429:
-            self._limiter.set_cooldown(3600)
-            self._download_limiter.set_cooldown(3600)
-            logger.warning("115 rate limit (429) on download, cooldown 3600s")
-            raise RuntimeError("115 API rate limit hit (429). Cooling down for 1 hour.")
-
-        if resp.status_code == 405 and self.renew_cookies():
+        if self._handle_response_errors(resp):
             request_headers["Cookie"] = self._cookies
             resp = self._http.post(
                 url,
@@ -430,6 +443,7 @@ class CloudAPI:
 
         resp.raise_for_status()
         result = resp.json()
+        self._check_business_errors(result)
 
         decrypted = m115_decode(key, result["data"])
         data_decoded = json.loads(decrypted)
