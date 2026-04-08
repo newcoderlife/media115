@@ -424,10 +424,10 @@ def execute_organize_plan(
 def _plan_scrape_upload(
     op: dict, new_video_name: str | None = None,
 ) -> list[tuple]:
-    """Plan sidecar upload: find local files, compute remote names.
+    """Plan sidecar upload for a single video file.
 
-    Returns a list of ``(local_path, remote_name)`` pairs.
-    Does NOT call any API — pure filesystem inspection.
+    Returns [(local_path, remote_name), ...].
+    Only includes NFOs matching this video's stem (not all NFOs in the dir).
     """
     from media115.cache import _cache_root
     from media115.utils import split_ext
@@ -436,10 +436,9 @@ def _plan_scrape_upload(
     if not scrape_dir.exists():
         return []
 
-    # Compute the NFO name that matches the new video
     nfo_name = split_ext(new_video_name)[0] + ".nfo" if new_video_name else None
+    video_stem = split_ext(op.get("file", ""))[0]  # original video filename stem
 
-    # Find matching output directory (by original parent path)
     parent = op.get("parent", "")
     search_name = parent.replace("/", "_")
 
@@ -450,12 +449,22 @@ def _plan_scrape_upload(
             if not out_dir.is_dir():
                 continue
             if out_dir.name == search_name:
-                pairs = []
+                result = []
                 for f in out_dir.iterdir():
-                    if f.suffix in (".nfo", ".jpg", ".png"):
-                        remote_name = nfo_name if f.suffix == ".nfo" and nfo_name else f.name
-                        pairs.append((f, remote_name))
-                return pairs
+                    if f.suffix == ".nfo":
+                        f_stem = split_ext(f.name)[0]
+                        if f_stem == video_stem:
+                            # This NFO matches our video — rename to new video name
+                            remote_name = nfo_name if nfo_name else f.name
+                            result.append((f, remote_name))
+                        elif f.name == "tvshow.nfo":
+                            # Shared tvshow.nfo — keep original name
+                            result.append((f, "tvshow.nfo"))
+                        # Skip NFOs for other videos in the same directory
+                    elif f.suffix in (".jpg", ".png"):
+                        # poster.jpg, fanart.jpg — shared, keep original name
+                        result.append((f, f.name))
+                return result
 
     return []
 

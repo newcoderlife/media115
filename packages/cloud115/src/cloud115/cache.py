@@ -78,7 +78,7 @@ class FileCache:
         if db_path is None:
             db_path = _default_db_path()
         self._db_path = Path(db_path)
-        self._conn = sqlite3.connect(str(self._db_path))
+        self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
