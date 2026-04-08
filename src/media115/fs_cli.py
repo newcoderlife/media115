@@ -297,39 +297,35 @@ def register(cli: click.Group):
 
     @cli.command("sync")
     @click.argument("path")
-    @click.option("--deep", is_flag=True, help="额外填充 dir listing 缓存（暂未实现）")
-    def sync(path, deep):
-        """刷新路径缓存：导出目录树并保存到 tree_cache.txt。"""
+    @click.option("--deep", is_flag=True, help="递归预热目录 listing 缓存")
+    @click.option("--depth", default=3, type=int, help="预热深度（配合 --deep，默认 3）")
+    def sync(path, deep, depth):
+        """刷新路径缓存。默认导出目录树，--deep 额外预热 listing 缓存。"""
         import media115.cache as media_cache
 
-        if deep:
-            click.echo("--deep 暂未实现，已忽略该标志")
+        client = _get_client()
 
-        try:
-            client = _get_client()
-        except click.ClickException as e:
-            raise e
-
-        try:
-            text = client.export_tree(path)
-        except FileNotFoundError:
-            raise click.ClickException(f"目录不存在: {path!r}")
-
+        # Always export tree
+        click.echo(f"正在导出目录树...")
+        text = client.export_tree(path)
         if not text:
             raise click.ClickException(f"导出失败: {path!r}")
 
-        # 保存到 tree_cache.txt
         tree_path = media_cache.tree_cache_path()
         tree_path.write_text(text, encoding="utf-8")
 
-        # 统计
         lines = text.strip().split("\n")
         VIDEO_EXTS = {".mkv", ".mp4", ".avi", ".ts", ".rmvb", ".wmv", ".flv", ".mov", ".m4v"}
         video_count = sum(
             1 for ln in lines if any(ln.rstrip().lower().endswith(ext) for ext in VIDEO_EXTS)
         )
-        get_logger().info("sync %s: %d lines, %d videos", path, len(lines), video_count)
         click.echo(f"已保存 tree_cache.txt：{len(lines)} 行，{video_count} 个视频文件")
+
+        if deep:
+            click.echo(f"正在预热缓存 (深度={depth})...")
+            client.warm(path, depth=depth)
+            stats = client.cache_status()
+            click.echo(f"预热完成：{stats['path_count']} 路径，{stats['dir_count']} 目录，{stats['entry_count']} 条目")
 
     @cli.group("cache")
     def cache_group():
@@ -338,79 +334,101 @@ def register(cli: click.Group):
     @cache_group.command("status")
     def cache_status():
         """显示缓存状态统计。"""
+        import time as _time
         import media115.cache as media_cache
 
-        cache_root = media_cache._cache_root()
-        tree_path = media_cache.tree_cache_path()
-
-        # cloud115 SQLite cache stats
+        # cloud115 SQLite stats
         try:
             client = _get_client()
             stats = client.cache_status()
-            paths_count = stats.get("path_count", 0)
-            dirs_count = stats.get("dir_count", 0)
+            path_count = stats.get("path_count", 0)
+            dir_count = stats.get("dir_count", 0)
+            entry_count = stats.get("entry_count", 0)
+            db_size = stats.get("db_size_bytes", 0)
+            rate_limit = stats.get("rate_limit", {})
         except Exception:
-            paths_count = "?"
-            dirs_count = "?"
+            path_count = dir_count = entry_count = "?"
+            db_size = 0
+            rate_limit = {}
 
-        # tree_cache.txt
+        click.echo(f"cloud115 缓存:")
+        click.echo(f"  路径映射:    {path_count} 条目")
+        click.echo(f"  目录缓存:    {dir_count} 个目录, {entry_count} 条目")
+        click.echo(f"  数据库大小:  {_format_size(db_size) if isinstance(db_size, int) else '?'}")
+
+        # Rate limit status
+        now = _time.time()
+        for name, state in rate_limit.items():
+            cooldown = state.get("cooldown_until", 0)
+            if now < cooldown:
+                remaining = int(cooldown - now)
+                click.echo(f"  限流 ({name}):  ⚠ cooldown 中 (剩余 {remaining}s)")
+            else:
+                count = state.get("minute_count", 0)
+                click.echo(f"  限流 ({name}):  正常 ({count}/20 QPM)")
+
+        # media115 tree cache
+        tree_path = media_cache.tree_cache_path()
         if tree_path.exists():
             tree_size = tree_path.stat().st_size
-            tree_info = f"存在 ({_format_size(tree_size)})"
+            click.echo(f"  tree_cache:  {_format_size(tree_size)}")
         else:
-            tree_info = "不存在"
-
-        click.echo(f"缓存根目录:        {cache_root}")
-        click.echo(f"path_index 条目数: {paths_count}")
-        click.echo(f"dir listing 文件数: {dirs_count}")
-        click.echo(f"tree_cache.txt:    {tree_info}")
+            click.echo(f"  tree_cache:  不存在")
 
     @cache_group.command("clear")
     @click.option("--tree", is_flag=True, help="也清除 tree_cache.txt")
     @click.option("--scrape", is_flag=True, help="也清除刮削缓存和 scrape_output")
     @click.option("--all", "clear_all", is_flag=True, help="清除全部缓存")
     def cache_clear(tree, scrape, clear_all):
-        """清除缓存。默认只清路径缓存（fs/）。"""
+        """清除缓存。默认只清 cloud115 路径/目录缓存。"""
         import shutil
         from media115.cache import _cache_root
 
         root = _cache_root()
 
         targets = []
-        targets.append(("路径缓存 (fs/)", root / "fs"))
-        if tree or clear_all:
-            targets.append(("目录树缓存 (tree_cache.txt)", root / "tree_cache.txt"))
-        if scrape or clear_all:
-            targets.append(("刮削缓存 (scrape/)", root / "scrape"))
-            targets.append(("刮削输出 (scrape_output/)", root / "scrape_output"))
-        if clear_all:
-            targets.append(("日志 (logs/)", root / "logs"))
 
-        existing = [(name, path) for name, path in targets if path.exists()]
-        if not existing:
+        # cloud115 SQLite cache is always included
+        try:
+            client = _get_client()
+            stats = client.cache_status()
+            desc = "cloud115 路径/目录缓存 (%d paths, %d dirs, %d entries)" % (
+                stats.get("path_count", 0), stats.get("dir_count", 0), stats.get("entry_count", 0)
+            )
+            targets.append(("cloud115", desc, lambda: client.cache_clear()))
+        except Exception:
+            pass
+
+        if tree or clear_all:
+            p = root / "tree_cache.txt"
+            if p.exists():
+                targets.append(("tree", "目录树缓存 (tree_cache.txt)", lambda: p.unlink()))
+
+        if scrape or clear_all:
+            for name, path in [("scrape", root / "scrape"), ("scrape_output", root / "scrape_output")]:
+                if path.exists():
+                    targets.append((name, f"刮削缓存 ({name}/)", lambda p=path: shutil.rmtree(p)))
+
+        if clear_all:
+            logs = root / "logs"
+            if logs.exists():
+                targets.append(("logs", "日志 (logs/)", lambda: shutil.rmtree(logs)))
+
+        if not targets:
             click.echo("没有可清除的缓存")
             return
 
         click.echo("将清除：")
-        for name, path in existing:
-            click.echo(f"  - {name}")
+        for _, desc, _ in targets:
+            click.echo(f"  - {desc}")
+
         if not click.confirm("确认？", default=False):
             click.echo("已取消")
             return
 
-        # Clear cloud115 SQLite cache after confirmation
-        try:
-            client = _get_client()
-            client.cache_clear()
-        except Exception:
-            pass
-
-        for name, path in existing:
-            if path.is_file():
-                path.unlink()
-            elif path.is_dir():
-                shutil.rmtree(path)
-            click.echo(f"  已清除: {name}")
+        for name, desc, action in targets:
+            action()
+            click.echo(f"  已清除: {desc}")
 
     @cli.command("mv")
     @click.argument("args", nargs=-1, required=True)
@@ -578,11 +596,14 @@ def register(cli: click.Group):
         try:
             client = _get_client()
             stats = client.cache_status()
+            db_size = stats.get("db_size_bytes", 0)
             click.echo(f"  path_index:    {stats.get('path_count', 0)} 条目")
-            click.echo(f"  dir listings:  {stats.get('dir_count', 0)} 目录")
+            click.echo(f"  dir listings:  {stats.get('dir_count', 0)} 目录, {stats.get('entry_count', 0)} 条目")
+            click.echo(f"  db 大小:       {_format_size(db_size) if isinstance(db_size, int) else '?'}")
         except Exception:
             click.echo("  path_index:    ? (需要登录)")
             click.echo("  dir listings:  ? (需要登录)")
+            click.echo("  db 大小:       ? (需要登录)")
 
         # tree_cache
         tc = cache_root / "tree_cache.txt"
