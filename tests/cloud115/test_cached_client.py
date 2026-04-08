@@ -374,12 +374,34 @@ class TestMove:
 
         client._api.move.assert_called_once_with(["f1"], "500")
 
-        # Source removed
+        # Source removed (entry moved, not duplicated)
         assert client._cache.find_entry("100", "movie.mkv") is None
-        # Target has entry
+        # Target has entry — same node_id, just reparented
         target_entry = client._cache.find_entry("500", "movie.mkv")
         assert target_entry is not None
         assert target_entry["node_id"] == "f1"
+
+    def test_move_uses_atomic_update(self, client):
+        """move() must use move_entry (single UPDATE), not remove+add."""
+        client.list_dir("/movies")
+        client._api.move.return_value = {"state": True}
+        client._api.get_dir_id.return_value = "500"
+
+        # Spy on the cache methods
+        from unittest.mock import patch, call
+
+        original_move_entry = client._cache.move_entry
+        with patch.object(client._cache, "move_entry", wraps=original_move_entry) as mock_move, \
+             patch.object(client._cache, "remove_entry", wraps=client._cache.remove_entry) as mock_remove, \
+             patch.object(client._cache, "add_entry", wraps=client._cache.add_entry) as mock_add:
+
+            client.move(["/movies/movie.mkv"], "/archive")
+
+            # move_entry must be called with the correct args
+            mock_move.assert_called_once_with("100", "f1", "500")
+            # remove_entry and add_entry must NOT be called for the entry itself
+            mock_remove.assert_not_called()
+            mock_add.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
