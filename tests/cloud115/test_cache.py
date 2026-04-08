@@ -286,6 +286,10 @@ class TestRateLimit:
 # ---------------------------------------------------------------------------
 
 class TestManagement:
+    def test_double_close(self, cache):
+        cache.close()
+        cache.close()  # should not raise
+
     def test_clear(self, cache):
         cache.set_path("/a", "1")
         cache.set_dir_listing("d1", [_entry()])

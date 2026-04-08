@@ -1151,6 +1151,85 @@ class TestLoadEnv:
             os.environ.pop("TEST_VAR_2", None)
 
 
+class TestUploadMissingNfo:
+    """Regression tests for _upload_missing_nfo."""
+
+    def test_passes_path_not_cid(self, runner):
+        """_upload_missing_nfo must pass a path string (starts with /)
+        to _upload_scrape_output, not a raw CID."""
+        from media115.cli import _upload_missing_nfo
+
+        # DANDY-992 has no NFO in SAMPLE_TREE, so it should be in the missing list
+        skipped_ops = [
+            {
+                "file": "DANDY-992.mp4",
+                "path": "影音/AV/DANDY-992/DANDY-992.mp4",
+                "parent": "AV/DANDY-992",
+                "type": "av",
+                "action": "skip",
+                "reason": "already correct",
+                "source_id": "",
+            },
+        ]
+
+        mock_client = MagicMock()
+        mock_client.resolve_path.return_value = "cid_123"
+
+        captured_target_dirs = []
+
+        def mock_upload_scrape_output(client, op, target_dir, file):
+            captured_target_dirs.append(target_dir)
+
+        with runner.isolated_filesystem():
+            _write_env()
+            _write_tree()
+            with (
+                patch("media115.cli._get_client", return_value=mock_client),
+                patch(
+                    "media115.organizer._upload_scrape_output",
+                    side_effect=mock_upload_scrape_output,
+                ),
+            ):
+                _upload_missing_nfo("AV", skipped_ops)
+
+        # target_dir should be a path string starting with "/", not a bare CID
+        assert len(captured_target_dirs) == 1
+        assert captured_target_dirs[0].startswith("/"), (
+            f"target_dir should start with '/', got: {captured_target_dirs[0]!r}"
+        )
+
+
+class TestStrmUrlSlashes:
+    """Regression test: STRM URLs must keep literal / not encode as %2F."""
+
+    def test_strm_url_keeps_slashes_literal(self, runner):
+        """Slashes in the 115 path must appear as literal / in the .strm URL."""
+        with runner.isolated_filesystem():
+            _write_env()
+            _write_tree()
+
+            result = runner.invoke(
+                main,
+                ["strm", "电影", "--output", "./strm_out", "--host", "localhost", "--port", "9000"],
+            )
+
+            assert result.exit_code == 0
+            strm_files = list(Path("strm_out").rglob("*.strm"))
+            assert len(strm_files) > 0, "No .strm files were generated"
+
+            for strm_file in strm_files:
+                content = strm_file.read_text().strip()
+                # The redirect path should contain literal "/" separators
+                assert "%2F" not in content, (
+                    f"URL contains %2F (encoded slash) in {strm_file}: {content!r}"
+                )
+                # And should contain at least one literal slash in the path portion
+                path_part = content.split("/redirect/", 1)[-1] if "/redirect/" in content else ""
+                assert "/" in path_part or path_part, (
+                    f"Expected path with slashes in {strm_file}: {content!r}"
+                )
+
+
 class TestGetClient:
     def test_get_client_from_cookies(self, runner):
         """_get_client should use CLOUD_115_COOKIES env var."""

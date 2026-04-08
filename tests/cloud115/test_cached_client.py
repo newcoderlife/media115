@@ -589,3 +589,38 @@ class TestStat:
     def test_stat_root(self, client):
         result = client.stat("/")
         assert result == {"name": "/", "type": "dir", "cid": "0"}
+
+
+# ---------------------------------------------------------------------------
+# shared FileCache between CachedClient and CloudAPI
+# ---------------------------------------------------------------------------
+
+def test_shared_file_cache(tmp_path):
+    """CachedClient and CloudAPI share the same FileCache instance."""
+    from cloud115.api import CloudAPI
+    from cloud115.cache import FileCache
+
+    c = CachedClient.__new__(CachedClient)
+    c._cache = FileCache(tmp_path / "test.db")
+
+    # Verify that when we pass file_cache to CloudAPI, it uses it
+    api = CloudAPI(cookies="test=1", file_cache=c._cache)
+    assert api._file_cache is c._cache
+    assert api._owns_cache is False
+    api.close()  # should NOT close the shared cache
+    # cache should still be usable
+    c._cache.set_path("/test", "123")
+    assert c._cache.get_path("/test") is not None
+    c._cache.close()
+
+
+# ---------------------------------------------------------------------------
+# _normalize_item with both fid and cid
+# ---------------------------------------------------------------------------
+
+def test_normalize_item_fid_and_cid():
+    """Items with both fid and cid should be classified as files."""
+    item = {"n": "movie.mkv", "fid": "f1", "cid": "parent_cid", "s": 1024, "pc": "pk1"}
+    result = _normalize_item(item)
+    assert result["type"] == "file"
+    assert result["node_id"] == "f1"
