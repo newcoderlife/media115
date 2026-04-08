@@ -347,8 +347,8 @@ def register(cli: click.Group):
         try:
             client = _get_client()
             stats = client.cache_status()
-            paths_count = stats.get("paths", 0)
-            dirs_count = stats.get("dirs", 0)
+            paths_count = stats.get("path_count", 0)
+            dirs_count = stats.get("dir_count", 0)
         except Exception:
             paths_count = "?"
             dirs_count = "?"
@@ -386,13 +386,6 @@ def register(cli: click.Group):
         if clear_all:
             targets.append(("日志 (logs/)", root / "logs"))
 
-        # Also clear cloud115 SQLite cache
-        try:
-            client = _get_client()
-            client.cache_clear()
-        except Exception:
-            pass
-
         existing = [(name, path) for name, path in targets if path.exists()]
         if not existing:
             click.echo("没有可清除的缓存")
@@ -404,6 +397,13 @@ def register(cli: click.Group):
         if not click.confirm("确认？", default=False):
             click.echo("已取消")
             return
+
+        # Clear cloud115 SQLite cache after confirmation
+        try:
+            client = _get_client()
+            client.cache_clear()
+        except Exception:
+            pass
 
         for name, path in existing:
             if path.is_file():
@@ -569,7 +569,6 @@ def register(cli: click.Group):
         click.echo()
 
         # 缓存
-        import json as _json
         import time as _time
         cache_root = _cache_root()
         click.echo("缓存:")
@@ -579,8 +578,8 @@ def register(cli: click.Group):
         try:
             client = _get_client()
             stats = client.cache_status()
-            click.echo(f"  path_index:    {stats.get('paths', 0)} 条目")
-            click.echo(f"  dir listings:  {stats.get('dirs', 0)} 目录")
+            click.echo(f"  path_index:    {stats.get('path_count', 0)} 条目")
+            click.echo(f"  dir listings:  {stats.get('dir_count', 0)} 目录")
         except Exception:
             click.echo("  path_index:    ? (需要登录)")
             click.echo("  dir listings:  ? (需要登录)")
@@ -601,22 +600,6 @@ def register(cli: click.Group):
             click.echo(f"  scrape_output: {len(cats)} 分类")
         else:
             click.echo("  scrape_output: ✗ 不存在")
-
-        # rate_limit
-        rl = cache_root / "rate_limit.json"
-        if rl.exists():
-            try:
-                state = _json.loads(rl.read_text())
-                cooldown = state.get("cooldown_until", 0)
-                if _time.time() < cooldown:
-                    remaining = int(cooldown - _time.time())
-                    click.echo(f"  rate_limit:    ⚠ cooldown 中 (剩余 {remaining}s)")
-                else:
-                    click.echo("  rate_limit:    ✓ 正常")
-            except Exception:
-                click.echo("  rate_limit:    ? 读取失败")
-        else:
-            click.echo("  rate_limit:    ✓ 无状态文件")
 
         click.echo()
 

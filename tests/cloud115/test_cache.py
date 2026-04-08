@@ -136,18 +136,18 @@ class TestDirListing:
         cache.set_dir_listing("d1", [_entry()])
         assert cache.find_entry("d1", "nope.txt") is None
 
-    def test_order_folders_first_then_name(self, cache):
+    def test_order_dirs_first_then_name(self, cache):
         entries = [
             _entry("beta.txt", type_="file", node_id="1"),
-            _entry("alpha", type_="folder", node_id="2"),
-            _entry("gamma", type_="folder", node_id="3"),
+            _entry("alpha", type_="dir", node_id="2"),
+            _entry("gamma", type_="dir", node_id="3"),
             _entry("aaa.txt", type_="file", node_id="4"),
         ]
         cache.set_dir_listing("d1", entries)
         result = cache.get_dir_entries("d1")
         types = [e["type"] for e in result]
-        # folders (type DESC) come first
-        assert types == ["folder", "folder", "file", "file"]
+        # dirs come first, then files
+        assert types == ["dir", "dir", "file", "file"]
         # within each group, sorted by name
         assert result[0]["name"] == "alpha"
         assert result[1]["name"] == "gamma"
