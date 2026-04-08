@@ -26,7 +26,10 @@ def _mock_client(items=None):
         "size": 1000, "pick_code": "pc1",
     }
     c.search.return_value = []
-    c.cache_status.return_value = {"path_count": 0, "dir_count": 0, "entry_count": 0, "db_size_bytes": 0}
+    c.cache_status.return_value = {
+        "path_count": 0, "dir_count": 0, "entry_count": 0,
+        "db_size_bytes": 0, "rate_limit": {},
+    }
     return c
 
 
@@ -404,13 +407,30 @@ class TestSync:
             result = runner.invoke(main, ["sync", "/不存在的路径"])
         assert result.exit_code != 0
 
-    def test_sync_deep_flag_prints_notice(self, runner):
+    def test_sync_deep_calls_warm(self, runner):
         client = _mock_client()
         client.export_tree.return_value = "影音\n|-电影\n"
+        client.cache_status.return_value = {
+            "path_count": 5, "dir_count": 3, "entry_count": 20,
+            "db_size_bytes": 1024, "rate_limit": {},
+        }
         with patch("media115.fs_cli._get_client", return_value=client):
             result = runner.invoke(main, ["sync", "--deep", "/影音"])
         assert result.exit_code == 0
-        assert "暂未实现" in result.output
+        client.warm.assert_called_once_with("/影音", depth=3)
+        assert "预热完成" in result.output
+
+    def test_sync_deep_custom_depth(self, runner):
+        client = _mock_client()
+        client.export_tree.return_value = "影音\n|-电影\n"
+        client.cache_status.return_value = {
+            "path_count": 2, "dir_count": 1, "entry_count": 5,
+            "db_size_bytes": 512, "rate_limit": {},
+        }
+        with patch("media115.fs_cli._get_client", return_value=client):
+            result = runner.invoke(main, ["sync", "--deep", "--depth", "5", "/影音"])
+        assert result.exit_code == 0
+        client.warm.assert_called_once_with("/影音", depth=5)
 
 
 class TestCacheStatus:
@@ -419,6 +439,9 @@ class TestCacheStatus:
         with patch("media115.fs_cli._get_client", return_value=client):
             result = runner.invoke(main, ["cache", "status"])
         assert result.exit_code == 0
+        assert "cloud115" in result.output
+        assert "路径映射" in result.output
+        assert "目录缓存" in result.output
 
     def test_cache_status_tree_cache_absent(self, runner):
         client = _mock_client()
@@ -426,6 +449,32 @@ class TestCacheStatus:
             result = runner.invoke(main, ["cache", "status"])
         assert result.exit_code == 0
         assert "不存在" in result.output
+
+    def test_cache_status_with_rate_limit_normal(self, runner):
+        client = _mock_client()
+        client.cache_status.return_value = {
+            "path_count": 10, "dir_count": 5, "entry_count": 50,
+            "db_size_bytes": 2048,
+            "rate_limit": {"list_files": {"cooldown_until": 0, "minute_count": 3}},
+        }
+        with patch("media115.fs_cli._get_client", return_value=client):
+            result = runner.invoke(main, ["cache", "status"])
+        assert result.exit_code == 0
+        assert "正常" in result.output
+        assert "QPM" in result.output
+
+    def test_cache_status_with_rate_limit_cooldown(self, runner):
+        import time
+        client = _mock_client()
+        client.cache_status.return_value = {
+            "path_count": 10, "dir_count": 5, "entry_count": 50,
+            "db_size_bytes": 2048,
+            "rate_limit": {"list_files": {"cooldown_until": time.time() + 30, "minute_count": 20}},
+        }
+        with patch("media115.fs_cli._get_client", return_value=client):
+            result = runner.invoke(main, ["cache", "status"])
+        assert result.exit_code == 0
+        assert "cooldown" in result.output
 
 
 class TestInit:
@@ -448,36 +497,46 @@ class TestInit:
 class TestCacheClear:
     def test_cache_clear_confirmed(self, runner, tmp_path, monkeypatch):
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
-        from media115.cache import _cache_dir
-        fs_dir = _cache_dir("fs")
-        (fs_dir / "path_index.json").write_text("{}")
         client = _mock_client()
         with patch("media115.fs_cli._get_client", return_value=client):
             result = runner.invoke(main, ["cache", "clear"], input="y\n")
         assert result.exit_code == 0
-        assert not fs_dir.exists()
+        # SQLite cache_clear() must be called
+        client.cache_clear.assert_called_once()
+
+    def test_cache_clear_lists_sqlite_in_confirmation(self, runner, tmp_path, monkeypatch):
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+        client = _mock_client()
+        client.cache_status.return_value = {
+            "path_count": 7, "dir_count": 3, "entry_count": 42,
+            "db_size_bytes": 4096, "rate_limit": {},
+        }
+        with patch("media115.fs_cli._get_client", return_value=client):
+            result = runner.invoke(main, ["cache", "clear"], input="n\n")
+        assert result.exit_code == 0
+        # Confirmation dialog must mention cloud115 SQLite cache
+        assert "cloud115" in result.output
+        assert "取消" in result.output
 
     def test_cache_clear_cancelled(self, runner, tmp_path, monkeypatch):
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
-        from media115.cache import _cache_dir
-        fs_dir = _cache_dir("fs")
-        (fs_dir / "path_index.json").write_text("{}")
         client = _mock_client()
         with patch("media115.fs_cli._get_client", return_value=client):
             result = runner.invoke(main, ["cache", "clear"], input="n\n")
         assert result.exit_code == 0
         assert "取消" in result.output
+        # cache_clear() must NOT have been called
+        client.cache_clear.assert_not_called()
 
-    def test_cache_clear_does_not_remove_scrape(self, runner, tmp_path, monkeypatch):
+    def test_cache_clear_does_not_remove_scrape_by_default(self, runner, tmp_path, monkeypatch):
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
-        from media115.cache import _cache_dir, _cache_root
-        # Create scrape dir and fs dir
+        from media115.cache import _cache_dir
+        # Create scrape dir
         scrape_dir = _cache_dir("scrape")
         (scrape_dir / "test.json").write_text("{}")
-        _cache_dir("fs")
         client = _mock_client()
         with patch("media115.fs_cli._get_client", return_value=client):
             result = runner.invoke(main, ["cache", "clear"], input="y\n")
         assert result.exit_code == 0
-        # scrape/ should still exist
+        # scrape/ should still exist (not cleared by default)
         assert scrape_dir.exists()

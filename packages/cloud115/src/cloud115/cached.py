@@ -615,3 +615,26 @@ class CachedClient:
     def cache_clear(self) -> None:
         """清除缓存元数据。不清除限流状态。"""
         self._cache.clear_metadata()
+
+    def warm(self, path, depth=3):
+        """主动预热：递归 list_dir 到指定深度，填充全部缓存。
+
+        每层 list_dir 自动写入 SQLite（path_index + dir_meta + dir_entry）。
+        """
+        path = _normalize(path)
+        items = self.list_dir(path)
+        if depth > 0:
+            for item in items:
+                if item["type"] == "dir":
+                    child_path = path.rstrip("/") + "/" + item["name"]
+                    self.warm(child_path, depth - 1)
+
+    def refresh_dir(self, path):
+        """强制刷新目录缓存，忽略 TTL。"""
+        path = _normalize(path)
+        cid = self.resolve_path(path)
+        raw = self._api.list_files_all(cid)
+        normalized = [_normalize_item(item) for item in raw]
+        self._cache.set_dir_listing(cid, normalized)
+        get_logger().debug("REFRESH    list_dir %s cid=%s → %d items", path, cid, len(normalized))
+        return [_entry_to_public(e) for e in normalized]
