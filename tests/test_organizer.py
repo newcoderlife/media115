@@ -1105,3 +1105,31 @@ class TestPlanScrapeUpload:
         assert len(pairs) == 1
         _, remote_name = pairs[0]
         assert remote_name == "ABC-001.nfo"
+
+
+def test_plan_scrape_upload_filters_by_video_stem(tmp_path, monkeypatch):
+    """Only include NFOs matching the video's stem, not all NFOs in the dir."""
+    from media115.organizer import _plan_scrape_upload
+    from media115 import cache as media_cache
+
+    # Create scrape_output with multiple episode NFOs
+    scrape_dir = tmp_path / "scrape_output" / "剧目" / "剧目_ShowFolder"
+    scrape_dir.mkdir(parents=True)
+    (scrape_dir / "Show S01E01.nfo").write_text("<episode/>")
+    (scrape_dir / "Show S01E02.nfo").write_text("<episode/>")
+    (scrape_dir / "tvshow.nfo").write_text("<tvshow/>")
+    (scrape_dir / "poster.jpg").write_bytes(b"img")
+
+    monkeypatch.setattr(media_cache, "_cache_root", lambda: tmp_path)
+
+    op = {"file": "Show S01E01.mkv", "parent": "剧目/ShowFolder"}
+    result = _plan_scrape_upload(op, "NewShow S01E01.mkv")
+
+    names = [name for _, name in result]
+    assert "NewShow S01E01.nfo" in names   # matched NFO, renamed
+    assert "tvshow.nfo" in names            # shared, kept as-is
+    assert "poster.jpg" in names            # shared, kept as-is
+    # Episode 2's NFO should NOT be included
+    nfo_names = [n for n in names if n.endswith(".nfo")]
+    assert len(nfo_names) == 2  # only ep1 NFO + tvshow.nfo
+    assert "NewShow S01E02.nfo" not in names
