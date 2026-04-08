@@ -355,6 +355,13 @@ def register(cli: click.Group):
         )
         click.echo(f"已保存 tree_cache.txt：{len(lines)} 行，{video_count} 个视频文件")
 
+        # Also save to SQLite tree_entry table
+        count = client.save_tree(text, VIDEO_EXTS)
+        stats = client.tree_stats()
+        click.echo(
+            f"已保存到缓存：{stats['total']} 条目，{stats['videos']} 个视频，{stats['nfos']} 个 NFO"
+        )
+
         if deep:
             count = [0]
             def _progress(p, num_items):
@@ -385,20 +392,22 @@ def register(cli: click.Group):
                 path_count = stats.get("path_count", 0)
                 dir_count = stats.get("dir_count", 0)
                 entry_count = stats.get("entry_count", 0)
+                tree_entries = stats.get("tree_entries", 0)
                 db_size = stats.get("db_size_bytes", 0)
                 rate_limit = stats.get("rate_limit", {})
             else:
-                path_count = dir_count = entry_count = 0
+                path_count = dir_count = entry_count = tree_entries = 0
                 db_size = 0
                 rate_limit = {}
         except Exception:
-            path_count = dir_count = entry_count = "?"
+            path_count = dir_count = entry_count = tree_entries = "?"
             db_size = 0
             rate_limit = {}
 
         click.echo(f"cloud115 缓存:")
         click.echo(f"  路径映射:    {path_count} 条目")
         click.echo(f"  目录缓存:    {dir_count} 个目录, {entry_count} 条目")
+        click.echo(f"  目录树:      {tree_entries} 条目")
         click.echo(f"  数据库大小:  {_format_size(db_size) if isinstance(db_size, int) else '?'}")
 
         # Rate limit status
@@ -412,13 +421,14 @@ def register(cli: click.Group):
                 count = state.get("minute_count", 0)
                 click.echo(f"  限流 ({name}):  正常 ({count}/20 QPM)")
 
-        # media115 tree cache
-        tree_path = media_cache.tree_cache_path()
+        # tree_cache.txt (legacy, kept for backward compat)
+        import media115.cache as _media_cache
+        tree_path = _media_cache.tree_cache_path()
         if tree_path.exists():
             tree_size = tree_path.stat().st_size
-            click.echo(f"  tree_cache:  {_format_size(tree_size)}")
+            click.echo(f"  tree_cache.txt: {_format_size(tree_size)} (legacy)")
         else:
-            click.echo(f"  tree_cache:  不存在")
+            click.echo(f"  tree_cache.txt: 不存在 (legacy)")
 
     @cache_group.command("clear")
     @click.option("--tree", is_flag=True, help="也清除 tree_cache.txt")
@@ -448,7 +458,7 @@ def register(cli: click.Group):
         if tree or clear_all:
             p = root / "tree_cache.txt"
             if p.exists():
-                targets.append(("tree", "目录树缓存 (tree_cache.txt)", lambda: p.unlink()))
+                targets.append(("tree_txt", "目录树缓存 (tree_cache.txt)", lambda: p.unlink()))
 
         if scrape or clear_all:
             for name, path in [("scrape", root / "scrape"), ("scrape_output", root / "scrape_output")]:
@@ -651,14 +661,24 @@ def register(cli: click.Group):
             click.echo("  dir listings:  ? (需要登录)")
             click.echo("  db 大小:       ? (需要登录)")
 
-        # tree_cache
-        tc = cache_root / "tree_cache.txt"
-        if tc.exists():
-            lines = tc.read_text().count("\n")
-            mtime = _time.strftime("%Y-%m-%d %H:%M", _time.localtime(tc.stat().st_mtime))
-            click.echo(f"  tree_cache:    ✓ {lines} 行 ({mtime})")
-        else:
-            click.echo("  tree_cache:    ✗ 不存在 (run: media115 sync)")
+        # tree_entry (SQLite)
+        try:
+            from cloud115.cache import FileCache, _default_db_path
+            _db_path = _default_db_path()
+            if _db_path.exists():
+                with FileCache(_db_path) as _fc:
+                    _ts = _fc.tree_stats()
+                if _ts["total"] > 0:
+                    click.echo(
+                        f"  tree_entry:    ✓ {_ts['total']} 条目 "
+                        f"({_ts['videos']} 视频, {_ts['nfos']} NFO)"
+                    )
+                else:
+                    click.echo(f"  tree_entry:    ✗ 空 (run: media115 sync)")
+            else:
+                click.echo(f"  tree_entry:    ✗ 不存在 (run: media115 sync)")
+        except Exception:
+            click.echo(f"  tree_entry:    ? (无法读取)")
 
         # scrape_output
         scrape_output = cache_root / "scrape_output"
