@@ -510,7 +510,7 @@ class CloudAPI:
         init = resp.json()
 
         # Step 2: Upload to OSS (separate client, longer timeout, with retry)
-        self._limiter.acquire()
+        # Note: OSS goes to Alibaba's servers, not 115 API — no 115 rate limiting needed
         for attempt in range(3):
             try:
                 oss_resp = _httpx.post(

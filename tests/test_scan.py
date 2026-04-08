@@ -81,7 +81,8 @@ class TestScanCommand:
             assert result.exit_code == 0
 
     def test_scan_no_credentials(self, runner):
-        with patch("media115.cli._get_client", return_value=None):
+        import click
+        with patch("media115.cli._get_client", side_effect=click.ClickException("未登录。请先运行: media115 auth")):
             result = runner.invoke(main, ["scan", "/影音"])
-            # Should exit gracefully
-            assert result.exit_code == 0
+            # Should exit with ClickException (code 1)
+            assert result.exit_code == 1

@@ -322,7 +322,9 @@ class FileCache:
 
     def close(self) -> None:
         """Close the database connection."""
-        self._conn.close()
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
 
     def __enter__(self) -> FileCache:
         """Enter context manager."""
