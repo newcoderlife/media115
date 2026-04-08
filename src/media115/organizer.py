@@ -303,12 +303,12 @@ def execute_organize_plan(
             logger.error("  Rename failed: %s", e)
             failed_ops.update(rename_indices)
 
-    # Phase 5: Upload NFO/poster + update file_map (skip failed files)
-    upload_total = len(resolved)
-    logger.info("  Uploading NFO/poster (%d files)...", upload_total)
-    for idx, (i, (op, parent_path)) in enumerate(
-        ((i, rp) for i, rp in enumerate(resolved)), 1
-    ):
+    # Phase 5: Upload NFO/poster grouped by target directory (skip failed files)
+    # Collect (local_path, remote_name) pairs per target dir
+    upload_groups: dict[str, list[tuple]] = {}  # target_dir → [(local_path, remote_name)]
+    successful_ops: list[tuple[int, dict]] = []  # (resolved_index, op) for status tracking
+
+    for i, (op, parent_path) in enumerate(resolved):
         if i in failed_ops:
             results.append({**op, "status": "error", "error": "move or rename failed"})
             continue
@@ -319,13 +319,9 @@ def execute_organize_plan(
         else:
             upload_dir = "/" + parent_path
 
-        display_name = (op.get("new_name") or op["file"])[:50]
-        print(
-            f"\r  [{idx}/{upload_total}] {display_name}",
-            end="", file=sys.stderr, flush=True,
-        )
-
-        _upload_scrape_output(client, op, upload_dir, op.get("new_name"))
+        pairs = _plan_scrape_upload(op, op.get("new_name"))
+        if pairs:
+            upload_groups.setdefault(upload_dir, []).extend(pairs)
 
         # Update file_map cache
         new_name = op.get("new_name")
@@ -336,9 +332,59 @@ def execute_organize_plan(
             if old_data:
                 _cache.put("file_map", new_stem, old_data)
 
+        successful_ops.append((i, op))
         results.append({**op, "status": "ok"})
+
+    # One list_dir + one delete call per target directory
+    num_groups = len(upload_groups)
+    logger.info(
+        "  Uploading NFO/poster: %d sidecar file(s) across %d director(ies)...",
+        sum(len(v) for v in upload_groups.values()),
+        num_groups,
+    )
+    for idx, (upload_dir, uploads) in enumerate(upload_groups.items(), 1):
+        display_dir = upload_dir.rsplit("/", 1)[-1][:50]
+        print(
+            f"\r  [{idx}/{num_groups}] {display_dir}",
+            end="", file=sys.stderr, flush=True,
+        )
+
+        # One list_dir per directory
+        existing_names: dict[str, bool] = {}
+        try:
+            items = client.list_dir(upload_dir)
+            existing_names = {
+                item["name"]: True for item in items if item.get("type") == "file"
+            }
+        except Exception:
+            pass
+
+        # Batch delete stale sidecars
+        to_delete = [
+            upload_dir + "/" + remote_name
+            for _, remote_name in uploads
+            if existing_names.get(remote_name)
+        ]
+        if to_delete:
+            try:
+                client.delete(to_delete)
+                logger.debug("  deleted %d old sidecar(s) in %s", len(to_delete), upload_dir)
+            except Exception as e:
+                logger.warning("  delete old sidecars failed in %s: %s", upload_dir, e)
+
+        # Upload new sidecar files
+        for local_path, remote_name in uploads:
+            try:
+                client.upload(str(local_path), upload_dir, remote_name)
+                logger.debug("  uploaded %s → %s", remote_name, upload_dir)
+            except Exception as e:
+                logger.warning("  upload failed %s: %s", remote_name, e)
+
     print("", file=sys.stderr)  # newline
-    logger.info("  Uploaded %d NFO/poster files", upload_total)
+    logger.info(
+        "  Uploaded NFO/poster for %d director(ies)",
+        num_groups,
+    )
 
     # Phase 6: Delete old source directories (now empty or metadata-only)
     source_dirs = set()
@@ -375,20 +421,20 @@ def execute_organize_plan(
     return results
 
 
-def _upload_scrape_output(
-    client, op: dict, target_dir: str, new_video_name: str | None = None,
-):
-    """Upload NFO + poster for an organized file if they exist locally.
+def _plan_scrape_upload(
+    op: dict, new_video_name: str | None = None,
+) -> list[tuple]:
+    """Plan sidecar upload: find local files, compute remote names.
 
-    *target_dir* is a cloud path like ``/影音/电影/Title (2024)``.
-    NFO is renamed to match the new video filename so Jellyfin can pair them.
+    Returns a list of ``(local_path, remote_name)`` pairs.
+    Does NOT call any API — pure filesystem inspection.
     """
     from media115.cache import _cache_root
     from media115.utils import split_ext
 
     scrape_dir = _cache_root() / "scrape_output"
     if not scrape_dir.exists():
-        return
+        return []
 
     # Compute the NFO name that matches the new video
     nfo_name = split_ext(new_video_name)[0] + ".nfo" if new_video_name else None
@@ -404,36 +450,65 @@ def _upload_scrape_output(
             if not out_dir.is_dir():
                 continue
             if out_dir.name == search_name:
-                from media115.log import get_logger
-                _log = get_logger()
-
-                # 115 does not support overwrite upload — same-name files create duplicates.
-                # Use rclone strategy: delete old file then upload new file.
-                existing_files: dict[str, bool] = {}  # name → exists
-                try:
-                    items = client.list_dir(target_dir)
-                    for item in items:
-                        if item.get("type") == "file":
-                            existing_files[item["name"]] = True
-                except Exception:
-                    pass
-
+                pairs = []
                 for f in out_dir.iterdir():
                     if f.suffix in (".nfo", ".jpg", ".png"):
                         remote_name = nfo_name if f.suffix == ".nfo" and nfo_name else f.name
-                        # Same-name file exists -> delete old then upload (overwrite semantics)
-                        if existing_files.get(remote_name):
-                            try:
-                                client.delete([target_dir + "/" + remote_name])
-                                _log.debug("  deleted old %s", remote_name)
-                            except Exception as e:
-                                _log.warning("  delete old %s failed: %s", remote_name, e)
-                        try:
-                            client.upload(str(f), target_dir, remote_name)
-                            _log.debug("  uploaded %s → %s", remote_name, target_dir)
-                        except Exception as e:
-                            _log.warning("  upload failed %s: %s", remote_name, e)
-                return
+                        pairs.append((f, remote_name))
+                return pairs
+
+    return []
+
+
+def _upload_scrape_output(
+    client, op: dict, target_dir: str, new_video_name: str | None = None,
+):
+    """Upload NFO + poster for an organized file if they exist locally.
+
+    *target_dir* is a cloud path like ``/影音/电影/Title (2024)``.
+    NFO is renamed to match the new video filename so Jellyfin can pair them.
+
+    Backward-compatible wrapper used by ``_upload_missing_nfo`` in cli.py.
+    For bulk uploads prefer ``_plan_scrape_upload`` + grouped execution.
+    """
+    from media115.log import get_logger
+    _log = get_logger()
+
+    pairs = _plan_scrape_upload(op, new_video_name)
+    if not pairs:
+        return
+
+    # 115 does not support overwrite upload — same-name files create duplicates.
+    # Use rclone strategy: delete old file then upload new file.
+    existing_files: dict[str, bool] = {}
+    try:
+        items = client.list_dir(target_dir)
+        for item in items:
+            if item.get("type") == "file":
+                existing_files[item["name"]] = True
+    except Exception:
+        pass
+
+    # Batch delete stale sidecars, then upload
+    to_delete = [
+        target_dir + "/" + remote_name
+        for _, remote_name in pairs
+        if existing_files.get(remote_name)
+    ]
+    if to_delete:
+        try:
+            client.delete(to_delete)
+            for path in to_delete:
+                _log.debug("  deleted old %s", path.rsplit("/", 1)[-1])
+        except Exception as e:
+            _log.warning("  delete old sidecars failed: %s", e)
+
+    for f, remote_name in pairs:
+        try:
+            client.upload(str(f), target_dir, remote_name)
+            _log.debug("  uploaded %s → %s", remote_name, target_dir)
+        except Exception as e:
+            _log.warning("  upload failed %s: %s", remote_name, e)
 
 
 def _sanitize(name: str) -> str:
