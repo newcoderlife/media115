@@ -129,7 +129,7 @@ class FileCache:
                 "DELETE FROM dir_entry WHERE parent_cid = ?", (cid,)
             )
             self._conn.executemany(
-                "INSERT INTO dir_entry "
+                "INSERT OR REPLACE INTO dir_entry "
                 "(parent_cid, name, type, node_id, size, pick_code) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 [
