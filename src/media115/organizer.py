@@ -321,7 +321,12 @@ def execute_organize_plan(
 
         pairs = _plan_scrape_upload(op, op.get("new_name"))
         if pairs:
-            upload_groups.setdefault(upload_dir, []).extend(pairs)
+            existing = upload_groups.setdefault(upload_dir, [])
+            existing_names = {name for _, name in existing}
+            for local_path, remote_name in pairs:
+                if remote_name not in existing_names:
+                    existing.append((local_path, remote_name))
+                    existing_names.add(remote_name)
 
         # Update file_map cache
         new_name = op.get("new_name")
