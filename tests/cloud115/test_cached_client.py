@@ -490,6 +490,37 @@ class TestCacheManagement:
 
 
 # ---------------------------------------------------------------------------
+# download_url / stream_url
+# ---------------------------------------------------------------------------
+
+class TestDownloadUrl:
+    def test_download_url_no_ua(self, client, mock_api):
+        mock_api.download_url.return_value = "https://cdn.115.com/file"
+        url = client.download_url("pk1")
+        assert url == "https://cdn.115.com/file"
+        mock_api.download_url.assert_called_once_with("pk1", None)
+
+    def test_download_url_with_ua(self, client, mock_api):
+        mock_api.download_url.return_value = "https://cdn.115.com/file"
+        url = client.download_url("pk1", user_agent="VLC/3.0")
+        assert url == "https://cdn.115.com/file"
+        mock_api.download_url.assert_called_once_with("pk1", "VLC/3.0")
+
+
+class TestStreamUrl:
+    def test_stream_url(self, client, mock_api):
+        mock_api.download_url.return_value = "https://cdn.115.com/file"
+        url = client.stream_url("/影音/电影/movie.mkv")
+        assert url == "https://cdn.115.com/file"
+        mock_api.download_url.assert_called_once_with("pk1", None)
+
+    def test_stream_url_with_ua(self, client, mock_api):
+        mock_api.download_url.return_value = "https://cdn.115.com/file"
+        url = client.stream_url("/影音/电影/movie.mkv", user_agent="VLC/3.0")
+        mock_api.download_url.assert_called_once_with("pk1", "VLC/3.0")
+
+
+# ---------------------------------------------------------------------------
 # auth delegation
 # ---------------------------------------------------------------------------
 

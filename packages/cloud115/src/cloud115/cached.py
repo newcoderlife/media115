@@ -208,9 +208,19 @@ class CachedClient:
 
     # ── passthrough / simple reads ───────────────────────────────────
 
-    def download_url(self, pick_code: str) -> str:
+    def download_url(self, pick_code: str, user_agent: str | None = None) -> str:
         """Get a download URL for a file (direct API call, no caching)."""
-        return self._api.download_url(pick_code)
+        get_logger().debug(
+            "API        download pick_code=%s ua=%s",
+            pick_code, (user_agent or "default")[:30],
+        )
+        return self._api.download_url(pick_code, user_agent)
+
+    def stream_url(self, path: str, user_agent: str | None = None) -> str:
+        """路径 → CDN 下载链接。一步完成 find_file + download_url。
+        proxy 和 get 命令的统一入口。"""
+        meta = self.find_file(path)
+        return self.download_url(meta["pick_code"], user_agent=user_agent)
 
     def search(self, keyword: str, path: str = "/") -> list:
         """Search for files by keyword under *path*."""
