@@ -122,11 +122,12 @@ class TestExportTree:
             assert "video files" in result.output
 
     def test_export_tree_no_client(self, runner):
+        import click
         with runner.isolated_filesystem():
             _write_env()
-            with patch("media115.cli._get_client", return_value=None):
+            with patch("media115.cli._get_client", side_effect=click.ClickException("未登录。请先运行: media115 auth")):
                 result = runner.invoke(main, ["export-tree", "/影音"])
-            assert result.exit_code == 0  # Click still returns 0
+            assert result.exit_code == 1  # ClickException exits with code 1
 
     def test_export_tree_empty_result(self, runner):
         mock_client = MagicMock()
@@ -826,6 +827,7 @@ class TestOrganizeExecute:
         assert "1 renamed" in result.output
 
     def test_organize_execute_no_client(self, runner):
+        import click
         plan = [
             {
                 "file": "test.mp4",
@@ -846,11 +848,11 @@ class TestOrganizeExecute:
 
             with (
                 patch("media115.organizer.build_organize_plan", return_value=plan),
-                patch("media115.cli._get_client", return_value=None),
+                patch("media115.cli._get_client", side_effect=click.ClickException("未登录。请先运行: media115 auth")),
             ):
                 result = runner.invoke(main, ["organize", "AV", "--execute"])
 
-        assert result.exit_code == 0
+        assert result.exit_code == 1  # ClickException exits with code 1
 
     def test_organize_execute_with_errors(self, runner):
         plan = [
@@ -1164,6 +1166,7 @@ class TestGetClient:
                 mock_cls.assert_called_once_with("test_cookie")
 
     def test_get_client_no_credentials(self, runner):
+        import click
         with patch.dict(
             os.environ,
             {"CLOUD_115_COOKIES": ""},
@@ -1171,5 +1174,8 @@ class TestGetClient:
         ):
             from media115.cli import _get_client
 
-            client = _get_client()
-        assert client is None
+            try:
+                _get_client()
+                assert False, "Expected ClickException"
+            except click.ClickException as e:
+                assert "未登录" in str(e.format_message())

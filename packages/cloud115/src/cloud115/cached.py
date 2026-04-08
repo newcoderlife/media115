@@ -155,6 +155,15 @@ class CachedClient:
         cid = self.resolve_path(path)
         return self._list_dir_by_cid(cid, label=path)
 
+    def list_dir_uncached(self, path: str) -> list:
+        """列出目录内容，直接从 API 获取，不经过缓存。
+        用于 dedup 等需要看到同名文件的场景。
+        """
+        path = _normalize(path)
+        cid = self.resolve_path(path)
+        raw_items = self._api.list_files_all(cid)
+        return [_entry_to_public(_normalize_item(item)) for item in raw_items]
+
     def _list_dir_by_cid(self, cid: str, label: str = "") -> list:
         """Internal: list directory *cid*, returning public-format dicts."""
         logger = get_logger()
@@ -580,16 +589,12 @@ class CachedClient:
     # ================================================================
 
     @classmethod
-    def qr_login(cls, app: str = "tv") -> CachedClient:
+    def qr_login(cls, app: str = "tv", listing_ttl: int = 3600, path_ttl: int = 86400) -> "CachedClient":
         """Interactive QR-code login. Returns a CachedClient with fresh cookies."""
         api = CloudAPI.qr_login(app)
-        client = cls.__new__(cls)
-        client._api = api
-        db_path = _default_db_path()
-        client._cache = FileCache(db_path)
-        client._listing_ttl = 3600
-        client._path_ttl = 86400
-        return client
+        cookies = api._cookies
+        api.close()
+        return cls(cookies, listing_ttl=listing_ttl, path_ttl=path_ttl)
 
     def check_login(self) -> bool:
         """Check if current credentials are valid."""

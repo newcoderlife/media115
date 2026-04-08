@@ -433,10 +433,20 @@ class TestSync:
         client.warm.assert_called_once_with("/影音", depth=5)
 
 
+def _mock_file_cache(stats=None):
+    """Create a mock FileCache with sensible defaults."""
+    fc = MagicMock()
+    fc.stats.return_value = stats or {
+        "path_count": 0, "dir_count": 0, "entry_count": 0,
+        "db_size_bytes": 0, "rate_limit": {},
+    }
+    return fc
+
+
 class TestCacheStatus:
     def test_cache_status(self, runner):
-        client = _mock_client()
-        with patch("media115.fs_cli._get_client", return_value=client):
+        mock_fc = _mock_file_cache()
+        with patch("media115.fs_cli._get_cache_only", return_value=mock_fc):
             result = runner.invoke(main, ["cache", "status"])
         assert result.exit_code == 0
         assert "cloud115" in result.output
@@ -444,20 +454,19 @@ class TestCacheStatus:
         assert "目录缓存" in result.output
 
     def test_cache_status_tree_cache_absent(self, runner):
-        client = _mock_client()
-        with patch("media115.fs_cli._get_client", return_value=client):
+        mock_fc = _mock_file_cache()
+        with patch("media115.fs_cli._get_cache_only", return_value=mock_fc):
             result = runner.invoke(main, ["cache", "status"])
         assert result.exit_code == 0
         assert "不存在" in result.output
 
     def test_cache_status_with_rate_limit_normal(self, runner):
-        client = _mock_client()
-        client.cache_status.return_value = {
+        mock_fc = _mock_file_cache({
             "path_count": 10, "dir_count": 5, "entry_count": 50,
             "db_size_bytes": 2048,
             "rate_limit": {"list_files": {"cooldown_until": 0, "minute_count": 3}},
-        }
-        with patch("media115.fs_cli._get_client", return_value=client):
+        })
+        with patch("media115.fs_cli._get_cache_only", return_value=mock_fc):
             result = runner.invoke(main, ["cache", "status"])
         assert result.exit_code == 0
         assert "正常" in result.output
@@ -465,13 +474,12 @@ class TestCacheStatus:
 
     def test_cache_status_with_rate_limit_cooldown(self, runner):
         import time
-        client = _mock_client()
-        client.cache_status.return_value = {
+        mock_fc = _mock_file_cache({
             "path_count": 10, "dir_count": 5, "entry_count": 50,
             "db_size_bytes": 2048,
             "rate_limit": {"list_files": {"cooldown_until": time.time() + 30, "minute_count": 20}},
-        }
-        with patch("media115.fs_cli._get_client", return_value=client):
+        })
+        with patch("media115.fs_cli._get_cache_only", return_value=mock_fc):
             result = runner.invoke(main, ["cache", "status"])
         assert result.exit_code == 0
         assert "cooldown" in result.output
@@ -497,21 +505,20 @@ class TestInit:
 class TestCacheClear:
     def test_cache_clear_confirmed(self, runner, tmp_path, monkeypatch):
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
-        client = _mock_client()
-        with patch("media115.fs_cli._get_client", return_value=client):
+        mock_fc = _mock_file_cache()
+        with patch("media115.fs_cli._get_cache_only", return_value=mock_fc):
             result = runner.invoke(main, ["cache", "clear"], input="y\n")
         assert result.exit_code == 0
-        # SQLite cache_clear() must be called
-        client.cache_clear.assert_called_once()
+        # SQLite clear_metadata() must be called
+        mock_fc.clear_metadata.assert_called_once()
 
     def test_cache_clear_lists_sqlite_in_confirmation(self, runner, tmp_path, monkeypatch):
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
-        client = _mock_client()
-        client.cache_status.return_value = {
+        mock_fc = _mock_file_cache({
             "path_count": 7, "dir_count": 3, "entry_count": 42,
             "db_size_bytes": 4096, "rate_limit": {},
-        }
-        with patch("media115.fs_cli._get_client", return_value=client):
+        })
+        with patch("media115.fs_cli._get_cache_only", return_value=mock_fc):
             result = runner.invoke(main, ["cache", "clear"], input="n\n")
         assert result.exit_code == 0
         # Confirmation dialog must mention cloud115 SQLite cache
@@ -520,13 +527,13 @@ class TestCacheClear:
 
     def test_cache_clear_cancelled(self, runner, tmp_path, monkeypatch):
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
-        client = _mock_client()
-        with patch("media115.fs_cli._get_client", return_value=client):
+        mock_fc = _mock_file_cache()
+        with patch("media115.fs_cli._get_cache_only", return_value=mock_fc):
             result = runner.invoke(main, ["cache", "clear"], input="n\n")
         assert result.exit_code == 0
         assert "取消" in result.output
-        # cache_clear() must NOT have been called
-        client.cache_clear.assert_not_called()
+        # clear_metadata() must NOT have been called
+        mock_fc.clear_metadata.assert_not_called()
 
     def test_cache_clear_does_not_remove_scrape_by_default(self, runner, tmp_path, monkeypatch):
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
