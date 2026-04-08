@@ -1,4 +1,4 @@
-"""strm-proxy tests. Mock 115 API and Jellyfin."""
+"""strm-proxy tests. Mock CachedClient and Jellyfin."""
 
 from unittest.mock import AsyncMock, MagicMock
 
@@ -10,10 +10,15 @@ from media115.proxy import create_app
 
 
 @pytest.fixture
-def app():
+def mock_client():
+    return MagicMock()
+
+
+@pytest.fixture
+def app(mock_client):
     return create_app(
         jellyfin_url="http://jellyfin:8096",
-        cloud115_client=MagicMock(),
+        client=mock_client,
     )
 
 
@@ -35,23 +40,24 @@ def _mock_async_response(json_data=None, status_code=200, content=b"", headers=N
 
 class TestPlayEndpoint:
     def test_302_redirect(self, client, app):
-        app.state.cloud115.download_url.return_value = "https://cdn.115.com/video.mkv"
+        app.state.client.download_url.return_value = "https://cdn.115.com/video.mkv"
         resp = client.get("/play/abc123", follow_redirects=False)
         assert resp.status_code == 302
         assert resp.headers["location"] == "https://cdn.115.com/video.mkv"
 
-    def test_caches_url(self, client, app):
-        app.state.cloud115.download_url.return_value = "https://cdn.115.com/video.mkv"
+    def test_no_caching(self, client, app):
+        """download_url is called every time — no in-memory cache."""
+        app.state.client.download_url.return_value = "https://cdn.115.com/video.mkv"
         client.get("/play/abc123", follow_redirects=False)
         client.get("/play/abc123", follow_redirects=False)
-        assert app.state.cloud115.download_url.call_count == 1
+        assert app.state.client.download_url.call_count == 2
 
-    def test_different_pickcode_not_cached(self, client, app):
-        app.state.cloud115.download_url.return_value = "https://cdn.115.com/a.mkv"
+    def test_different_pickcode(self, client, app):
+        app.state.client.download_url.return_value = "https://cdn.115.com/a.mkv"
         client.get("/play/aaa", follow_redirects=False)
-        app.state.cloud115.download_url.return_value = "https://cdn.115.com/b.mkv"
+        app.state.client.download_url.return_value = "https://cdn.115.com/b.mkv"
         client.get("/play/bbb", follow_redirects=False)
-        assert app.state.cloud115.download_url.call_count == 2
+        assert app.state.client.download_url.call_count == 2
 
 
 class TestVideoStreamIntercept:
@@ -65,7 +71,7 @@ class TestVideoStreamIntercept:
                 }
             ]
         }
-        app.state.cloud115.download_url.return_value = "https://cdn.115.com/real.mkv"
+        app.state.client.download_url.return_value = "https://cdn.115.com/real.mkv"
         app.state.http = AsyncMock(spec=httpx.AsyncClient)
         app.state.http.get.return_value = _mock_async_response(json_data=jellyfin_item)
 
@@ -117,18 +123,19 @@ class TestRedirectByPath:
     """Tests for /redirect/{file_path} endpoint."""
 
     def test_redirect_success(self):
-        """Mock client resolves path -> pick_code -> download URL, verify 302."""
-        cloud_client = MagicMock()
-        cloud_client.get_dir_id.return_value = "dir_123"
-        cloud_client.list_files_all.return_value = [
-            {"n": "Test Movie (2024).mkv", "fid": "fid_1", "pc": "pick_abc"},
-        ]
-        cloud_client.download_url.return_value = "https://cdn.115.com/test.mkv"
+        """CachedClient.find_file resolves path, download_url gets URL, verify 302."""
+        mock = MagicMock()
+        mock.find_file.return_value = {
+            "name": "Test Movie (2024).mkv",
+            "type": "file",
+            "fid": "fid_1",
+            "size": 1024,
+            "pick_code": "pick_abc",
+            "parent_cid": "dir_123",
+        }
+        mock.download_url.return_value = "https://cdn.115.com/test.mkv"
 
-        app = create_app(
-            jellyfin_url="http://jellyfin:8096",
-            cloud115_client=cloud_client,
-        )
+        app = create_app(jellyfin_url="http://jellyfin:8096", client=mock)
         tc = TestClient(app)
 
         resp = tc.get(
@@ -138,18 +145,15 @@ class TestRedirectByPath:
 
         assert resp.status_code == 302
         assert resp.headers["location"] == "https://cdn.115.com/test.mkv"
-        cloud_client.get_dir_id.assert_called_once()
-        cloud_client.download_url.assert_called_once_with("pick_abc")
+        mock.find_file.assert_called_once()
+        mock.download_url.assert_called_once_with("pick_abc")
 
     def test_redirect_not_found(self):
-        """When get_dir_id returns None, should return 404."""
-        cloud_client = MagicMock()
-        cloud_client.get_dir_id.return_value = None
+        """When find_file raises FileNotFoundError, should return 404."""
+        mock = MagicMock()
+        mock.find_file.side_effect = FileNotFoundError("File not found: /影音/电影/Missing/missing.mkv")
 
-        app = create_app(
-            jellyfin_url="http://jellyfin:8096",
-            cloud115_client=cloud_client,
-        )
+        app = create_app(jellyfin_url="http://jellyfin:8096", client=mock)
         tc = TestClient(app)
 
         resp = tc.get(
@@ -159,74 +163,19 @@ class TestRedirectByPath:
 
         assert resp.status_code == 404
 
-    def test_redirect_file_not_in_listing(self):
-        """Directory exists but file not found in listing, should 404."""
-        cloud_client = MagicMock()
-        cloud_client.get_dir_id.return_value = "dir_123"
-        cloud_client.list_files_all.return_value = [
-            {"n": "other_file.mkv", "fid": "fid_other", "pc": "pick_other"},
-        ]
-
-        app = create_app(
-            jellyfin_url="http://jellyfin:8096",
-            cloud115_client=cloud_client,
-        )
-        tc = TestClient(app)
-
-        resp = tc.get(
-            "/redirect/影音/电影/SomeDir/missing.mkv",
-            follow_redirects=False,
-        )
-
-        assert resp.status_code == 404
-
-    def test_redirect_caches(self):
-        """Call twice with same path, verify client only called once (caching)."""
-        cloud_client = MagicMock()
-        cloud_client.get_dir_id.return_value = "dir_123"
-        cloud_client.list_files_all.return_value = [
-            {"n": "cached.mkv", "fid": "fid_1", "pc": "pick_cached"},
-        ]
-        cloud_client.download_url.return_value = "https://cdn.115.com/cached.mkv"
-
-        app = create_app(
-            jellyfin_url="http://jellyfin:8096",
-            cloud115_client=cloud_client,
-        )
-        tc = TestClient(app)
-
-        # First request -- resolves path, populates cache
-        resp1 = tc.get(
-            "/redirect/影音/电影/CacheDir/cached.mkv",
-            follow_redirects=False,
-        )
-        assert resp1.status_code == 302
-
-        # Second request -- should use cached pick_code
-        resp2 = tc.get(
-            "/redirect/影音/电影/CacheDir/cached.mkv",
-            follow_redirects=False,
-        )
-        assert resp2.status_code == 302
-
-        # get_dir_id and list_files_all should only be called once
-        assert cloud_client.get_dir_id.call_count == 1
-        assert cloud_client.list_files_all.call_count == 1
-        # download_url may be called once (URL also cached by _get_cached_url)
-        assert cloud_client.download_url.call_count == 1
-
     def test_redirect_no_pick_code(self):
         """File found but has no pick_code, should 404."""
-        cloud_client = MagicMock()
-        cloud_client.get_dir_id.return_value = "dir_123"
-        cloud_client.list_files_all.return_value = [
-            {"n": "no_pc.mkv", "fid": "fid_1", "pc": ""},
-        ]
+        mock = MagicMock()
+        mock.find_file.return_value = {
+            "name": "no_pc.mkv",
+            "type": "file",
+            "fid": "fid_1",
+            "size": 0,
+            "pick_code": "",
+            "parent_cid": "dir_123",
+        }
 
-        app = create_app(
-            jellyfin_url="http://jellyfin:8096",
-            cloud115_client=cloud_client,
-        )
+        app = create_app(jellyfin_url="http://jellyfin:8096", client=mock)
         tc = TestClient(app)
 
         resp = tc.get(
@@ -239,13 +188,10 @@ class TestRedirectByPath:
 
     def test_redirect_exception(self):
         """When client raises, should return 500."""
-        cloud_client = MagicMock()
-        cloud_client.get_dir_id.side_effect = Exception("connection refused")
+        mock = MagicMock()
+        mock.find_file.side_effect = Exception("connection refused")
 
-        app = create_app(
-            jellyfin_url="http://jellyfin:8096",
-            cloud115_client=cloud_client,
-        )
+        app = create_app(jellyfin_url="http://jellyfin:8096", client=mock)
         tc = TestClient(app)
 
         resp = tc.get(

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import time
 from contextlib import asynccontextmanager
 from urllib.parse import unquote
 
@@ -11,11 +10,10 @@ import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse, Response
 
-CACHE_TTL = 300  # 5 minutes
 EXCLUDED_HEADERS = {"host", "transfer-encoding", "content-encoding", "content-length"}
 
 
-def create_app(jellyfin_url: str, cloud115_client) -> FastAPI:
+def create_app(jellyfin_url: str, client) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.http = httpx.AsyncClient(timeout=30)
@@ -24,13 +22,11 @@ def create_app(jellyfin_url: str, cloud115_client) -> FastAPI:
 
     app = FastAPI(title="115 strm-proxy", lifespan=lifespan)
     app.state.jellyfin_url = jellyfin_url.rstrip("/")
-    app.state.cloud115 = cloud115_client
-    app.state.url_cache: dict[str, tuple[str, float]] = {}
-    app.state.path_cache: dict[str, tuple[str, float]] = {}  # path -> (pick_code, ts)
+    app.state.client = client
 
     @app.get("/play/{pick_code}")
     async def play_redirect(pick_code: str):
-        url = _get_cached_url(app, pick_code)
+        url = app.state.client.download_url(pick_code)
         return RedirectResponse(url=url, status_code=302)
 
     @app.get("/redirect/{file_path:path}")
@@ -45,41 +41,15 @@ def create_app(jellyfin_url: str, cloud115_client) -> FastAPI:
         if not decoded_path.startswith("/"):
             decoded_path = "/" + decoded_path
 
-        # Split into parent dir path and filename
-        parts = decoded_path.rsplit("/", 1)
-        if len(parts) != 2:
-            return Response(content="Invalid path", status_code=400)
-        dir_path, filename = parts
-
-        # Check path cache for pick_code
-        cache = app.state.path_cache
-        now = time.time()
-        cache_key = decoded_path
-        if cache_key in cache:
-            pick_code, ts = cache[cache_key]
-            if now - ts < CACHE_TTL:
-                url = _get_cached_url(app, pick_code)
-                return RedirectResponse(url=url, status_code=302)
-
-        # Resolve directory to get file listing
-        client = app.state.cloud115
         try:
-            dir_id = client.get_dir_id(dir_path)
-            if not dir_id:
-                return Response(content=f"Directory not found: {dir_path}", status_code=404)
-
-            files = client.list_files_all(dir_id=dir_id)
-            for f in files:
-                name = f.get("fn", f.get("n", ""))
-                if name == filename and "fid" in f:
-                    pick_code = f.get("pc", "")
-                    if not pick_code:
-                        return Response(content=f"No pick_code for: {filename}", status_code=404)
-                    cache[cache_key] = (pick_code, now)
-                    url = _get_cached_url(app, pick_code)
-                    return RedirectResponse(url=url, status_code=302)
-
-            return Response(content=f"File not found: {filename}", status_code=404)
+            info = app.state.client.find_file(decoded_path)
+            pick_code = info.get("pick_code", "")
+            if not pick_code:
+                return Response(content=f"No pick_code for: {decoded_path}", status_code=404)
+            url = app.state.client.download_url(pick_code)
+            return RedirectResponse(url=url, status_code=302)
+        except FileNotFoundError as e:
+            return Response(content=str(e), status_code=404)
         except Exception as e:
             return Response(content=f"Error: {e}", status_code=500)
 
@@ -119,7 +89,7 @@ def create_app(jellyfin_url: str, cloud115_client) -> FastAPI:
             ms_path = ms.get("Path", "")
             pick_code = _extract_pick_code(ms_path)
             if pick_code:
-                url = _get_cached_url(app, pick_code)
+                url = app.state.client.download_url(pick_code)
                 return RedirectResponse(url=url, status_code=302)
 
         return await _proxy_to_jellyfin(app, request)
@@ -129,19 +99,6 @@ def create_app(jellyfin_url: str, cloud115_client) -> FastAPI:
         return await _proxy_to_jellyfin(app, request)
 
     return app
-
-
-def _get_cached_url(app: FastAPI, pick_code: str) -> str:
-    cache = app.state.url_cache
-    now = time.time()
-    if pick_code in cache:
-        url, ts = cache[pick_code]
-        if now - ts < CACHE_TTL:
-            return url
-
-    url = app.state.cloud115.download_url(pick_code)
-    cache[pick_code] = (url, now)
-    return url
 
 
 def _extract_pick_code(strm_url: str) -> str | None:

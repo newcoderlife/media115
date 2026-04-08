@@ -1,6 +1,9 @@
-"""115 cloud client (cookie mode only).
+"""115 cloud API client (cookie mode only).
 
-Cookie mode: works immediately, no approval needed. Based on py115/p115client.
+Pure API layer — every public method maps to one 115 HTTP endpoint.
+Higher-level caching / path-resolution lives in CachedClient.
+
+Based on py115/p115client.
 """
 
 from __future__ import annotations
@@ -14,10 +17,10 @@ from urllib.parse import urlencode
 
 import httpx
 
-from media115._crypto import generate_m115_key, m115_decode, m115_encode
-from media115.cache import _cache_dir
-from media115.log import get_logger
-from media115.rate_limit import RateLimiter, _read_state, _write_state
+from cloud115.cache import FileCache, _default_db_path
+from cloud115.crypto import generate_m115_key, m115_decode, m115_encode
+from cloud115.log import get_logger
+from cloud115.rate_limit import RateLimiter
 
 # API endpoints
 WEB_API = "https://webapi.115.com"
@@ -26,8 +29,8 @@ QR_API = "https://qrcodeapi.115.com"
 PASSPORT_API = "https://passportapi.115.com"
 
 
-class Cloud115Client:
-    """115 client (cookie mode). Use `from_cookies` to create."""
+class CloudAPI:
+    """115 API client (cookie mode). Use `from_cookies` to create."""
 
     _USER_AGENT = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -35,7 +38,7 @@ class Cloud115Client:
         "Chrome/130.0.0.0 Safari/537.36"
     )
 
-    def __init__(self):
+    def __init__(self, cookies: str = "", cache_dir: str | Path | None = None):
         self._http = httpx.Client(
             timeout=30,
             headers={
@@ -44,15 +47,23 @@ class Cloud115Client:
                 "Referer": "https://115.com/",
             },
         )
-        self._env_path = Path.cwd() / ".env"
-        self._limiter = RateLimiter(qps=0.5, qpm=20, state_path=_cache_dir() / "rate_limit.json")
-        self._download_limiter = RateLimiter(qps=0.5, qpm=20, state_path=_cache_dir() / "download_rate_limit.json")
+        db_path = Path(cache_dir) / "cache.db" if cache_dir else _default_db_path()
+        self._file_cache = FileCache(db_path)
+        self._limiter = RateLimiter("api", qps=0.5, qpm=20, cache=self._file_cache)
+        self._download_limiter = RateLimiter("download", qps=0.5, qpm=20, cache=self._file_cache)
         # Cookie mode
-        self._cookies: str = ""
+        self._cookies: str = cookies
         self._user_id: str = ""
+        if cookies:
+            for part in cookies.split(";"):
+                part = part.strip()
+                if part.startswith("UID="):
+                    self._user_id = part[4:].split("_")[0]
+                    break
 
     def close(self):
         self._http.close()
+        self._file_cache.close()
 
     def __enter__(self):
         return self
@@ -63,26 +74,19 @@ class Cloud115Client:
     # ── Factory methods ──────────────────────────────────────────────
 
     @classmethod
-    def from_cookies(cls, cookies: str) -> Cloud115Client:
+    def from_cookies(cls, cookies: str, cache_dir: str | Path | None = None) -> CloudAPI:
         """Create client from cookie string (UID=...; CID=...; SEID=...)."""
-        client = cls()
-        client._cookies = cookies
-        for part in cookies.split(";"):
-            part = part.strip()
-            if part.startswith("UID="):
-                client._user_id = part[4:].split("_")[0]
-                break
-        return client
+        return cls(cookies=cookies, cache_dir=cache_dir)
 
     @classmethod
-    def from_cookie_file(cls, path: Path) -> Cloud115Client:
+    def from_cookie_file(cls, path: Path, cache_dir: str | Path | None = None) -> CloudAPI:
         """Load cookies from a text file."""
-        return cls.from_cookies(path.read_text().strip())
+        return cls.from_cookies(path.read_text().strip(), cache_dir=cache_dir)
 
     # ── QR code login ────────────────────────────────────────────────
 
     @classmethod
-    def qr_login(cls, app: str = "tv") -> Cloud115Client:
+    def qr_login(cls, app: str = "tv") -> CloudAPI:
         """Interactive QR code login. Returns a client with fresh cookies."""
         http = httpx.Client(timeout=35)
 
@@ -243,7 +247,7 @@ class Cloud115Client:
     ) -> dict:
         (limiter or self._limiter).acquire()
         logger = get_logger()
-        # 构建可读的日志：方法 + 路径 + 关键参数
+        # Build readable log: method + path + key params
         api_path = url.split(".com")[-1][:40]
         key_params = ""
         if params:
@@ -336,53 +340,8 @@ class Cloud115Client:
             if len(batch) < 1000:
                 break
             offset += len(batch)
-        get_logger().debug("list_files_all cid=%s → %d items (%d pages)", dir_id, len(all_files), pages)
+        get_logger().debug("list_files_all cid=%s -> %d items (%d pages)", dir_id, len(all_files), pages)
         return all_files
-
-    def list_files_recursive(
-        self, dir_id: str = "0", max_depth: int = 5, _depth: int = 0
-    ) -> list[dict]:
-        """Recursively list all files and directories."""
-        if _depth > max_depth:
-            return []
-        result = []
-        items = self.list_files_all(dir_id=dir_id)
-        for item in items:
-            is_dir = "fid" not in item
-            item["_is_dir"] = is_dir
-            item["_parent_id"] = dir_id
-            result.append(item)
-            if is_dir:
-                child_id = item.get("cid", item.get("fid", ""))
-                if child_id:
-                    result.extend(
-                        self.list_files_recursive(
-                            dir_id=str(child_id),
-                            max_depth=max_depth,
-                            _depth=_depth + 1,
-                        )
-                    )
-        return result
-
-    def resolve_path(self, path: str) -> str:
-        """Resolve a path like '/影音/电影/' to a dir_id."""
-        parts = [p for p in path.strip("/").split("/") if p]
-        if not parts:
-            return "0"
-        current_id = "0"
-        for part in parts:
-            items = self.list_files_all(dir_id=current_id)
-            found = False
-            for item in items:
-                name = item.get("fn", item.get("n", ""))
-                is_dir = "fid" not in item
-                if is_dir and name == part:
-                    current_id = str(item.get("cid", item.get("fid", "")))
-                    found = True
-                    break
-            if not found:
-                raise FileNotFoundError(f"Directory not found: '{part}' in path '{path}'")
-        return current_id
 
     def get_dir_id(self, path: str) -> str | None:
         """Get directory ID by absolute path. One API call, very reliable."""
@@ -393,9 +352,9 @@ class Cloud115Client:
         )
         if result.get("state"):
             cid = str(result.get("id", ""))
-            get_logger().debug("get_dir_id %s → cid=%s", path, cid)
+            get_logger().debug("get_dir_id %s -> cid=%s", path, cid)
             return cid
-        get_logger().debug("get_dir_id %s → not found", path)
+        get_logger().debug("get_dir_id %s -> not found", path)
         return None
 
     def search(self, keyword: str, dir_id: str = "0") -> list[dict]:
@@ -405,7 +364,7 @@ class Cloud115Client:
             params={"search_value": keyword, "cid": dir_id, "format": "json"},
         )
         data = result.get("data", [])
-        get_logger().debug("search '%s' in cid=%s → %d results", keyword, dir_id, len(data))
+        get_logger().debug("search '%s' in cid=%s -> %d results", keyword, dir_id, len(data))
         return data
 
     def download_url(self, pick_code: str) -> str:
@@ -445,7 +404,7 @@ class Cloud115Client:
             data={"pid": parent_id, "cname": name},
         )
         new_cid = result.get("cid", result.get("aid", ""))
-        get_logger().debug("mkdir '%s' in pid=%s → cid=%s", name, parent_id, new_cid)
+        get_logger().debug("mkdir '%s' in pid=%s -> cid=%s", name, parent_id, new_cid)
         return result
 
     def move(self, file_ids: list[str], target_dir_id: str) -> dict:
@@ -453,7 +412,7 @@ class Cloud115Client:
         for i, fid in enumerate(file_ids):
             data[f"fid[{i}]"] = fid
         result = self._cookie_request("POST", f"{WEB_API}/files/move", data=data)
-        get_logger().debug("move %d files → pid=%s", len(file_ids), target_dir_id)
+        get_logger().debug("move %d files -> pid=%s", len(file_ids), target_dir_id)
         return result
 
     def rename(self, file_id: str, new_name: str) -> dict:
@@ -462,7 +421,7 @@ class Cloud115Client:
             f"{WEB_API}/files/edit",
             data={"fid": file_id, "file_name": new_name},
         )
-        get_logger().debug("rename fid=%s → '%s'", file_id, new_name)
+        get_logger().debug("rename fid=%s -> '%s'", file_id, new_name)
         return result
 
     def delete(self, file_ids: list[str]) -> dict:
@@ -529,13 +488,13 @@ class Cloud115Client:
                 time.sleep(3 * (attempt + 1))
 
         if oss_resp.status_code == 200:
-            logger.debug("upload '%s' (%d bytes) → dir=%s", fname, len(content), target_dir_id)
+            logger.debug("upload '%s' (%d bytes) -> dir=%s", fname, len(content), target_dir_id)
             return oss_resp.json().get("data")
         logger.warning("115 upload %s failed: HTTP %d", fname, oss_resp.status_code)
         return None
 
     def upload_info(self) -> dict:
-        """获取上传所需的 user_id 和 user_key。"""
+        """Get user_id and user_key needed for uploads."""
         self._limiter.acquire()
         resp = self._http.get(
             f"{PRO_API}/app/uploadinfo",
@@ -556,13 +515,13 @@ class Cloud115Client:
         file_sha1: str,
         file_stream=None,
     ) -> dict:
-        """Cookie 模式秒传。
+        """Cookie-mode rapid upload (instant upload if 115 already has the file).
 
-        file_stream: 可选的文件流（seekable），用于 sign_check 验证。
-        返回 {"status": 2, "pickcode": "..."} 表示成功，
-               {"status": 1} 表示 115 上没有此文件。
+        file_stream: optional seekable file stream for sign_check verification.
+        Returns {"status": 2, "pickcode": "..."} on success,
+                {"status": 1} when 115 does not have this file.
         """
-        from media115._ec115 import EC115Cipher, TOKEN_SALT
+        from cloud115.ec115 import EC115Cipher, TOKEN_SALT
 
         info = self.upload_info()
         user_id = info["user_id"]
@@ -576,7 +535,7 @@ class Cloud115Client:
         sign_key = ""
         sign_val = ""
 
-        for attempt in range(3):  # 最多重试 3 次（sign_check）
+        for attempt in range(3):
             get_logger().debug("115 rapid_upload %s (attempt %d)", filename, attempt)
             timestamp = str(int(time.time()))
 
@@ -618,7 +577,7 @@ class Cloud115Client:
                 form["sign_key"] = sign_key
                 form["sign_val"] = sign_val
 
-            # EC115 加密请求
+            # EC115 encrypted request
             form_data = urlencode(form).encode()
             encrypted = ec.encode(form_data)
 
@@ -634,15 +593,15 @@ class Cloud115Client:
             )
             resp.raise_for_status()
 
-            # EC115 解密响应
+            # EC115 decrypted response
             result = json.loads(ec.decode(resp.content))
 
             status = result.get("status")
             if status == 2:
-                get_logger().debug("rapid_upload '%s' → 秒传成功 pickcode=%s", filename, result.get("pickcode", ""))
+                get_logger().debug("rapid_upload '%s' -> success pickcode=%s", filename, result.get("pickcode", ""))
                 return {"status": 2, "pickcode": result.get("pickcode", "")}
             elif status == 7 and result.get("statuscode") == 701 and file_stream:
-                # sign_check: 计算指定范围 SHA1
+                # sign_check: compute SHA1 for the requested byte range
                 sign_key = result["sign_key"]
                 sign_range = result["sign_check"]
                 start_s, end_s = sign_range.split("-")
@@ -653,11 +612,11 @@ class Cloud115Client:
                 ).hexdigest().upper()
                 continue
             else:
-                get_logger().debug("rapid_upload '%s' → status=%s (需要实际上传)", filename, result.get("status"))
+                get_logger().debug("rapid_upload '%s' -> status=%s (needs actual upload)", filename, result.get("status"))
                 return {"status": result.get("status", 0)}
 
-        get_logger().debug("rapid_upload '%s' → 超过重试次数", filename)
-        return {"status": 0}  # 超过重试次数
+        get_logger().debug("rapid_upload '%s' -> exceeded retries", filename)
+        return {"status": 0}
 
     def batch_rename(self, renames: dict[str, str]) -> dict:
         """Rename multiple files in one API call.
@@ -735,7 +694,7 @@ class Cloud115Client:
                 self.delete([str(file_id)])
 
         text = dl.content.decode("utf-16-le", errors="replace")
-        get_logger().debug("export_tree cid=%s → %d lines", dir_id, text.count("\n"))
+        get_logger().debug("export_tree cid=%s -> %d lines", dir_id, text.count("\n"))
         return text
 
 

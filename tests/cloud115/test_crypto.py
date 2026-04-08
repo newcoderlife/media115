@@ -4,7 +4,7 @@ import base64
 
 import pytest
 
-from media115._crypto import (
+from cloud115.crypto import (
     _rsa_decrypt,
     _rsa_encrypt,
     _xor_derive_key,

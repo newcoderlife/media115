@@ -633,16 +633,17 @@ class TestScrapeAvWritesFileMap:
 
 
 def make_mock_client():
+    """Create a mock CachedClient with sensible defaults."""
     client = MagicMock()
-    client.get_dir_id.return_value = "cat_cid_1"
-    client.list_files_all.return_value = [
-        {"n": "OldDir", "cid": "dir_cid_1"},  # subdirectory
+    client.resolve_path.return_value = "cat_cid_1"
+    client.list_dir.return_value = [
+        {"name": "OldDir", "type": "dir", "cid": "dir_cid_1"},
     ]
-    client.mkdir.return_value = {"cid": "new_cid_1"}
-    client.move.return_value = True
-    client.batch_rename.return_value = True
-    client.list_files.return_value = []
-    client.delete.return_value = True
+    client.mkdir.return_value = "new_cid_1"
+    client.move.return_value = None
+    client.batch_rename.return_value = None
+    client.delete.return_value = None
+    client.upload.return_value = None
     return client
 
 
@@ -682,17 +683,15 @@ class TestExecuteOrganizePlanBasic:
         monkeypatch.setattr(_cache, "put", lambda *a, **kw: None)
 
         client = make_mock_client()
-        # Phase 1: category listing returns the old subdirectory
-        # Phase 1 cont: list files inside OldDir to find the file's fid
-        client.list_files_all.side_effect = [
-            # First call: category dir listing (subdirs)
-            [{"n": "OldDir", "cid": "dir_cid_1"}],
-            # Second call: list files inside OldDir
-            [{"n": "old.mkv", "fid": "fid_1"}],
-            # Third call: Phase 6 refresh category listing
-            [{"n": "OldDir", "cid": "dir_cid_1"}],
-            # Fourth call: Phase 6 list OldDir contents (no videos)
-            [{"n": "poster.jpg", "fid": "fid_poster"}],
+        # Phase 1: list_dir for parent dir returns the file
+        # Phase 6: list_dir for category + OldDir cleanup
+        client.list_dir.side_effect = [
+            # First call: list files inside OldDir (Phase 1)
+            [{"name": "old.mkv", "type": "file", "fid": "fid_1"}],
+            # Second call: Phase 6 category listing
+            [{"name": "OldDir", "type": "dir", "cid": "dir_cid_1"}],
+            # Third call: Phase 6 list OldDir contents (no videos)
+            [{"name": "poster.jpg", "type": "file", "fid": "fid_poster"}],
         ]
 
         # Stub _upload_scrape_output to avoid filesystem access
@@ -703,9 +702,13 @@ class TestExecuteOrganizePlanBasic:
 
         assert len(results) == 1
         assert results[0]["status"] == "ok"
-        client.mkdir.assert_called_once_with("cat_cid_1", "New Title (2024)")
-        client.move.assert_called_once_with(["fid_1"], "new_cid_1")
-        client.batch_rename.assert_called_once_with({"fid_1": "New Title (2024).mkv"})
+        client.mkdir.assert_called_once_with("/影音/电影/New Title (2024)")
+        client.move.assert_called_once_with(
+            ["/影音/电影/OldDir/old.mkv"], "/影音/电影/New Title (2024)"
+        )
+        client.batch_rename.assert_called_once_with(
+            [("/影音/电影/New Title (2024)/old.mkv", "New Title (2024).mkv")]
+        )
 
 
 class TestExecuteOrganizePlanRenameOnly:
@@ -719,9 +722,9 @@ class TestExecuteOrganizePlanRenameOnly:
         monkeypatch.setattr(_cache, "put", lambda *a, **kw: None)
 
         client = make_mock_client()
-        client.list_files_all.side_effect = [
-            [{"n": "OldDir", "cid": "dir_cid_1"}],
-            [{"n": "old.mkv", "fid": "fid_1"}],
+        client.list_dir.side_effect = [
+            # Phase 1: list files inside OldDir
+            [{"name": "old.mkv", "type": "file", "fid": "fid_1"}],
         ]
         monkeypatch.setattr("media115.organizer._upload_scrape_output", lambda *a, **kw: None)
 
@@ -732,13 +735,15 @@ class TestExecuteOrganizePlanRenameOnly:
         assert results[0]["status"] == "ok"
         client.mkdir.assert_not_called()
         client.move.assert_not_called()
-        client.batch_rename.assert_called_once_with({"fid_1": "New Title (2024).mkv"})
+        client.batch_rename.assert_called_once_with(
+            [("/影音/电影/OldDir/old.mkv", "New Title (2024).mkv")]
+        )
 
 
 class TestExecuteOrganizePlanMoveFailure:
     """test_execute_organize_plan_move_failure: move raises, tracked as failed."""
 
-    def test_failed_fids_tracked(self, monkeypatch):
+    def test_failed_ops_tracked(self, monkeypatch):
         from media115 import cache as _cache
         from media115.organizer import execute_organize_plan
 
@@ -746,13 +751,13 @@ class TestExecuteOrganizePlanMoveFailure:
         monkeypatch.setattr(_cache, "put", lambda *a, **kw: None)
 
         client = make_mock_client()
-        client.list_files_all.side_effect = [
-            [{"n": "OldDir", "cid": "dir_cid_1"}],
-            [{"n": "old.mkv", "fid": "fid_1"}],
-            # Phase 6: refreshed category listing
-            [{"n": "OldDir", "cid": "dir_cid_1"}],
-            # Phase 6: OldDir contents (still has the file since move failed)
-            [{"n": "old.mkv", "fid": "fid_1"}],
+        client.list_dir.side_effect = [
+            # Phase 1: list files inside OldDir
+            [{"name": "old.mkv", "type": "file", "fid": "fid_1"}],
+            # Phase 6: category listing (OldDir still has video since move failed)
+            [{"name": "OldDir", "type": "dir", "cid": "dir_cid_1"}],
+            # Phase 6: OldDir contents
+            [{"name": "old.mkv", "type": "file", "fid": "fid_1"}],
         ]
         client.move.side_effect = Exception("115 API error")
 
@@ -779,9 +784,9 @@ class TestExecuteOrganizePlanRenameFailure:
         monkeypatch.setattr(_cache, "put", lambda *a, **kw: None)
 
         client = make_mock_client()
-        client.list_files_all.side_effect = [
-            [{"n": "OldDir", "cid": "dir_cid_1"}],
-            [{"n": "old.mkv", "fid": "fid_1"}],
+        client.list_dir.side_effect = [
+            # Phase 1: list files inside OldDir
+            [{"name": "old.mkv", "type": "file", "fid": "fid_1"}],
         ]
         # No new_folder so no move happens; only rename
         client.batch_rename.side_effect = Exception("rename API error")
@@ -807,15 +812,13 @@ class TestExecuteOrganizePlanPhase6Cleanup:
         monkeypatch.setattr(_cache, "put", lambda *a, **kw: None)
 
         client = make_mock_client()
-        client.list_files_all.side_effect = [
-            # Phase 1: category listing
-            [{"n": "OldDir", "cid": "dir_cid_1"}],
+        client.list_dir.side_effect = [
             # Phase 1: files in OldDir
-            [{"n": "old.mkv", "fid": "fid_1"}],
-            # Phase 6: refreshed category listing
-            [{"n": "OldDir", "cid": "dir_cid_1"}],
+            [{"name": "old.mkv", "type": "file", "fid": "fid_1"}],
+            # Phase 6: category listing
+            [{"name": "OldDir", "type": "dir", "cid": "dir_cid_1"}],
             # Phase 6: OldDir contents -- only metadata, no video
-            [{"n": "poster.jpg", "fid": "fid_poster"}],
+            [{"name": "poster.jpg", "type": "file", "fid": "fid_poster"}],
         ]
         monkeypatch.setattr("media115.organizer._upload_scrape_output", lambda *a, **kw: None)
 
@@ -823,7 +826,7 @@ class TestExecuteOrganizePlanPhase6Cleanup:
         results = execute_organize_plan(ops, client, "影音/电影")
 
         assert results[0]["status"] == "ok"
-        client.delete.assert_called_once_with(["dir_cid_1"])
+        client.delete.assert_called_once_with(["/影音/电影/OldDir"])
 
 
 class TestExecuteOrganizePlanPhase6SkipVideo:
@@ -837,13 +840,13 @@ class TestExecuteOrganizePlanPhase6SkipVideo:
         monkeypatch.setattr(_cache, "put", lambda *a, **kw: None)
 
         client = make_mock_client()
-        client.list_files_all.side_effect = [
-            [{"n": "OldDir", "cid": "dir_cid_1"}],
-            [{"n": "old.mkv", "fid": "fid_1"}],
-            # Phase 6: refreshed listing
-            [{"n": "OldDir", "cid": "dir_cid_1"}],
+        client.list_dir.side_effect = [
+            # Phase 1: list files inside OldDir
+            [{"name": "old.mkv", "type": "file", "fid": "fid_1"}],
+            # Phase 6: category listing
+            [{"name": "OldDir", "type": "dir", "cid": "dir_cid_1"}],
             # Phase 6: OldDir still has a video file
-            [{"n": "other_video.mp4", "fid": "fid_other"}],
+            [{"name": "other_video.mp4", "type": "file", "fid": "fid_other"}],
         ]
         monkeypatch.setattr("media115.organizer._upload_scrape_output", lambda *a, **kw: None)
 
@@ -865,10 +868,9 @@ class TestExecuteOrganizePlanNotFound:
         monkeypatch.setattr(_cache, "put", lambda *a, **kw: None)
 
         client = make_mock_client()
-        client.list_files_all.side_effect = [
-            [{"n": "OldDir", "cid": "dir_cid_1"}],
+        client.list_dir.side_effect = [
             # Files in OldDir -- does NOT include old.mkv
-            [{"n": "different.mkv", "fid": "fid_other"}],
+            [{"name": "different.mkv", "type": "file", "fid": "fid_other"}],
         ]
         monkeypatch.setattr("media115.organizer._upload_scrape_output", lambda *a, **kw: None)
 
@@ -881,13 +883,13 @@ class TestExecuteOrganizePlanNotFound:
 
 
 class TestExecuteOrganizePlanCategoryNotFound:
-    """test_execute_organize_plan_category_not_found: get_dir_id returns None."""
+    """test_execute_organize_plan_category_not_found: resolve_path raises."""
 
     def test_all_ops_error(self, monkeypatch):
         from media115.organizer import execute_organize_plan
 
         client = make_mock_client()
-        client.get_dir_id.return_value = None
+        client.resolve_path.side_effect = FileNotFoundError("not found")
 
         ops = [
             _make_op(),
@@ -912,9 +914,6 @@ class TestExecuteOrganizePlanSkipAction:
         monkeypatch.setattr(_cache, "put", lambda *a, **kw: None)
 
         client = make_mock_client()
-        client.list_files_all.side_effect = [
-            [{"n": "OldDir", "cid": "dir_cid_1"}],
-        ]
         monkeypatch.setattr("media115.organizer._upload_scrape_output", lambda *a, **kw: None)
 
         ops = [_make_op(action="skip", new_folder=None, new_name=None, reason="already correct")]
@@ -924,41 +923,8 @@ class TestExecuteOrganizePlanSkipAction:
         assert results[0]["status"] == "skipped"
 
 
-class TestExecuteOrganizePlanMkdirFallback:
-    """test_execute_organize_plan_mkdir_fallback: mkdir returns no cid, fallback to get_dir_id."""
-
-    def test_mkdir_no_cid_fallback(self, monkeypatch):
-        from media115 import cache as _cache
-        from media115.organizer import execute_organize_plan
-
-        monkeypatch.setattr(_cache, "get", lambda *a, **kw: None)
-        monkeypatch.setattr(_cache, "put", lambda *a, **kw: None)
-
-        client = make_mock_client()
-        # mkdir returns empty cid, forcing fallback
-        client.mkdir.return_value = {}
-        # get_dir_id: first call returns category_cid, second call returns
-        # the existing folder cid for the fallback
-        client.get_dir_id.side_effect = ["cat_cid_1", "existing_cid_1"]
-        client.list_files_all.side_effect = [
-            [{"n": "OldDir", "cid": "dir_cid_1"}],
-            [{"n": "old.mkv", "fid": "fid_1"}],
-            # Phase 6: refreshed listing
-            [{"n": "OldDir", "cid": "dir_cid_1"}],
-            [{"n": "poster.jpg", "fid": "fid_poster"}],
-        ]
-        monkeypatch.setattr("media115.organizer._upload_scrape_output", lambda *a, **kw: None)
-
-        ops = [_make_op()]
-        results = execute_organize_plan(ops, client, "影音/电影")
-
-        assert results[0]["status"] == "ok"
-        # Move should use the fallback cid
-        client.move.assert_called_once_with(["fid_1"], "existing_cid_1")
-
-
 class TestExecuteOrganizePlanMkdirException:
-    """test_execute_organize_plan_mkdir_exception: mkdir raises, fallback to get_dir_id."""
+    """test_execute_organize_plan_mkdir_exception: mkdir raises, fallback to resolve_path."""
 
     def test_mkdir_exception_fallback(self, monkeypatch):
         from media115 import cache as _cache
@@ -969,13 +935,15 @@ class TestExecuteOrganizePlanMkdirException:
 
         client = make_mock_client()
         client.mkdir.side_effect = Exception("already exists")
-        client.get_dir_id.side_effect = ["cat_cid_1", "existing_cid_1"]
-        client.list_files_all.side_effect = [
-            [{"n": "OldDir", "cid": "dir_cid_1"}],
-            [{"n": "old.mkv", "fid": "fid_1"}],
-            # Phase 6
-            [{"n": "OldDir", "cid": "dir_cid_1"}],
-            [{"n": "poster.jpg", "fid": "fid_poster"}],
+        # resolve_path succeeds for both category and the target folder
+        client.resolve_path.return_value = "existing_cid_1"
+        client.list_dir.side_effect = [
+            # Phase 1: files in OldDir
+            [{"name": "old.mkv", "type": "file", "fid": "fid_1"}],
+            # Phase 6: category listing
+            [{"name": "OldDir", "type": "dir", "cid": "dir_cid_1"}],
+            # Phase 6: OldDir contents
+            [{"name": "poster.jpg", "type": "file", "fid": "fid_poster"}],
         ]
         monkeypatch.setattr("media115.organizer._upload_scrape_output", lambda *a, **kw: None)
 
@@ -983,7 +951,10 @@ class TestExecuteOrganizePlanMkdirException:
         results = execute_organize_plan(ops, client, "影音/电影")
 
         assert results[0]["status"] == "ok"
-        client.move.assert_called_once_with(["fid_1"], "existing_cid_1")
+        # Move uses path-based API
+        client.move.assert_called_once_with(
+            ["/影音/电影/OldDir/old.mkv"], "/影音/电影/New Title (2024)"
+        )
 
 
 class TestSanitize:
@@ -1027,17 +998,24 @@ class TestUploadScrapeOutput:
         poster_file.write_bytes(b"\xff\xd8fake-jpg")
 
         client = MagicMock()
+        # list_dir returns empty (no existing files to delete)
+        client.list_dir.return_value = []
         op = {
             "file": "old.mkv",
             "parent": "影音/电影/OldDir",
             "new_name": "New Title (2024).mkv",
         }
 
-        _upload_scrape_output(client, op, "target_cid_1", "New Title (2024).mkv")
+        target_dir = "/影音/电影/New Title (2024)"
+        _upload_scrape_output(client, op, target_dir, "New Title (2024).mkv")
 
-        assert client.upload_file.call_count == 2
+        assert client.upload.call_count == 2
         # Collect the remote names used in upload calls
-        remote_names = {call.args[2] for call in client.upload_file.call_args_list}
+        upload_calls = client.upload.call_args_list
+        remote_names = set()
+        for call in upload_calls:
+            # upload(local_path, remote_dir, filename)
+            remote_names.add(call.args[2] if len(call.args) > 2 else call.kwargs.get("filename", ""))
         # NFO should be renamed to match the new video filename
         assert "New Title (2024).nfo" in remote_names
         # Poster keeps its original name
@@ -1049,6 +1027,6 @@ class TestUploadScrapeOutput:
         # No scrape_output directory exists in the isolated XDG cache
         client = MagicMock()
         op = {"file": "old.mkv", "parent": "影音/电影/OldDir"}
-        _upload_scrape_output(client, op, "target_cid_1", "New Title (2024).mkv")
+        _upload_scrape_output(client, op, "/影音/电影/Target", "New Title (2024).mkv")
 
-        client.upload_file.assert_not_called()
+        client.upload.assert_not_called()
