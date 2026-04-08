@@ -154,7 +154,7 @@ class FileCache:
         rows = self._conn.execute(
             "SELECT name, type, node_id, size, pick_code "
             "FROM dir_entry WHERE parent_cid = ? "
-            "ORDER BY type DESC, name",
+            "ORDER BY CASE WHEN type='dir' THEN 0 ELSE 1 END, name",
             (cid,),
         ).fetchall()
         return [dict(r) for r in rows]

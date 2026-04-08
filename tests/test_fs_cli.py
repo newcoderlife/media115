@@ -26,7 +26,7 @@ def _mock_client(items=None):
         "size": 1000, "pick_code": "pc1",
     }
     c.search.return_value = []
-    c.cache_status.return_value = {"paths": 0, "dirs": 0}
+    c.cache_status.return_value = {"path_count": 0, "dir_count": 0, "entry_count": 0, "db_size_bytes": 0}
     return c
 
 
