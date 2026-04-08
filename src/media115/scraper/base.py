@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import httpx
 
-from media115.cache import _cache_dir
-from media115.rate_limit import RateLimiter
+from cloud115.rate_limit import RateLimiter
 
 DEFAULT_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -20,8 +19,7 @@ class ThrottledClient:
 
     def __init__(self, name: str = "scraper", qps: float = 0.8, qpm: int = 40, timeout: int = DEFAULT_TIMEOUT):
         self._limiter = RateLimiter(
-            qps=qps, qpm=qpm,
-            state_path=_cache_dir() / f"rate_limit_{name}.json",
+            name, qps=qps, qpm=qpm
         )
         self._http = httpx.Client(timeout=timeout, headers={"User-Agent": DEFAULT_UA})
 
