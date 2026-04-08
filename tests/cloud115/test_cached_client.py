@@ -670,3 +670,99 @@ class TestRefreshPaths:
         """Empty paths list makes no API calls."""
         client.refresh_paths([])
         client._api.list_files_all.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# tree cache: _parse_tree_text, save_tree, get_tree_entries, tree_stats
+# ---------------------------------------------------------------------------
+
+_SAMPLE_TREE = """\
+\ufeff|——根目录
+| |-影音
+| | |-AV
+| | | |-DANDY-001
+| | | | |-DANDY-001.mkv
+| | | | |-DANDY-001.nfo
+| | | |-DANDY-002
+| | | | |-DANDY-002.mp4
+| | |-电影
+| | | |-Dune (2021)
+| | | | |-Dune (2021).mkv
+"""
+
+_VIDEO_EXTS = {".mkv", ".mp4", ".avi", ".ts", ".rmvb", ".wmv", ".flv", ".mov", ".m4v"}
+
+
+class TestParseTreeText:
+    def test_finds_videos_and_nfo(self):
+        entries = CachedClient._parse_tree_text(_SAMPLE_TREE, _VIDEO_EXTS)
+        paths = {e["path"] for e in entries}
+        assert "影音/AV/DANDY-001/DANDY-001.mkv" in paths
+        assert "影音/AV/DANDY-001/DANDY-001.nfo" in paths
+        assert "影音/AV/DANDY-002/DANDY-002.mp4" in paths
+        assert "影音/电影/Dune (2021)/Dune (2021).mkv" in paths
+
+    def test_excludes_directories(self):
+        entries = CachedClient._parse_tree_text(_SAMPLE_TREE, _VIDEO_EXTS)
+        names = {e["n"] for e in entries}
+        # Directory names should not appear as entries
+        assert "AV" not in names
+        assert "DANDY-001" not in names
+        assert "电影" not in names
+
+    def test_is_video_flag(self):
+        entries = CachedClient._parse_tree_text(_SAMPLE_TREE, _VIDEO_EXTS)
+        by_path = {e["path"]: e for e in entries}
+        assert by_path["影音/AV/DANDY-001/DANDY-001.mkv"]["is_video"] is True
+        assert by_path["影音/AV/DANDY-001/DANDY-001.nfo"]["is_video"] is False
+
+    def test_is_nfo_flag(self):
+        entries = CachedClient._parse_tree_text(_SAMPLE_TREE, _VIDEO_EXTS)
+        by_path = {e["path"]: e for e in entries}
+        assert by_path["影音/AV/DANDY-001/DANDY-001.nfo"]["is_nfo"] is True
+        assert by_path["影音/AV/DANDY-001/DANDY-001.mkv"]["is_nfo"] is False
+
+    def test_parent_field(self):
+        entries = CachedClient._parse_tree_text(_SAMPLE_TREE, _VIDEO_EXTS)
+        by_path = {e["path"]: e for e in entries}
+        assert by_path["影音/AV/DANDY-001/DANDY-001.mkv"]["parent"] == "影音/AV/DANDY-001"
+        assert by_path["影音/电影/Dune (2021)/Dune (2021).mkv"]["parent"] == "影音/电影/Dune (2021)"
+
+    def test_empty_text(self):
+        assert CachedClient._parse_tree_text("", _VIDEO_EXTS) == []
+
+    def test_name_field(self):
+        entries = CachedClient._parse_tree_text(_SAMPLE_TREE, _VIDEO_EXTS)
+        by_path = {e["path"]: e for e in entries}
+        assert by_path["影音/AV/DANDY-001/DANDY-001.mkv"]["n"] == "DANDY-001.mkv"
+
+
+class TestSaveAndGetTree:
+    def test_save_tree_returns_count(self, client):
+        count = client.save_tree(_SAMPLE_TREE, _VIDEO_EXTS)
+        assert count == 4  # 3 videos + 1 nfo
+
+    def test_save_tree_stores_in_cache(self, client):
+        client.save_tree(_SAMPLE_TREE, _VIDEO_EXTS)
+        entries = client.get_tree_entries()
+        assert len(entries) == 4
+
+    def test_get_tree_entries_with_category(self, client):
+        client.save_tree(_SAMPLE_TREE, _VIDEO_EXTS)
+        av_entries = client.get_tree_entries("影音/AV")
+        assert all("影音/AV" in e["path"] for e in av_entries)
+        assert len(av_entries) == 3  # DANDY-001.mkv, DANDY-001.nfo, DANDY-002.mp4
+
+    def test_tree_stats(self, client):
+        client.save_tree(_SAMPLE_TREE, _VIDEO_EXTS)
+        stats = client.tree_stats()
+        assert stats["total"] == 4
+        assert stats["videos"] == 3
+        assert stats["nfos"] == 1
+
+    def test_save_tree_replaces_previous(self, client):
+        client.save_tree(_SAMPLE_TREE, _VIDEO_EXTS)
+        client.save_tree("影音\n|- AV\n| |- X\n| | |- X.mkv\n", _VIDEO_EXTS)
+        entries = client.get_tree_entries()
+        assert len(entries) == 1
+        assert entries[0]["n"] == "X.mkv"

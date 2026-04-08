@@ -110,6 +110,17 @@ def _load_config() -> dict:
     return dict(_DEFAULT_CONFIG)
 
 
+def _get_tree_entries(category: str = "") -> list[dict]:
+    """Get tree entries from SQLite cache (no login required)."""
+    from cloud115.cache import FileCache, _default_db_path
+
+    db_path = _default_db_path()
+    if not db_path.exists():
+        return []
+    with FileCache(db_path) as fc:
+        return fc.get_tree_entries(category)
+
+
 def _env_write_path() -> Path:
     """Determine the .env write path.
 
@@ -309,6 +320,13 @@ def export_tree(path):
     click.echo(f"Tree exported: {len(lines)} entries, {video_count} video files")
     click.echo(f"Saved to {tree_path}")
 
+    # Also save to SQLite tree_entry table
+    count = client.save_tree(text, VIDEO_EXTS)
+    stats = client.tree_stats()
+    click.echo(
+        f"Saved to SQLite: {stats['total']} entries, {stats['videos']} videos, {stats['nfos']} NFOs"
+    )
+
     click.echo("\nNext: run 'scan-tree <category>' to preview what needs scraping.")
 
 
@@ -327,12 +345,11 @@ def scan_tree(category, show_all):
         match_against_cases,
     )
 
-    tree_path = media_cache.tree_cache_path()
-    if not tree_path.exists():
+    entries = _get_tree_entries()
+    if not entries:
         click.echo("No tree cache. Run 'media115 sync /影音' first.", err=True)
         return
 
-    entries = media_cache.parse_tree_cache(VIDEO_EXTS)
     videos = [e for e in entries if e["is_video"]]
     nfo_set = {e["parent"] + "/" + _split_ext(e["n"])[0] for e in entries if e["is_nfo"]}
 
@@ -471,7 +488,10 @@ def batch_scrape(category, output, max_count, force):
     """
     from media115.scraper.analyzer import analyze_filename
 
-    entries = media_cache.parse_tree_cache(VIDEO_EXTS)
+    entries = _get_tree_entries()
+    if not entries:
+        click.echo("No tree cache. Run 'media115 sync /影音' first.", err=True)
+        return
     videos = [e for e in entries if e["is_video"]]
 
     videos = [v for v in videos if f"/{category}/" in f"/{v['path']}/"]
@@ -617,7 +637,7 @@ def _upload_missing_nfo(category: str, skipped_ops: list[dict]):
     logger = get_logger()
 
     # 从 tree cache 找已有匹配 NFO 的视频（按文件名 stem 匹配，不是按目录）
-    entries = media_cache.parse_tree_cache(VIDEO_EXTS)
+    entries = _get_tree_entries()
     nfo_stems = {
         e["parent"] + "/" + _split_ext(e["n"])[0]
         for e in entries if e["is_nfo"] and f"/{category}/" in f"/{e['path']}/"
@@ -677,12 +697,11 @@ def organize(category, execute, cleanup):
     """
     from media115.organizer import build_organize_plan, execute_organize_plan
 
-    tree_path = media_cache.tree_cache_path()
-    if not tree_path.exists():
+    entries = _get_tree_entries()
+    if not entries:
         click.echo("No tree cache. Run 'media115 sync /影音' first.", err=True)
         return
 
-    entries = media_cache.parse_tree_cache(VIDEO_EXTS)
     plan = build_organize_plan(category, entries, media_cache)
 
     renames = [op for op in plan if op["action"] == "rename"]
@@ -918,7 +937,7 @@ def strm(path, output, host, port):
 
     PATH: 115 cloud path like /影音/电影
 
-    Reads tree_cache.txt and generates one .strm file per video file,
+    Reads tree data from SQLite cache and generates one .strm file per video file,
     mirroring the 115 directory structure under OUTPUT. Each .strm file
     contains a redirect URL through the strm-proxy.
 
@@ -932,15 +951,13 @@ def strm(path, output, host, port):
     proxy_port = port or config.get("strm_proxy", {}).get("port", 9000)
     base_url = f"http://{proxy_host}:{proxy_port}"
 
-    tree_path = media_cache.tree_cache_path()
-    if not tree_path.exists():
-        click.echo("No tree cache. Run 'media115 sync /影音' first.", err=True)
-        return
-
     # Normalize the filter path (strip leading/trailing slashes)
     filter_path = path.strip("/")
 
-    entries = media_cache.parse_tree_cache(VIDEO_EXTS)
+    entries = _get_tree_entries()
+    if not entries:
+        click.echo("No tree cache. Run 'media115 sync /影音' first.", err=True)
+        return
     videos = [e for e in entries if e["is_video"]]
 
     # Filter to videos under the given path

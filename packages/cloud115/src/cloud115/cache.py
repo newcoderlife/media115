@@ -64,6 +64,17 @@ CREATE TABLE IF NOT EXISTS rate_limit (
     minute_start   REAL DEFAULT 0,
     minute_count   INTEGER DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS tree_entry (
+    path       TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    parent     TEXT NOT NULL,
+    is_video   INTEGER NOT NULL DEFAULT 0,
+    is_nfo     INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (path)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tree_parent ON tree_entry(parent);
 """
 
 
@@ -275,11 +286,12 @@ class FileCache:
     # ---- management ------------------------------------------------------
 
     def clear_metadata(self) -> None:
-        """清除缓存元数据（path_index + dir_meta + dir_entry）。不动 rate_limit。"""
+        """清除缓存元数据（path_index + dir_meta + dir_entry + tree_entry）。不动 rate_limit。"""
         with self._conn:
             self._conn.execute("DELETE FROM path_index")
             self._conn.execute("DELETE FROM dir_meta")
             self._conn.execute("DELETE FROM dir_entry")
+            self._conn.execute("DELETE FROM tree_entry")
 
     def clear(self) -> None:
         """Delete **all** cached data from every table."""
@@ -320,6 +332,59 @@ class FileCache:
             "SELECT COUNT(*) FROM dir_meta WHERE ts < ?", (cutoff,)
         ).fetchone()[0]
 
+    # ---- tree_entry ------------------------------------------------------
+
+    def set_tree(self, entries: list[dict]) -> None:
+        """Replace all tree entries atomically. Each entry: {path, n, parent, is_video, is_nfo}."""
+        with self._conn:
+            self._conn.execute("DELETE FROM tree_entry")
+            self._conn.executemany(
+                "INSERT INTO tree_entry (path, name, parent, is_video, is_nfo) VALUES (?, ?, ?, ?, ?)",
+                [
+                    (e["path"], e["n"], e["parent"], int(e["is_video"]), int(e["is_nfo"]))
+                    for e in entries
+                ],
+            )
+
+    def get_tree_entries(self, category: str = "") -> list[dict]:
+        """Get tree entries, optionally filtered by category path prefix."""
+        if category:
+            rows = self._conn.execute(
+                "SELECT path, name, parent, is_video, is_nfo FROM tree_entry "
+                "WHERE path LIKE ? OR path = ?",
+                (category + "/%", category),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT path, name, parent, is_video, is_nfo FROM tree_entry"
+            ).fetchall()
+        return [
+            {
+                "path": r[0],
+                "n": r[1],
+                "parent": r[2],
+                "is_video": bool(r[3]),
+                "is_nfo": bool(r[4]),
+            }
+            for r in rows
+        ]
+
+    def tree_stats(self) -> dict:
+        """Return tree entry counts."""
+        total = self._conn.execute("SELECT COUNT(*) FROM tree_entry").fetchone()[0]
+        videos = self._conn.execute(
+            "SELECT COUNT(*) FROM tree_entry WHERE is_video = 1"
+        ).fetchone()[0]
+        nfos = self._conn.execute(
+            "SELECT COUNT(*) FROM tree_entry WHERE is_nfo = 1"
+        ).fetchone()[0]
+        return {"total": total, "videos": videos, "nfos": nfos}
+
+    def clear_tree(self) -> None:
+        """Clear tree entries only."""
+        with self._conn:
+            self._conn.execute("DELETE FROM tree_entry")
+
     def close(self) -> None:
         """Close the database connection."""
         if self._conn is not None:
@@ -345,6 +410,9 @@ class FileCache:
         entry_count = self._conn.execute(
             "SELECT COUNT(*) FROM dir_entry"
         ).fetchone()[0]
+        tree_entries = self._conn.execute(
+            "SELECT COUNT(*) FROM tree_entry"
+        ).fetchone()[0]
         try:
             db_size = self._db_path.stat().st_size
         except OSError:
@@ -364,6 +432,7 @@ class FileCache:
             "path_count": path_count,
             "dir_count": dir_count,
             "entry_count": entry_count,
+            "tree_entries": tree_entries,
             "db_size_bytes": db_size,
             "rate_limit": rate_states,
         }

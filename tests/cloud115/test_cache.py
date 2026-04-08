@@ -401,3 +401,101 @@ class TestStaleDirCount:
         cache._conn.execute("UPDATE dir_meta SET ts = 0 WHERE cid = 'old'")
         cache._conn.commit()
         assert cache.stale_dir_count(3600) == 1
+
+
+# ---------------------------------------------------------------------------
+# tree_entry
+# ---------------------------------------------------------------------------
+
+def _tree_entry(path="AV/DANDY-001/DANDY-001.mkv", name="DANDY-001.mkv",
+                parent="AV/DANDY-001", is_video=True, is_nfo=False):
+    return {"path": path, "n": name, "parent": parent,
+            "is_video": is_video, "is_nfo": is_nfo}
+
+
+class TestTreeEntry:
+    def test_set_and_get_all(self, cache):
+        entries = [
+            _tree_entry("AV/DANDY-001/DANDY-001.mkv", "DANDY-001.mkv", "AV/DANDY-001",
+                        is_video=True, is_nfo=False),
+            _tree_entry("AV/DANDY-001/DANDY-001.nfo", "DANDY-001.nfo", "AV/DANDY-001",
+                        is_video=False, is_nfo=True),
+            _tree_entry("电影/Dune (2021)/Dune (2021).mkv", "Dune (2021).mkv",
+                        "电影/Dune (2021)", is_video=True, is_nfo=False),
+        ]
+        cache.set_tree(entries)
+
+        result = cache.get_tree_entries()
+        assert len(result) == 3
+        paths = {r["path"] for r in result}
+        assert "AV/DANDY-001/DANDY-001.mkv" in paths
+        assert "AV/DANDY-001/DANDY-001.nfo" in paths
+        assert "电影/Dune (2021)/Dune (2021).mkv" in paths
+
+    def test_get_entries_fields(self, cache):
+        cache.set_tree([_tree_entry()])
+        result = cache.get_tree_entries()
+        assert len(result) == 1
+        e = result[0]
+        assert e["path"] == "AV/DANDY-001/DANDY-001.mkv"
+        assert e["n"] == "DANDY-001.mkv"
+        assert e["parent"] == "AV/DANDY-001"
+        assert e["is_video"] is True
+        assert e["is_nfo"] is False
+
+    def test_get_with_category_filter(self, cache):
+        cache.set_tree([
+            _tree_entry("AV/DANDY-001/DANDY-001.mkv", "DANDY-001.mkv",
+                        "AV/DANDY-001", is_video=True, is_nfo=False),
+            _tree_entry("电影/Dune (2021)/Dune (2021).mkv", "Dune (2021).mkv",
+                        "电影/Dune (2021)", is_video=True, is_nfo=False),
+        ])
+        result = cache.get_tree_entries("AV")
+        assert len(result) == 1
+        assert result[0]["path"] == "AV/DANDY-001/DANDY-001.mkv"
+
+    def test_set_tree_replaces_existing(self, cache):
+        cache.set_tree([_tree_entry("old/file.mkv", "file.mkv", "old", is_video=True)])
+        cache.set_tree([_tree_entry("new/film.mkv", "film.mkv", "new", is_video=True)])
+        result = cache.get_tree_entries()
+        assert len(result) == 1
+        assert result[0]["path"] == "new/film.mkv"
+
+    def test_set_tree_empty(self, cache):
+        cache.set_tree([_tree_entry()])
+        cache.set_tree([])
+        assert cache.get_tree_entries() == []
+
+    def test_tree_stats_empty(self, cache):
+        stats = cache.tree_stats()
+        assert stats == {"total": 0, "videos": 0, "nfos": 0}
+
+    def test_tree_stats(self, cache):
+        cache.set_tree([
+            _tree_entry("AV/X/X.mkv", "X.mkv", "AV/X", is_video=True, is_nfo=False),
+            _tree_entry("AV/X/X.nfo", "X.nfo", "AV/X", is_video=False, is_nfo=True),
+            _tree_entry("电影/Y/Y.mkv", "Y.mkv", "电影/Y", is_video=True, is_nfo=False),
+        ])
+        stats = cache.tree_stats()
+        assert stats["total"] == 3
+        assert stats["videos"] == 2
+        assert stats["nfos"] == 1
+
+    def test_clear_tree(self, cache):
+        cache.set_tree([_tree_entry()])
+        cache.clear_tree()
+        assert cache.get_tree_entries() == []
+
+    def test_clear_metadata_includes_tree(self, cache):
+        cache.set_tree([_tree_entry()])
+        cache.set_path("/test", "c1")
+        cache.clear_metadata()
+        assert cache.get_tree_entries() == []
+        assert cache.get_path("/test") is None
+
+    def test_stats_includes_tree_entries(self, cache):
+        cache.set_tree([
+            _tree_entry("AV/X/X.mkv", "X.mkv", "AV/X", is_video=True, is_nfo=False),
+        ])
+        s = cache.stats()
+        assert s["tree_entries"] == 1

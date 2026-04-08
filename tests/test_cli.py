@@ -48,10 +48,20 @@ def _write_env(base="."):
 
 
 def _write_tree(base=".", content=None):
-    """Write tree_cache.txt to the XDG cache location."""
+    """Write tree to SQLite (primary) and tree_cache.txt (legacy backup)."""
     from media115 import cache as media_cache
+    tree_text = content or SAMPLE_TREE
+    # Write legacy text file (backward compat)
     tree_path = media_cache.tree_cache_path()
-    tree_path.write_text(content or SAMPLE_TREE)
+    tree_path.write_text(tree_text)
+    # Write to SQLite so _get_tree_entries() works
+    from cloud115.cache import FileCache, _default_db_path
+    from cloud115.cached import CachedClient
+    VIDEO_EXTS = {".mkv", ".mp4", ".avi", ".ts", ".rmvb", ".wmv", ".flv", ".mov", ".m4v"}
+    entries = CachedClient._parse_tree_text(tree_text, VIDEO_EXTS)
+    db_path = _default_db_path()
+    with FileCache(db_path) as fc:
+        fc.set_tree(entries)
     return tree_path
 
 
