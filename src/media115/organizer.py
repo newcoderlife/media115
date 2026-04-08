@@ -359,9 +359,8 @@ def execute_organize_plan(
             failed_ops.update(rename_indices)
 
     # Phase 5: Upload NFO/poster grouped by target directory (skip failed files)
-    # Collect (local_path, remote_name) pairs per target dir
-    upload_groups: dict[str, list[tuple]] = {}  # target_dir → [(local_path, remote_name)]
-    successful_ops: list[tuple[int, dict]] = []  # (resolved_index, op) for status tracking
+    # Group video_file dicts by target directory
+    target_groups: dict[str, list[dict]] = {}  # target_dir → [video_file_dicts]
 
     for i, (op, parent_path) in enumerate(resolved):
         if i in failed_ops:
@@ -374,14 +373,12 @@ def execute_organize_plan(
         else:
             upload_dir = "/" + parent_path
 
-        pairs = _plan_scrape_upload(op, op.get("new_name"))
-        if pairs:
-            existing = upload_groups.setdefault(upload_dir, [])
-            existing_names = {name for _, name in existing}
-            for local_path, remote_name in pairs:
-                if remote_name not in existing_names:
-                    existing.append((local_path, remote_name))
-                    existing_names.add(remote_name)
+        video_info = {
+            "file": op["file"],
+            "parent": op.get("parent", parent_path),
+            "new_name": op.get("new_name"),
+        }
+        target_groups.setdefault(upload_dir, []).append(video_info)
 
         # Update file_map cache
         new_name = op.get("new_name")
@@ -392,57 +389,23 @@ def execute_organize_plan(
             if old_data:
                 _cache.put("file_map", new_stem, old_data)
 
-        successful_ops.append((i, op))
         results.append({**op, "status": "ok"})
 
-    # One list_dir + one delete call per target directory
-    num_groups = len(upload_groups)
-    logger.info(
-        "  Uploading NFO/poster: %d sidecar file(s) across %d director(ies)...",
-        sum(len(v) for v in upload_groups.values()),
-        num_groups,
-    )
-    for idx, (upload_dir, uploads) in enumerate(upload_groups.items(), 1):
+    num_groups = len(target_groups)
+    logger.info("  Uploading NFO/poster across %d director(ies)...", num_groups)
+    total_uploaded = 0
+    for idx, (upload_dir, vf_list) in enumerate(target_groups.items(), 1):
         display_dir = upload_dir.rsplit("/", 1)[-1][:50]
         print(
             f"\r  [{idx}/{num_groups}] {display_dir}",
             end="", file=sys.stderr, flush=True,
         )
-
-        # One list_dir per directory
-        existing_names: dict[str, bool] = {}
-        try:
-            items = client.list_dir(upload_dir)
-            existing_names = {
-                item["name"]: True for item in items if item.get("type") == "file"
-            }
-        except Exception:
-            pass
-
-        # Batch delete stale sidecars
-        to_delete = [
-            upload_dir + "/" + remote_name
-            for _, remote_name in uploads
-            if existing_names.get(remote_name)
-        ]
-        if to_delete:
-            try:
-                client.delete(to_delete)
-                logger.debug("  deleted %d old sidecar(s) in %s", len(to_delete), upload_dir)
-            except Exception as e:
-                logger.warning("  delete old sidecars failed in %s: %s", upload_dir, e)
-
-        # Upload new sidecar files
-        for local_path, remote_name in uploads:
-            try:
-                client.upload(str(local_path), upload_dir, remote_name)
-                logger.debug("  uploaded %s → %s", remote_name, upload_dir)
-            except Exception as e:
-                logger.warning("  upload failed %s: %s", remote_name, e)
+        total_uploaded += sync_sidecars(client, upload_dir, vf_list)
 
     print("", file=sys.stderr)  # newline
     logger.info(
-        "  Uploaded NFO/poster for %d director(ies)",
+        "  Uploaded %d NFO/poster file(s) across %d director(ies)",
+        total_uploaded,
         num_groups,
     )
 
@@ -529,55 +492,80 @@ def _plan_scrape_upload(
     return []
 
 
-def _upload_scrape_output(
-    client, op: dict, target_dir: str, new_video_name: str | None = None,
-):
-    """Upload NFO + poster for an organized file if they exist locally.
+def sync_sidecars(
+    client,
+    target_dir: str,
+    video_files: list[dict],
+    category: str = "",
+) -> int:
+    """Sync local scrape_output (NFO/poster) to a 115 directory.
 
-    *target_dir* is a cloud path like ``/影音/电影/Title (2024)``.
-    NFO is renamed to match the new video filename so Jellyfin can pair them.
+    For each video_file, finds matching local sidecar files and uploads them.
+    Handles: per-video NFOs (matched by stem), shared files (tvshow.nfo, poster.jpg).
+    Deduplicates shared files across multiple videos in the same directory.
+    Deletes old remote files before uploading to avoid 115 duplicates.
 
-    Backward-compatible wrapper used by ``_upload_missing_nfo`` in cli.py.
-    For bulk uploads prefer ``_plan_scrape_upload`` + grouped execution.
+    Args:
+        client: CachedClient instance
+        target_dir: remote 115 path like "/影音/电影/Movie (2024)"
+        video_files: list of dicts, each with at least {"file": "name.mkv",
+            "parent": "category/dir"} and optionally {"new_name": "optional_new.mkv"}
+        category: optional category string (unused, reserved for future filtering)
+
+    Returns:
+        number of files uploaded
     """
     from media115.log import get_logger
     _log = get_logger()
 
-    pairs = _plan_scrape_upload(op, new_video_name)
-    if not pairs:
-        return
+    # Step 1: Collect all sidecar pairs, deduplicating by remote_name
+    uploads: list[tuple] = []  # [(local_path, remote_name), ...]
+    seen_names: set[str] = set()
+    for vf in video_files:
+        new_name = vf.get("new_name")
+        pairs = _plan_scrape_upload(vf, new_name)
+        for local_path, remote_name in pairs:
+            if remote_name not in seen_names:
+                uploads.append((local_path, remote_name))
+                seen_names.add(remote_name)
 
-    # 115 does not support overwrite upload — same-name files create duplicates.
-    # Use rclone strategy: delete old file then upload new file.
-    existing_files: dict[str, bool] = {}
+    if not uploads:
+        return 0
+
+    # Step 2: List target directory once
+    existing_names: dict[str, bool] = {}
     try:
         items = client.list_dir(target_dir)
-        for item in items:
-            if item.get("type") == "file":
-                existing_files[item["name"]] = True
+        existing_names = {
+            item["name"]: True for item in items if item.get("type") == "file"
+        }
     except Exception:
         pass
 
-    # Batch delete stale sidecars, then upload
+    # Step 3: Batch delete stale sidecars
     to_delete = [
         target_dir + "/" + remote_name
-        for _, remote_name in pairs
-        if existing_files.get(remote_name)
+        for _, remote_name in uploads
+        if existing_names.get(remote_name)
     ]
     if to_delete:
         try:
             client.delete(to_delete)
-            for path in to_delete:
-                _log.debug("  deleted old %s", path.rsplit("/", 1)[-1])
+            _log.debug("  deleted %d old sidecar(s) in %s", len(to_delete), target_dir)
         except Exception as e:
-            _log.warning("  delete old sidecars failed: %s", e)
+            _log.warning("  delete old sidecars failed in %s: %s", target_dir, e)
 
-    for f, remote_name in pairs:
+    # Step 4: Upload new sidecar files
+    uploaded = 0
+    for local_path, remote_name in uploads:
         try:
-            client.upload(str(f), target_dir, remote_name)
+            client.upload(str(local_path), target_dir, remote_name)
             _log.debug("  uploaded %s → %s", remote_name, target_dir)
+            uploaded += 1
         except Exception as e:
             _log.warning("  upload failed %s: %s", remote_name, e)
+
+    return uploaded
 
 
 def _sanitize(name: str) -> str:

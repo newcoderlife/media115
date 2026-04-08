@@ -631,10 +631,7 @@ def _upload_missing_nfo(category: str, skipped_ops: list[dict]):
 
     检查 skip 的文件是否在 tree cache 中有 NFO，如果没有且本地有 scrape_output，就上传。
     """
-    from media115.log import get_logger
-    from media115.organizer import _upload_scrape_output
-
-    logger = get_logger()
+    from media115.organizer import sync_sidecars
 
     # 从 tree cache 找已有匹配 NFO 的视频（按文件名 stem 匹配，不是按目录）
     entries = _get_tree_entries()
@@ -655,32 +652,24 @@ def _upload_missing_nfo(category: str, skipped_ops: list[dict]):
 
     client = _get_client()
 
-    # 按目录分组，每个目录只处理一次（避免重复 list_dir）
-    by_parent: dict[str, list[dict]] = {}
+    # 按目录分组，每个目录调用一次 sync_sidecars
+    by_dir: dict[str, list[dict]] = {}
     for op in missing:
-        by_parent.setdefault(op["parent"], []).append(op)
+        target_dir = "/" + op["parent"]
+        video_info = {"file": op["file"], "parent": op["parent"]}
+        by_dir.setdefault(target_dir, []).append(video_info)
 
-    click.echo(f"\n补传 NFO: {len(by_parent)} 个目录缺少 NFO（共 {len(missing)} 个文件）")
+    click.echo(f"\n补传 NFO: {len(by_dir)} 个目录缺少 NFO（共 {len(missing)} 个文件）")
 
     uploaded = 0
-    for i, (parent, ops) in enumerate(by_parent.items(), 1):
-        parent_leaf = parent.split("/")[-1] if "/" in parent else parent
-
-        target_path = "/" + parent
-        try:
-            client.resolve_path(target_path)
-        except FileNotFoundError:
-            logger.warning("  补传跳过 %s: 目录不存在", parent)
-            continue
-
-        print(f"\r  [{i}/{len(by_parent)}] {_trunc(parent_leaf, 50)}", end="", file=sys.stderr, flush=True)
-        # 只用第一个 op 触发上传（_upload_scrape_output 会上传整个 scrape_output 目录）
-        _upload_scrape_output(client, ops[0], target_path, ops[0].get("file"))
-        uploaded += 1
+    for i, (target_dir, video_files) in enumerate(by_dir.items(), 1):
+        leaf = target_dir.rsplit("/", 1)[-1][:50]
+        print(f"\r  [{i}/{len(by_dir)}] {leaf}", end="", file=sys.stderr, flush=True)
+        count = sync_sidecars(client, target_dir, video_files)
+        uploaded += count
 
     print("", file=sys.stderr)
-    logger.info("补传完成: %d 个目录", uploaded)
-    click.echo(f"补传完成: {uploaded} 个目录")
+    click.echo(f"补传完成: {uploaded} 个文件")
 
 
 @main.command()
