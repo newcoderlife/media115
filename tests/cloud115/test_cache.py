@@ -315,3 +315,85 @@ class TestManagement:
         assert s["dir_count"] == 1
         assert s["entry_count"] == 2
         assert s["db_size_bytes"] > 0
+
+    def test_stats_includes_rate_limit(self, cache):
+        cache.set_rate_limit("api", cooldown_until=42.0, last_request=10.0, minute_count=3)
+        s = cache.stats()
+        assert "rate_limit" in s
+        assert "api" in s["rate_limit"]
+        assert s["rate_limit"]["api"]["cooldown_until"] == 42.0
+        assert s["rate_limit"]["api"]["minute_count"] == 3
+
+
+# ---------------------------------------------------------------------------
+# clear_metadata
+# ---------------------------------------------------------------------------
+
+class TestClearMetadata:
+    def test_keeps_rate_limit(self, cache):
+        cache.set_path("/a", "1")
+        cache.set_dir_listing("cid1", [
+            {"name": "f", "type": "file", "node_id": "f1", "size": 1, "pick_code": "pc"},
+        ])
+        cache.set_rate_limit("api", minute_count=5)
+
+        cache.clear_metadata()
+
+        assert cache.get_path("/a") is None
+        assert cache.get_dir_ts("cid1") is None
+        state = cache.get_rate_limit("api")
+        assert state["minute_count"] == 5
+
+
+# ---------------------------------------------------------------------------
+# try_acquire_slot
+# ---------------------------------------------------------------------------
+
+class TestTryAcquireSlot:
+    def test_succeeds(self, cache):
+        now = time.time()
+        assert cache.try_acquire_slot("test", now, 1.0, 20) is True
+        state = cache.get_rate_limit("test")
+        assert state["minute_count"] == 1
+
+    def test_fails_qpm(self, cache):
+        now = time.time()
+        cache.set_rate_limit("test", minute_start=now, minute_count=20, last_request=now - 5)
+        assert cache.try_acquire_slot("test", now, 1.0, 20) is False
+
+    def test_fails_cooldown(self, cache):
+        now = time.time()
+        cache.set_rate_limit("test", cooldown_until=now + 3600)
+        assert cache.try_acquire_slot("test", now, 1.0, 20) is False
+
+    def test_fails_qps(self, cache):
+        now = time.time()
+        cache.set_rate_limit("test", last_request=now - 0.5, minute_start=now - 10, minute_count=5)
+        assert cache.try_acquire_slot("test", now, 2.0, 20) is False
+
+    def test_resets_minute_window(self, cache):
+        now = time.time()
+        cache.set_rate_limit("test", minute_start=now - 120, minute_count=999)
+        assert cache.try_acquire_slot("test", now, 0.0, 20) is True
+        state = cache.get_rate_limit("test")
+        assert state["minute_count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# stale_dir_count
+# ---------------------------------------------------------------------------
+
+class TestStaleDirCount:
+    def test_no_stale(self, cache):
+        cache.set_dir_listing("fresh", [
+            {"name": "f", "type": "file", "node_id": "f1", "size": 1, "pick_code": "pc"},
+        ])
+        assert cache.stale_dir_count(3600) == 0
+
+    def test_with_stale(self, cache):
+        cache.set_dir_listing("old", [
+            {"name": "f", "type": "file", "node_id": "f1", "size": 1, "pick_code": "pc"},
+        ])
+        cache._conn.execute("UPDATE dir_meta SET ts = 0 WHERE cid = 'old'")
+        cache._conn.commit()
+        assert cache.stale_dir_count(3600) == 1

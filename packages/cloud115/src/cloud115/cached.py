@@ -613,5 +613,5 @@ class CachedClient:
         return self._cache.stats()
 
     def cache_clear(self) -> None:
-        """Clear all cached data."""
-        self._cache.clear()
+        """清除缓存元数据。不清除限流状态。"""
+        self._cache.clear_metadata()

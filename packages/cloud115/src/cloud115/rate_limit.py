@@ -30,22 +30,40 @@ class RateLimiter:
         if self._cache is None:
             return
 
+        min_interval = 1.0 / self._qps
+
         while True:
             now = time.time()
+
+            # Atomic check-and-update: single SQL, no TOCTOU race
+            if self._cache.try_acquire_slot(self._name, now, min_interval, self._qpm):
+                return  # Got a slot
+
+            # Failed — figure out why and wait appropriately
             state = self._cache.get_rate_limit(self._name)
 
-            # cooldown
-            cooldown_until = state.get("cooldown_until", 0)
-            if now < cooldown_until:
-                remaining = int(cooldown_until - now)
+            # Cooldown active?
+            if now < state.get("cooldown_until", 0):
+                remaining = int(state["cooldown_until"] - now)
                 mins, secs = divmod(remaining, 60)
                 raise RuntimeError(
                     "Rate limit cooldown: %dm%02ds remaining" % (mins, secs)
                 )
 
-            # QPS
+            # QPM exceeded?
+            minute_start = state.get("minute_start", 0)
+            minute_count = state.get("minute_count", 0)
+            if now - minute_start <= 60 and minute_count >= self._qpm:
+                wait = 60 - (now - minute_start)
+                get_logger().debug(
+                    "THROTTLE   QPM limit qpm=%d count=%d wait=%.1fs",
+                    self._qpm, minute_count, max(wait, 0),
+                )
+                time.sleep(max(wait, 0.1))
+                continue
+
+            # QPS too fast
             last_req = state.get("last_request", 0)
-            min_interval = 1.0 / self._qps
             wait = min_interval - (now - last_req)
             if wait > 0:
                 get_logger().debug(
@@ -53,30 +71,8 @@ class RateLimiter:
                     wait, self._qps, now - last_req,
                 )
                 time.sleep(wait)
-                now = time.time()
-
-            # QPM
-            minute_start = state.get("minute_start", 0)
-            minute_count = state.get("minute_count", 0)
-
-            if now - minute_start > 60:
-                minute_start = now
-                minute_count = 0
-
-            if minute_count >= self._qpm:
-                wait = 60 - (now - minute_start)
-                if wait > 0:
-                    time.sleep(wait)
-                    continue
-
-            # record
-            self._cache.set_rate_limit(
-                self._name,
-                last_request=now,
-                minute_start=minute_start,
-                minute_count=minute_count + 1,
-            )
-            break
+            else:
+                time.sleep(0.05)  # Brief pause before retry
 
     def set_cooldown(self, seconds):
         if self._cache:
