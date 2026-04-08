@@ -458,10 +458,8 @@ class CachedClient:
 
         # write-through
         for sp, parent_cid, name, entry in sources:
-            self._cache.remove_entry(parent_cid, name)
+            self._cache.move_entry(parent_cid, entry["node_id"], dest_cid)
             self._cache.delete_path_prefix(sp)
-            # Add to destination
-            self._cache.add_entry(dest_cid, entry)
             if entry["type"] == "dir":
                 new_path = dest_path.rstrip("/") + "/" + name
                 self._cache.set_path(new_path, entry["node_id"])

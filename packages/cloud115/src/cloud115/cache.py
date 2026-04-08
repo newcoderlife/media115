@@ -32,6 +32,8 @@ def _default_db_path() -> Path:
 
 _RATE_LIMIT_FIELDS = frozenset({"cooldown_until", "last_request", "minute_start", "minute_count"})
 
+_SCHEMA_VERSION = 2  # Bump when schema changes
+
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS path_index (
     path       TEXT PRIMARY KEY,
@@ -51,11 +53,12 @@ CREATE TABLE IF NOT EXISTS dir_entry (
     node_id    TEXT NOT NULL,
     size       INTEGER,
     pick_code  TEXT,
-    PRIMARY KEY (parent_cid, name)
+    PRIMARY KEY (parent_cid, node_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_entry_parent ON dir_entry(parent_cid);
 CREATE INDEX IF NOT EXISTS idx_entry_node   ON dir_entry(node_id);
+CREATE INDEX IF NOT EXISTS idx_entry_name   ON dir_entry(parent_cid, name);
 
 CREATE TABLE IF NOT EXISTS rate_limit (
     name          TEXT PRIMARY KEY,
@@ -92,6 +95,18 @@ class FileCache:
         self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
+
+        # Schema migration: if version < _SCHEMA_VERSION, drop cache tables and recreate.
+        # Cache data is expendable — it rebuilds from API calls.
+        version = self._conn.execute("PRAGMA user_version").fetchone()[0]
+        if version < _SCHEMA_VERSION:
+            for table in ("dir_entry", "dir_meta", "path_index", "tree_entry"):
+                self._conn.execute(f"DROP TABLE IF EXISTS {table}")  # noqa: S608
+            for idx in ("idx_entry_parent", "idx_entry_node", "idx_entry_name", "idx_tree_parent"):
+                self._conn.execute(f"DROP INDEX IF EXISTS {idx}")  # noqa: S608
+            self._conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
+            self._conn.commit()
+
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
 
@@ -171,15 +186,31 @@ class FileCache:
         return [dict(r) for r in rows]
 
     def find_entry(self, parent_cid: str, name: str) -> dict | None:
-        """Look up a single child by *name* inside *parent_cid*."""
+        """Look up a single child by *name* inside *parent_cid*.
+
+        Returns the first match. When multiple same-name entries exist (different
+        node_ids) use :meth:`find_entries` to retrieve all of them.
+        """
         row = self._conn.execute(
             "SELECT name, type, node_id, size, pick_code "
-            "FROM dir_entry WHERE parent_cid = ? AND name = ?",
+            "FROM dir_entry WHERE parent_cid = ? AND name = ? LIMIT 1",
             (parent_cid, name),
         ).fetchone()
         if row is None:
             return None
         return dict(row)
+
+    def find_entries(self, parent_cid: str, name: str) -> list[dict]:
+        """Find ALL entries matching *name* inside *parent_cid*.
+
+        Useful for dedup scenarios where the same filename has multiple node_ids.
+        """
+        rows = self._conn.execute(
+            "SELECT name, type, node_id, size, pick_code "
+            "FROM dir_entry WHERE parent_cid = ? AND name = ?",
+            (parent_cid, name),
+        ).fetchall()
+        return [{"name": r[0], "type": r[1], "node_id": r[2], "size": r[3], "pick_code": r[4]} for r in rows]
 
     # ---- write-through ---------------------------------------------------
 
@@ -201,10 +232,31 @@ class FileCache:
         self._conn.commit()
 
     def remove_entry(self, parent_cid: str, name: str) -> None:
-        """Delete a single entry from the cached listing."""
+        """Delete all entries with *name* from the cached listing (backward compat).
+
+        With the id-first PK a directory can contain multiple same-name files.
+        This method removes all of them. Use :meth:`remove_entry_by_id` for
+        targeted single-entry removal.
+        """
         self._conn.execute(
             "DELETE FROM dir_entry WHERE parent_cid = ? AND name = ?",
             (parent_cid, name),
+        )
+        self._conn.commit()
+
+    def remove_entry_by_id(self, parent_cid: str, node_id: str) -> None:
+        """Delete a specific entry identified by *node_id* within *parent_cid*."""
+        self._conn.execute(
+            "DELETE FROM dir_entry WHERE parent_cid = ? AND node_id = ?",
+            (parent_cid, node_id),
+        )
+        self._conn.commit()
+
+    def move_entry(self, old_parent_cid: str, node_id: str, new_parent_cid: str) -> None:
+        """Move an entry to a different parent directory (atomic UPDATE)."""
+        self._conn.execute(
+            "UPDATE dir_entry SET parent_cid = ? WHERE parent_cid = ? AND node_id = ?",
+            (new_parent_cid, old_parent_cid, node_id),
         )
         self._conn.commit()
 
