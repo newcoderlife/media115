@@ -1177,3 +1177,107 @@ def test_phase5_deduplicates_shared_sidecars(tmp_path, monkeypatch):
     # Shared files appear only once
     assert names.count("tvshow.nfo") == 1
     assert names.count("poster.jpg") == 1
+
+
+# ── _extract_av_suffix tests ────────────────────────────────────────
+
+
+class TestExtractAvSuffix:
+    def test_cut_version(self):
+        from media115.organizer import _extract_av_suffix
+        assert _extract_av_suffix("-C") == "-C"
+        assert _extract_av_suffix("-C.mp4") == "-C"
+
+    def test_multi_disc(self):
+        from media115.organizer import _extract_av_suffix
+        assert _extract_av_suffix("A.FHD") == ".A"
+        assert _extract_av_suffix("B_4K^WM") == ".B"
+        assert _extract_av_suffix("A") == ".A"
+
+    def test_part(self):
+        from media115.organizer import _extract_av_suffix
+        assert _extract_av_suffix(".Part1") == ".Part1"
+        assert _extract_av_suffix("_Part2") == ".Part2"
+
+    def test_quality_only(self):
+        from media115.organizer import _extract_av_suffix
+        assert _extract_av_suffix(".FHD") == ""
+        assert _extract_av_suffix(".HD") == ""
+        assert _extract_av_suffix(".2160p.DMM.WEB-DL.AAC2.0.H.264-MTeam") == ""
+
+    def test_empty(self):
+        from media115.organizer import _extract_av_suffix
+        assert _extract_av_suffix("") == ""
+
+
+# ── AV organize plan preserves content suffixes ─────────────────────
+
+
+class TestAvOrganizePreservesSuffixes:
+    """AV organize should preserve -C, A/B, Part suffixes."""
+
+    def _make_tree(self, filename, folder="影音/AV/raw-folder"):
+        return [
+            {
+                "n": filename,
+                "path": f"{folder}/{filename}",
+                "parent": folder,
+                "is_video": True,
+                "is_nfo": False,
+            }
+        ]
+
+    def test_cut_version_preserved(self):
+        """ABP-612-C.mp4 should stay ABP-612-C.mp4 (not renamed to ABP-612.mp4).
+        The file is already correctly named so new_name is None; only folder changes."""
+        from media115.organizer import build_organize_plan
+
+        cache = MockCache()
+        cache.put("file_map", "ABP-612-C", {"type": "av", "number": "ABP-612"})
+
+        ops = build_organize_plan("AV", self._make_tree("ABP-612-C.mp4"), cache)
+        op = ops[0]
+        assert op["action"] == "rename"
+        assert op["new_folder"] == "ABP-612"
+        # File is already named ABP-612-C.mp4 so no rename needed
+        assert op["new_name"] is None
+
+    def test_fhd_suffix_stripped(self):
+        """YRH-093A.FHD.wmv: A (disc) preserved, FHD stripped."""
+        from media115.organizer import build_organize_plan
+
+        cache = MockCache()
+        cache.put("file_map", "YRH-093A.FHD", {"type": "av", "number": "YRH-093"})
+
+        ops = build_organize_plan("AV", self._make_tree("YRH-093A.FHD.wmv"), cache)
+        assert ops[0]["new_name"] == "YRH-093.A.wmv"
+
+    def test_multi_disc_b_preserved(self):
+        """STARS-685A_4K^WM.mp4: A preserved, quality markers stripped."""
+        from media115.organizer import build_organize_plan
+
+        cache = MockCache()
+        cache.put("file_map", "STARS-685A_4K^WM", {"type": "av", "number": "STARS-685"})
+
+        ops = build_organize_plan("AV", self._make_tree("STARS-685A_4K^WM.mp4"), cache)
+        assert ops[0]["new_name"] == "STARS-685.A.mp4"
+
+    def test_part_suffix_still_preserved(self):
+        """Part suffix still preserved via new code path."""
+        from media115.organizer import build_organize_plan
+
+        cache = MockCache()
+        cache.put("file_map", "ABP-123.Part1.hd", {"type": "av", "number": "ABP-123"})
+
+        ops = build_organize_plan("AV", self._make_tree("ABP-123.Part1.hd.mkv"), cache)
+        assert ops[0]["new_name"] == "ABP-123.Part1.mkv"
+
+    def test_plain_number_no_suffix(self):
+        """dandy-992.mp4 with no extra suffix stays dandy-992.mp4."""
+        from media115.organizer import build_organize_plan
+
+        cache = MockCache()
+        cache.put("file_map", "dandy-992", {"type": "av", "number": "DANDY-992"})
+
+        ops = build_organize_plan("AV", self._make_tree("dandy-992.mp4"), cache)
+        assert ops[0]["new_name"] == "DANDY-992.mp4"

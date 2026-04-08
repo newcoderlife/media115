@@ -39,6 +39,50 @@ def compute_pre_sha1(file_path: Path) -> str:
 # ── 115 Cloud directory organization ─────────────────────────────────
 
 
+def _extract_av_suffix(after_number: str) -> str:
+    """Extract content-discriminating suffix from the part of filename after the AV number.
+
+    Preserves: Part1, A/B/C/D (disc), -C (cut version), CD1/CD2
+    Strips: HD, FHD, 4K, quality markers, team names, codec info
+
+    Examples:
+        "-C.mp4 stuff" -> "-C"
+        "A.FHD" -> ".A"
+        ".Part1" -> ".Part1"
+        ".FHD" -> ""
+        ".HD" -> ""
+        "B_4K^WM" -> ".B"
+        ".2160p.DMM.WEB-DL..." -> ""
+    """
+    if not after_number:
+        return ""
+
+    # Normalize separators
+    s = after_number
+
+    # Pattern 1: -C (cut/censored version)
+    if s.startswith("-C") and (len(s) == 2 or not s[2].isalpha()):
+        return "-C"
+
+    # Pattern 2: Single letter A-D immediately after number (multi-disc)
+    # e.g., "A.FHD", "B_4K", "A_4K^WM"
+    if s and s[0] in "ABCDabcd" and (len(s) == 1 or not s[1].isalnum() or s[1].isdigit()):
+        return "." + s[0].upper()
+
+    # Pattern 3: .Part1, _Part2 etc
+    part_m = re.match(r'[._-]?(Part\d+)', s, re.IGNORECASE)
+    if part_m:
+        return "." + part_m.group(1)
+
+    # Pattern 4: .CD1, _CD2
+    cd_m = re.match(r'[._-]?(CD\d+)', s, re.IGNORECASE)
+    if cd_m:
+        return "." + cd_m.group(1)
+
+    # No content suffix found — everything else is quality/encode markers
+    return ""
+
+
 def build_organize_plan(category: str, tree_entries: list[dict], cache_module) -> list[dict]:
     """Build a rename/move plan from file_map cache (written by batch-scrape).
 
@@ -105,10 +149,21 @@ def build_organize_plan(category: str, tree_entries: list[dict], cache_module) -
             number = scrape_info.get("number", "")
             if number:
                 new_folder = number
-                # Preserve Part suffix for multi-part files
-                part_m = re.search(r"[._](Part\d+)", name, re.IGNORECASE)
-                part_suffix = f".{part_m.group(1)}" if part_m else ""
-                new_name = f"{number}{part_suffix}{ext}"
+                # Extract content-discriminating suffix from original filename
+                # Strip the extension first, then search for the number prefix
+                name_stem = re.sub(r'\.\w{2,4}$', '', name)  # remove extension
+                # Build a regex from the number that tolerates optional separators
+                # e.g. "ABP-123" should match "abp123", "ABP-123", "ABP_123"
+                # Escape each char, then replace escaped separator sequences with optional sep
+                num_parts = re.split(r'[-_.]', number)
+                num_re = r'[-_.]?'.join(re.escape(p) for p in num_parts)
+                m = re.search(num_re + r'(.*)', name_stem, re.IGNORECASE)
+                after_number = m.group(1) if m else ""
+
+                # Extract meaningful suffix from what follows the number
+                suffix = _extract_av_suffix(after_number)
+
+                new_name = f"{number}{suffix}{ext}"
                 if new_folder != parent_leaf or new_name != name:
                     op["new_folder"] = new_folder if new_folder != parent_leaf else None
                     op["new_name"] = new_name if new_name != name else None
