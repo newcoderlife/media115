@@ -1,11 +1,12 @@
 """FileCache tests — SQLite-backed path / directory / rate-limit cache."""
 from __future__ import annotations
 
+import sqlite3
 import time
 
 import pytest
 
-from cloud115.cache import FileCache, _default_db_path
+from cloud115.cache import FileCache, _SCHEMA_VERSION, _default_db_path
 
 
 # ---------------------------------------------------------------------------
@@ -499,3 +500,162 @@ class TestTreeEntry:
         ])
         s = cache.stats()
         assert s["tree_entries"] == 1
+
+
+# ---------------------------------------------------------------------------
+# id-first PK: same-name files with different node_ids
+# ---------------------------------------------------------------------------
+
+class TestIdFirstPK:
+    def test_same_name_different_node_ids_coexist(self, cache):
+        """PK is (parent_cid, node_id) — same-name files must coexist."""
+        e1 = _entry("dup.mkv", node_id="n1", size=100)
+        e2 = _entry("dup.mkv", node_id="n2", size=200)
+        cache.set_dir_listing("d1", [e1, e2])
+        entries = cache.get_dir_entries("d1")
+        assert len(entries) == 2
+        node_ids = {e["node_id"] for e in entries}
+        assert node_ids == {"n1", "n2"}
+
+    def test_add_entry_upserts_by_node_id(self, cache):
+        """add_entry with same node_id updates rather than duplicates."""
+        cache.add_entry("d1", _entry("a.txt", node_id="n1", size=10))
+        cache.add_entry("d1", _entry("a.txt", node_id="n1", size=99))
+        entries = cache.get_dir_entries("d1")
+        assert len(entries) == 1
+        assert entries[0]["size"] == 99
+
+    def test_add_entry_different_node_id_creates_new_row(self, cache):
+        """add_entry with different node_id creates a second row."""
+        cache.add_entry("d1", _entry("dup.txt", node_id="n1", size=10))
+        cache.add_entry("d1", _entry("dup.txt", node_id="n2", size=20))
+        entries = cache.get_dir_entries("d1")
+        assert len(entries) == 2
+
+    def test_find_entry_returns_first_match(self, cache):
+        """find_entry still works when there are duplicates — returns first."""
+        cache.set_dir_listing("d1", [
+            _entry("dup.mkv", node_id="n1"),
+            _entry("dup.mkv", node_id="n2"),
+        ])
+        result = cache.find_entry("d1", "dup.mkv")
+        assert result is not None
+        assert result["node_id"] in {"n1", "n2"}
+
+    def test_find_entries_returns_all_matches(self, cache):
+        """find_entries returns every entry with the given name."""
+        cache.set_dir_listing("d1", [
+            _entry("dup.mkv", node_id="n1", size=100),
+            _entry("dup.mkv", node_id="n2", size=200),
+            _entry("other.txt", node_id="n3"),
+        ])
+        results = cache.find_entries("d1", "dup.mkv")
+        assert len(results) == 2
+        node_ids = {r["node_id"] for r in results}
+        assert node_ids == {"n1", "n2"}
+
+    def test_find_entries_empty_when_not_found(self, cache):
+        cache.set_dir_listing("d1", [_entry("a.txt", node_id="n1")])
+        assert cache.find_entries("d1", "ghost.txt") == []
+
+    def test_remove_entry_removes_all_same_name(self, cache):
+        """remove_entry(name) removes ALL entries with that name."""
+        cache.set_dir_listing("d1", [
+            _entry("dup.mkv", node_id="n1"),
+            _entry("dup.mkv", node_id="n2"),
+            _entry("keep.txt", node_id="n3"),
+        ])
+        cache.remove_entry("d1", "dup.mkv")
+        entries = cache.get_dir_entries("d1")
+        assert len(entries) == 1
+        assert entries[0]["name"] == "keep.txt"
+
+    def test_remove_entry_by_id_targeted_removal(self, cache):
+        """remove_entry_by_id removes exactly one entry."""
+        cache.set_dir_listing("d1", [
+            _entry("dup.mkv", node_id="n1"),
+            _entry("dup.mkv", node_id="n2"),
+        ])
+        cache.remove_entry_by_id("d1", "n1")
+        entries = cache.get_dir_entries("d1")
+        assert len(entries) == 1
+        assert entries[0]["node_id"] == "n2"
+
+    def test_move_entry_updates_parent_cid(self, cache):
+        """move_entry changes parent_cid atomically."""
+        cache.set_dir_listing("src", [_entry("file.mkv", node_id="n1")])
+        cache.set_dir_listing("dst", [])
+
+        cache.move_entry("src", "n1", "dst")
+
+        assert cache.find_entry("src", "file.mkv") is None
+        result = cache.find_entry("dst", "file.mkv")
+        assert result is not None
+        assert result["node_id"] == "n1"
+
+    def test_move_entry_noop_when_not_found(self, cache):
+        """move_entry with unknown node_id is silently a no-op."""
+        cache.set_dir_listing("src", [_entry("file.mkv", node_id="n1")])
+        cache.move_entry("src", "nonexistent", "dst")
+        # Original entry still in src
+        assert cache.find_entry("src", "file.mkv") is not None
+
+
+# ---------------------------------------------------------------------------
+# DB migration: old schema → new schema
+# ---------------------------------------------------------------------------
+
+class TestDbMigration:
+    def test_old_schema_is_migrated(self, tmp_path):
+        """A DB with old PK (parent_cid, name) is silently wiped and recreated."""
+        db_file = tmp_path / "old.db"
+
+        # Build a v1 database with old PK and some data
+        conn = sqlite3.connect(str(db_file))
+        conn.execute("""
+            CREATE TABLE dir_entry (
+                parent_cid TEXT NOT NULL,
+                name       TEXT NOT NULL,
+                type       TEXT NOT NULL,
+                node_id    TEXT NOT NULL,
+                size       INTEGER,
+                pick_code  TEXT,
+                PRIMARY KEY (parent_cid, name)
+            )
+        """)
+        conn.execute(
+            "INSERT INTO dir_entry VALUES ('p1','f.txt','file','old_node',100,'pc')"
+        )
+        conn.execute("PRAGMA user_version = 1")
+        conn.commit()
+        conn.close()
+
+        # Opening with FileCache must not raise and must reset to new schema
+        cache = FileCache(db_file)
+        try:
+            # Old data gone (migration wiped tables)
+            assert cache.find_entry("p1", "f.txt") is None
+            # New schema accepts id-first operations
+            cache.add_entry("p1", _entry("new.txt", node_id="nA"))
+            cache.add_entry("p1", _entry("new.txt", node_id="nB"))
+            assert len(cache.get_dir_entries("p1")) == 2
+        finally:
+            cache.close()
+
+    def test_schema_version_is_set(self, tmp_path):
+        """FileCache sets PRAGMA user_version to _SCHEMA_VERSION."""
+        cache = FileCache(tmp_path / "v.db")
+        version = cache._conn.execute("PRAGMA user_version").fetchone()[0]
+        cache.close()
+        assert version == _SCHEMA_VERSION
+
+    def test_fresh_db_needs_no_migration(self, tmp_path):
+        """Opening a brand-new DB twice does not wipe data."""
+        db_file = tmp_path / "fresh.db"
+        c1 = FileCache(db_file)
+        c1.add_entry("d1", _entry("keep.txt", node_id="n1"))
+        c1.close()
+
+        c2 = FileCache(db_file)
+        assert c2.find_entry("d1", "keep.txt") is not None
+        c2.close()
