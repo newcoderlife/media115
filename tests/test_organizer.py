@@ -981,84 +981,129 @@ class TestSanitize:
         assert _sanitize('<>:"/\\|?*') == ""
 
 
-class TestUploadScrapeOutput:
-    """test_upload_scrape_output: upload NFO + poster from scrape_output."""
+class TestSyncSidecars:
+    """sync_sidecars: unified sidecar upload primitive."""
 
-    def test_uploads_nfo_and_poster(self, tmp_path, monkeypatch):
+    def test_uploads_nfo_and_poster_single_video(self, tmp_path, monkeypatch):
+        """Movie case: one video, NFO renamed to new video name, poster kept."""
         from media115.cache import _cache_root
-        from media115.organizer import _upload_scrape_output
+        from media115.organizer import sync_sidecars
 
-        # Create scrape_output directory structure in the XDG cache location:
-        # <XDG_CACHE_HOME>/media115/scrape_output/<category>/<parent_path_with_underscores>/
         scrape_dir = _cache_root() / "scrape_output" / "movie" / "影音_电影_OldDir"
         scrape_dir.mkdir(parents=True)
-        nfo_file = scrape_dir / "old.nfo"
-        nfo_file.write_text("<movie><title>Test</title></movie>")
-        poster_file = scrape_dir / "poster.jpg"
-        poster_file.write_bytes(b"\xff\xd8fake-jpg")
+        (scrape_dir / "old.nfo").write_text("<movie><title>Test</title></movie>")
+        (scrape_dir / "poster.jpg").write_bytes(b"\xff\xd8fake-jpg")
 
         client = MagicMock()
-        # list_dir returns empty (no existing files to delete)
-        client.list_dir.return_value = []
-        op = {
-            "file": "old.mkv",
-            "parent": "影音/电影/OldDir",
-            "new_name": "New Title (2024).mkv",
-        }
+        client.list_dir.return_value = []  # no existing files
 
         target_dir = "/影音/电影/New Title (2024)"
-        _upload_scrape_output(client, op, target_dir, "New Title (2024).mkv")
+        video_files = [{"file": "old.mkv", "parent": "影音/电影/OldDir", "new_name": "New Title (2024).mkv"}]
+        count = sync_sidecars(client, target_dir, video_files)
 
-        assert client.upload.call_count == 2
-        # Collect the remote names used in upload calls
+        assert count == 2
         upload_calls = client.upload.call_args_list
-        remote_names = set()
-        for call in upload_calls:
-            # upload(local_path, remote_dir, filename)
-            remote_names.add(call.args[2] if len(call.args) > 2 else call.kwargs.get("filename", ""))
-        # NFO should be renamed to match the new video filename
+        remote_names = {
+            call.args[2] if len(call.args) > 2 else call.kwargs.get("filename", "")
+            for call in upload_calls
+        }
         assert "New Title (2024).nfo" in remote_names
-        # Poster keeps its original name
         assert "poster.jpg" in remote_names
 
-    def test_no_scrape_dir_is_noop(self, tmp_path, monkeypatch):
-        from media115.organizer import _upload_scrape_output
+    def test_no_scrape_dir_is_noop(self):
+        """No scrape_output directory → returns 0, no API calls."""
+        from media115.organizer import sync_sidecars
 
-        # No scrape_output directory exists in the isolated XDG cache
         client = MagicMock()
-        op = {"file": "old.mkv", "parent": "影音/电影/OldDir"}
-        _upload_scrape_output(client, op, "/影音/电影/Target", "New Title (2024).mkv")
+        video_files = [{"file": "old.mkv", "parent": "影音/电影/NoSuchDir"}]
+        count = sync_sidecars(client, "/影音/电影/Target", video_files)
 
+        assert count == 0
         client.upload.assert_not_called()
+        client.list_dir.assert_not_called()
 
-    def test_existing_files_batch_deleted(self, tmp_path, monkeypatch):
-        """When old sidecars exist, _upload_scrape_output issues ONE batch delete."""
+    def test_existing_files_batch_deleted(self):
+        """When old sidecars exist, sync_sidecars issues ONE batch delete."""
         from media115.cache import _cache_root
-        from media115.organizer import _upload_scrape_output
+        from media115.organizer import sync_sidecars
 
         scrape_dir = _cache_root() / "scrape_output" / "movie" / "影音_电影_OldDir"
-        scrape_dir.mkdir(parents=True)
+        scrape_dir.mkdir(parents=True, exist_ok=True)
         (scrape_dir / "old.nfo").write_text("<movie/>")
         (scrape_dir / "poster.jpg").write_bytes(b"\xff\xd8fake")
 
         client = MagicMock()
-        # Both sidecar names already exist remotely
         client.list_dir.return_value = [
             {"type": "file", "name": "New Title (2024).nfo"},
             {"type": "file", "name": "poster.jpg"},
         ]
-        op = {"file": "old.mkv", "parent": "影音/电影/OldDir"}
         target_dir = "/影音/电影/New Title (2024)"
+        video_files = [{"file": "old.mkv", "parent": "影音/电影/OldDir", "new_name": "New Title (2024).mkv"}]
 
-        _upload_scrape_output(client, op, target_dir, "New Title (2024).mkv")
+        count = sync_sidecars(client, target_dir, video_files)
 
-        # One batch delete call (not two individual calls)
         client.delete.assert_called_once()
         deleted_paths = client.delete.call_args[0][0]
         assert len(deleted_paths) == 2
         assert all(p.startswith(target_dir) for p in deleted_paths)
-        # Both uploads still happen
-        assert client.upload.call_count == 2
+        assert count == 2
+
+    def test_multiple_videos_shared_files_uploaded_once(self, tmp_path, monkeypatch):
+        """TV episode case: two videos in same dir — tvshow.nfo/poster uploaded only once."""
+        from media115.organizer import sync_sidecars
+        from media115 import cache as media_cache
+
+        scrape_dir = tmp_path / "scrape_output" / "剧目" / "剧目_ShowFolder"
+        scrape_dir.mkdir(parents=True)
+        (scrape_dir / "Show S01E01.nfo").write_text("<ep1/>")
+        (scrape_dir / "Show S01E02.nfo").write_text("<ep2/>")
+        (scrape_dir / "tvshow.nfo").write_text("<tvshow/>")
+        (scrape_dir / "poster.jpg").write_bytes(b"img")
+
+        monkeypatch.setattr(media_cache, "_cache_root", lambda: tmp_path)
+
+        client = MagicMock()
+        client.list_dir.return_value = []
+
+        target_dir = "/影音/剧目/Show (2020)"
+        video_files = [
+            {"file": "Show S01E01.mkv", "parent": "剧目/ShowFolder", "new_name": "Show S01E01.mkv"},
+            {"file": "Show S01E02.mkv", "parent": "剧目/ShowFolder", "new_name": "Show S01E02.mkv"},
+        ]
+        count = sync_sidecars(client, target_dir, video_files)
+
+        upload_calls = client.upload.call_args_list
+        remote_names = [
+            call.args[2] if len(call.args) > 2 else call.kwargs.get("filename", "")
+            for call in upload_calls
+        ]
+        # Shared files uploaded exactly once
+        assert remote_names.count("tvshow.nfo") == 1
+        assert remote_names.count("poster.jpg") == 1
+        # Per-episode NFOs each uploaded once
+        assert remote_names.count("Show S01E01.nfo") == 1
+        assert remote_names.count("Show S01E02.nfo") == 1
+        # Total: 4 files
+        assert count == 4
+        # list_dir called exactly once
+        client.list_dir.assert_called_once_with(target_dir)
+
+    def test_returns_count_of_uploaded_files(self):
+        """Return value equals number of files successfully uploaded."""
+        from media115.cache import _cache_root
+        from media115.organizer import sync_sidecars
+
+        scrape_dir = _cache_root() / "scrape_output" / "av" / "影音_AV_ABC-001"
+        scrape_dir.mkdir(parents=True, exist_ok=True)
+        (scrape_dir / "ABC-001.nfo").write_text("<movie/>")
+
+        client = MagicMock()
+        client.list_dir.return_value = []
+
+        video_files = [{"file": "ABC-001.mkv", "parent": "影音/AV/ABC-001"}]
+        count = sync_sidecars(client, "/影音/AV/ABC-001", video_files)
+
+        assert count == 1
 
 
 class TestPlanScrapeUpload:
@@ -1135,9 +1180,9 @@ def test_plan_scrape_upload_filters_by_video_stem(tmp_path, monkeypatch):
     assert "NewShow S01E02.nfo" not in names
 
 
-def test_phase5_deduplicates_shared_sidecars(tmp_path, monkeypatch):
+def test_sync_sidecars_deduplicates_shared_sidecars(tmp_path, monkeypatch):
     """tvshow.nfo and poster.jpg should only be uploaded once per target dir."""
-    from media115.organizer import _plan_scrape_upload
+    from media115.organizer import sync_sidecars
     from media115 import cache as media_cache
 
     scrape_dir = tmp_path / "scrape_output" / "剧目" / "剧目_ShowFolder"
@@ -1149,28 +1194,21 @@ def test_phase5_deduplicates_shared_sidecars(tmp_path, monkeypatch):
 
     monkeypatch.setattr(media_cache, "_cache_root", lambda: tmp_path)
 
-    # Simulate what Phase 5 does: call _plan_scrape_upload for each episode
-    op1 = {"file": "Show S01E01.mkv", "parent": "剧目/ShowFolder"}
-    op2 = {"file": "Show S01E02.mkv", "parent": "剧目/ShowFolder"}
+    client = MagicMock()
+    client.list_dir.return_value = []
 
-    pairs1 = _plan_scrape_upload(op1, "NewShow S01E01.mkv")
-    pairs2 = _plan_scrape_upload(op2, "NewShow S01E02.mkv")
-
-    # Simulate Phase 5 dedup logic
-    upload_groups: dict = {}
     target = "/影音/剧目/NewShow (2024)"
-    existing = upload_groups.setdefault(target, [])
-    existing_names = {name for _, name in existing}
-    for local_path, remote_name in pairs1:
-        if remote_name not in existing_names:
-            existing.append((local_path, remote_name))
-            existing_names.add(remote_name)
-    for local_path, remote_name in pairs2:
-        if remote_name not in existing_names:
-            existing.append((local_path, remote_name))
-            existing_names.add(remote_name)
+    video_files = [
+        {"file": "Show S01E01.mkv", "parent": "剧目/ShowFolder", "new_name": "NewShow S01E01.mkv"},
+        {"file": "Show S01E02.mkv", "parent": "剧目/ShowFolder", "new_name": "NewShow S01E02.mkv"},
+    ]
+    sync_sidecars(client, target, video_files)
 
-    names = [name for _, name in upload_groups[target]]
+    upload_calls = client.upload.call_args_list
+    names = [
+        call.args[2] if len(call.args) > 2 else call.kwargs.get("filename", "")
+        for call in upload_calls
+    ]
     # Each episode NFO appears once
     assert names.count("NewShow S01E01.nfo") == 1
     assert names.count("NewShow S01E02.nfo") == 1
