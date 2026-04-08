@@ -646,15 +646,16 @@ def _upload_missing_nfo(category: str, skipped_ops: list[dict]):
     for i, (parent, ops) in enumerate(by_parent.items(), 1):
         parent_leaf = parent.split("/")[-1] if "/" in parent else parent
 
+        target_path = "/" + parent
         try:
-            dir_cid = client.resolve_path("/" + parent)
+            client.resolve_path(target_path)
         except FileNotFoundError:
             logger.warning("  补传跳过 %s: 目录不存在", parent)
             continue
 
         print(f"\r  [{i}/{len(by_parent)}] {_trunc(parent_leaf, 50)}", end="", file=sys.stderr, flush=True)
         # 只用第一个 op 触发上传（_upload_scrape_output 会上传整个 scrape_output 目录）
-        _upload_scrape_output(client, ops[0], dir_cid, ops[0].get("file"))
+        _upload_scrape_output(client, ops[0], target_path, ops[0].get("file"))
         uploaded += 1
 
     print("", file=sys.stderr)
@@ -976,7 +977,7 @@ def strm(path, output, host, port):
         strm_file.parent.mkdir(parents=True, exist_ok=True)
 
         # URL-encode the full 115 path for the redirect endpoint
-        encoded_path = quote(full_115_path, safe="")
+        encoded_path = quote(full_115_path, safe="/")
         strm_url = f"{base_url}/redirect/{encoded_path}"
 
         strm_file.write_text(strm_url + "\n")

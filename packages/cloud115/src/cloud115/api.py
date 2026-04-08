@@ -38,7 +38,7 @@ class CloudAPI:
         "Chrome/130.0.0.0 Safari/537.36"
     )
 
-    def __init__(self, cookies: str = "", cache_dir: str | Path | None = None):
+    def __init__(self, cookies: str = "", cache_dir: str | Path | None = None, file_cache: "FileCache | None" = None):
         self._http = httpx.Client(
             timeout=30,
             headers={
@@ -47,8 +47,13 @@ class CloudAPI:
                 "Referer": "https://115.com/",
             },
         )
-        db_path = Path(cache_dir) / "cache.db" if cache_dir else _default_db_path()
-        self._file_cache = FileCache(db_path)
+        if file_cache is not None:
+            self._file_cache = file_cache
+            self._owns_cache = False
+        else:
+            db_path = Path(cache_dir) / "cache.db" if cache_dir else _default_db_path()
+            self._file_cache = FileCache(db_path)
+            self._owns_cache = True
         self._limiter = RateLimiter("api", qps=0.5, qpm=20, cache=self._file_cache)
         self._download_limiter = RateLimiter("download", qps=0.5, qpm=20, cache=self._file_cache)
         # Cookie mode
@@ -63,7 +68,8 @@ class CloudAPI:
 
     def close(self):
         self._http.close()
-        self._file_cache.close()
+        if self._owns_cache:
+            self._file_cache.close()
 
     def __enter__(self):
         return self

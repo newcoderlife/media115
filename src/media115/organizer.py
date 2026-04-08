@@ -2,33 +2,32 @@
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import re
 from pathlib import Path
 
-CHUNK_SIZE = 1024 * 1024  # 1MB
-PRE_SHA1_SIZE = 128 * 1024 * 1024  # 128MB
+_CHUNK_SIZE = 1024 * 1024  # 1MB
+_PRE_SHA1_SIZE = 128 * 1024 * 1024  # 128MB
 
 
 def compute_sha1(file_path: Path) -> str:
     h = hashlib.sha1()
     with open(file_path, "rb") as f:
-        while chunk := f.read(CHUNK_SIZE):
+        while chunk := f.read(_CHUNK_SIZE):
             h.update(chunk)
     return h.hexdigest()
 
 
 def compute_pre_sha1(file_path: Path) -> str:
     file_size = file_path.stat().st_size
-    if file_size <= PRE_SHA1_SIZE:
+    if file_size <= _PRE_SHA1_SIZE:
         return compute_sha1(file_path)
 
     h = hashlib.sha1()
     bytes_read = 0
     with open(file_path, "rb") as f:
-        while bytes_read < PRE_SHA1_SIZE:
-            to_read = min(CHUNK_SIZE, PRE_SHA1_SIZE - bytes_read)
+        while bytes_read < _PRE_SHA1_SIZE:
+            to_read = min(_CHUNK_SIZE, _PRE_SHA1_SIZE - bytes_read)
             chunk = f.read(to_read)
             if not chunk:
                 break
