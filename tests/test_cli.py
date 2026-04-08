@@ -1166,7 +1166,7 @@ class TestUploadMissingNfo:
 
     def test_passes_path_not_cid(self, runner):
         """_upload_missing_nfo must pass a path string (starts with /)
-        to _upload_scrape_output, not a raw CID."""
+        to sync_sidecars, not a raw CID."""
         from media115.cli import _upload_missing_nfo
 
         # DANDY-992 has no NFO in SAMPLE_TREE, so it should be in the missing list
@@ -1183,12 +1183,12 @@ class TestUploadMissingNfo:
         ]
 
         mock_client = MagicMock()
-        mock_client.resolve_path.return_value = "cid_123"
 
         captured_target_dirs = []
 
-        def mock_upload_scrape_output(client, op, target_dir, file):
+        def mock_sync_sidecars(client, target_dir, video_files, category=""):
             captured_target_dirs.append(target_dir)
+            return 0
 
         with runner.isolated_filesystem():
             _write_env()
@@ -1196,8 +1196,8 @@ class TestUploadMissingNfo:
             with (
                 patch("media115.cli._get_client", return_value=mock_client),
                 patch(
-                    "media115.organizer._upload_scrape_output",
-                    side_effect=mock_upload_scrape_output,
+                    "media115.organizer.sync_sidecars",
+                    side_effect=mock_sync_sidecars,
                 ),
             ):
                 _upload_missing_nfo("AV", skipped_ops)
