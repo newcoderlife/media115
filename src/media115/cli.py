@@ -777,10 +777,13 @@ def organize(category, execute, cleanup):
     _upload_missing_nfo(category, skips)
 
     if ok > 0:
-        click.echo(
-            "\nTree cache is now stale. Run 'media115 sync /影音' to refresh.",
-            err=True,
-        )
+        from media115.organizer import verify_organize
+        click.echo("\nVerifying...")
+        verified, mismatches = verify_organize(client, renames, f"/{category_path}")
+        if mismatches:
+            click.echo(f"⚠ {mismatches} 个文件未验证通过")
+        else:
+            click.echo(f"✓ {verified} 个文件验证通过")
 
     if cleanup and ok > 0:
         click.echo("\nCleaning up empty directories...")

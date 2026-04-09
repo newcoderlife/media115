@@ -32,7 +32,7 @@ def _default_db_path() -> Path:
 
 _RATE_LIMIT_FIELDS = frozenset({"cooldown_until", "last_request", "minute_start", "minute_count"})
 
-_SCHEMA_VERSION = 2  # Bump when schema changes
+_SCHEMA_VERSION = 3  # Bump when schema changes
 
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS path_index (
@@ -78,6 +78,11 @@ CREATE TABLE IF NOT EXISTS tree_entry (
 );
 
 CREATE INDEX IF NOT EXISTS idx_tree_parent ON tree_entry(parent);
+
+CREATE TABLE IF NOT EXISTS snapshot_meta (
+    key    TEXT PRIMARY KEY,
+    value  TEXT NOT NULL
+);
 """
 
 
@@ -100,7 +105,7 @@ class FileCache:
         # Cache data is expendable — it rebuilds from API calls.
         version = self._conn.execute("PRAGMA user_version").fetchone()[0]
         if version < _SCHEMA_VERSION:
-            for table in ("dir_entry", "dir_meta", "path_index", "tree_entry"):
+            for table in ("dir_entry", "dir_meta", "path_index", "tree_entry", "snapshot_meta"):
                 self._conn.execute(f"DROP TABLE IF EXISTS {table}")  # noqa: S608
             for idx in ("idx_entry_parent", "idx_entry_node", "idx_entry_name", "idx_tree_parent"):
                 self._conn.execute(f"DROP INDEX IF EXISTS {idx}")  # noqa: S608
@@ -386,8 +391,9 @@ class FileCache:
 
     # ---- tree_entry ------------------------------------------------------
 
-    def set_tree(self, entries: list[dict]) -> None:
+    def set_tree(self, entries: list[dict], root_path: str = "", exported_at=None) -> None:
         """Replace all tree entries atomically. Each entry: {path, n, parent, is_video, is_nfo}."""
+        import time as _time
         with self._conn:
             self._conn.execute("DELETE FROM tree_entry")
             self._conn.executemany(
@@ -397,6 +403,26 @@ class FileCache:
                     for e in entries
                 ],
             )
+            # Record metadata
+            self._conn.execute(
+                "INSERT OR REPLACE INTO snapshot_meta (key, value) VALUES (?, ?)",
+                ("root_path", root_path),
+            )
+            self._conn.execute(
+                "INSERT OR REPLACE INTO snapshot_meta (key, value) VALUES (?, ?)",
+                ("exported_at", str(exported_at or int(_time.time()))),
+            )
+            self._conn.execute(
+                "INSERT OR REPLACE INTO snapshot_meta (key, value) VALUES (?, ?)",
+                ("entry_count", str(len(entries))),
+            )
+
+    def get_snapshot_meta(self) -> dict:
+        """Return snapshot metadata as a key→value dict."""
+        rows = self._conn.execute(
+            "SELECT key, value FROM snapshot_meta"
+        ).fetchall()
+        return {r[0]: r[1] for r in rows}
 
     def get_tree_entries(self, category: str = "") -> list[dict]:
         """Get tree entries, optionally filtered by category path prefix."""
