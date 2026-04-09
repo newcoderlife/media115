@@ -1268,3 +1268,189 @@ class TestGetClient:
                 assert False, "Expected ClickException"
             except click.ClickException as e:
                 assert "未登录" in str(e.format_message())
+
+
+class TestScrapeFix:
+    """Tests for the scrape-fix command."""
+
+    def test_scrape_fix_help(self, runner):
+        result = runner.invoke(main, ["scrape-fix", "--help"])
+        assert result.exit_code == 0
+        assert "FILENAME" in result.output or "filename" in result.output.lower()
+
+    def test_scrape_fix_with_search_movie(self, runner):
+        """--search should call scrape_movie with the given query."""
+        mock_result = {"status": "ok", "match": "守护游戏", "tmdb_id": 1664596}
+
+        with runner.isolated_filesystem():
+            _write_env()
+            _write_tree()
+
+            with patch("media115.scraper.scrape.scrape_movie", return_value=mock_result) as mock_scrape:
+                result = runner.invoke(
+                    main,
+                    ["scrape-fix", "Restart.2026.mkv", "--search", "守护游戏", "--category", "电影"],
+                )
+
+        assert result.exit_code == 0
+        assert "守护游戏" in result.output
+        mock_scrape.assert_called_once()
+        call_args = mock_scrape.call_args
+        assert call_args[0][0] == "守护游戏"
+
+    def test_scrape_fix_with_tmdb_id_movie(self, runner):
+        """--tmdb-id for a movie should fetch by ID and generate NFO."""
+        mock_detail = {
+            "title": "Restart",
+            "original_title": "Restart",
+            "release_date": "2026-01-15",
+            "overview": "A movie about restarting.",
+            "tagline": "",
+            "runtime": 120,
+            "vote_average": 7.5,
+            "vote_count": 1000,
+            "genres": [{"name": "Action"}],
+            "production_companies": [],
+            "production_countries": [],
+            "belongs_to_collection": None,
+            "poster_path": None,
+            "backdrop_path": None,
+        }
+        mock_images = {}
+        mock_credits = {"crew": [], "cast": []}
+
+        with runner.isolated_filesystem():
+            _write_env()
+            _write_tree()
+
+            with (
+                patch.dict(os.environ, {"TMDB_READ_ACCESS_TOKEN": "fake_token"}),
+                patch(
+                    "media115.scraper.scrape._get_tmdb_movie_full",
+                    return_value=(mock_detail, mock_images, mock_credits),
+                ),
+                patch("media115.scraper.scrape._save_tmdb_poster"),
+                patch("media115.scraper.nfo.generate_movie_nfo"),
+                patch("media115.cache.put"),
+            ):
+                result = runner.invoke(
+                    main,
+                    ["scrape-fix", "Restart.2026.mkv", "--tmdb-id", "1664596", "--category", "电影"],
+                )
+
+        assert result.exit_code == 0
+        assert "Restart" in result.output
+        assert "1664596" in result.output
+
+    def test_scrape_fix_with_search_tv(self, runner):
+        """--search for TV category should call scrape_tv."""
+        mock_result = {"status": "ok", "match": "Breaking Bad S01E01", "tmdb_id": 1396}
+
+        with runner.isolated_filesystem():
+            _write_env()
+            _write_tree()
+
+            with patch("media115.scraper.scrape.scrape_tv", return_value=mock_result) as mock_scrape:
+                result = runner.invoke(
+                    main,
+                    [
+                        "scrape-fix",
+                        "Breaking.Bad.S01E01.mkv",
+                        "--search",
+                        "Breaking Bad",
+                        "--category",
+                        "剧目",
+                        "--season",
+                        "1",
+                        "--episode",
+                        "1",
+                    ],
+                )
+
+        assert result.exit_code == 0
+        assert "Breaking Bad" in result.output
+        mock_scrape.assert_called_once()
+        call_args = mock_scrape.call_args
+        assert call_args[0][0] == "Breaking Bad"
+
+    def test_scrape_fix_av_with_number(self, runner):
+        """--number should call scrape_av with the given AV number."""
+        mock_result = {"status": "ok", "match": "T28-003", "number": "T28-003"}
+
+        with runner.isolated_filesystem():
+            _write_env()
+            _write_tree()
+
+            with patch("media115.scraper.scrape.scrape_av", return_value=mock_result) as mock_scrape:
+                result = runner.invoke(
+                    main,
+                    ["scrape-fix", "T-3800040.mkv", "--number", "T28-003", "--category", "AV"],
+                )
+
+        assert result.exit_code == 0
+        assert "T28-003" in result.output
+        mock_scrape.assert_called_once()
+        call_args = mock_scrape.call_args
+        assert call_args[0][0] == "T28-003"
+
+    def test_scrape_fix_auto_detect_av(self, runner):
+        """AV files should auto-detect category as AV."""
+        mock_result = {"status": "ok", "match": "DANDY-992", "number": "DANDY-992"}
+
+        with runner.isolated_filesystem():
+            _write_env()
+            _write_tree()
+
+            with patch("media115.scraper.scrape.scrape_av", return_value=mock_result):
+                result = runner.invoke(
+                    main,
+                    ["scrape-fix", "DANDY-992.mp4"],
+                )
+
+        assert result.exit_code == 0
+        assert "AV" in result.output
+
+    def test_scrape_fix_movie_no_option(self, runner):
+        """Movie without --tmdb-id or --search should print an error."""
+        with runner.isolated_filesystem():
+            _write_env()
+            _write_tree()
+
+            result = runner.invoke(
+                main,
+                ["scrape-fix", "Inception.2010.mkv", "--category", "电影"],
+            )
+
+        assert result.exit_code == 0
+        assert "Error" in result.output or "error" in result.output.lower()
+
+    def test_scrape_fix_tv_no_option(self, runner):
+        """TV without --tmdb-id or --search should print an error."""
+        with runner.isolated_filesystem():
+            _write_env()
+            _write_tree()
+
+            result = runner.invoke(
+                main,
+                ["scrape-fix", "Breaking.Bad.S01E01.mkv", "--category", "剧目"],
+            )
+
+        assert result.exit_code == 0
+        assert "Error" in result.output or "error" in result.output.lower()
+
+    def test_scrape_fix_not_found_result(self, runner):
+        """When scrape_movie returns not_found, should report failure."""
+        mock_result = {"status": "not_found"}
+
+        with runner.isolated_filesystem():
+            _write_env()
+            _write_tree()
+
+            with patch("media115.scraper.scrape.scrape_movie", return_value=mock_result):
+                result = runner.invoke(
+                    main,
+                    ["scrape-fix", "Unknown.Movie.2025.mkv", "--search", "Unknown Movie", "--category", "电影"],
+                )
+
+        assert result.exit_code == 0
+        assert "✗" in result.output or "not_found" in result.output
