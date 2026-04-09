@@ -282,7 +282,7 @@ def auth(app, check, renew, force, get_qr, wait_qr):
     click.echo(f"Cookies saved to {env_path}")
 
 
-VIDEO_EXTS = {".mkv", ".mp4", ".avi", ".ts", ".rmvb", ".wmv", ".flv", ".mov", ".m4v"}
+VIDEO_EXTS = {".mkv", ".mp4", ".avi", ".ts", ".rmvb", ".wmv", ".flv", ".mov", ".m4v", ".iso"}
 NFO_EXT = ".nfo"
 
 
