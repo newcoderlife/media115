@@ -343,17 +343,18 @@ class FileCache:
     # ---- management ------------------------------------------------------
 
     def clear_metadata(self) -> None:
-        """清除缓存元数据（path_index + dir_meta + dir_entry + tree_entry）。不动 rate_limit。"""
+        """Clear all cache data. Keeps rate_limit."""
         with self._conn:
             self._conn.execute("DELETE FROM path_index")
             self._conn.execute("DELETE FROM dir_meta")
             self._conn.execute("DELETE FROM dir_entry")
             self._conn.execute("DELETE FROM tree_entry")
+            self._conn.execute("DELETE FROM snapshot_meta")
 
     def clear(self) -> None:
-        """Delete **all** cached data from every table."""
+        """Clear everything including rate_limit."""
         with self._conn:
-            for table in ("path_index", "dir_meta", "dir_entry", "rate_limit"):
+            for table in ("path_index", "dir_meta", "dir_entry", "rate_limit", "tree_entry", "snapshot_meta"):
                 self._conn.execute(f"DELETE FROM {table}")  # noqa: S608
 
     def try_acquire_slot(self, name: str, now: float, min_interval: float, qpm: int) -> bool:

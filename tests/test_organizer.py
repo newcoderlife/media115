@@ -1319,3 +1319,140 @@ class TestAvOrganizePreservesSuffixes:
 
         ops = build_organize_plan("AV", self._make_tree("dandy-992.mp4"), cache)
         assert ops[0]["new_name"] == "DANDY-992.mp4"
+
+
+# ── verify_organize tests ────────────────────────────────────────────
+
+
+class TestVerifyOrganize:
+    """verify_organize: covers all op types (move+rename, in-place rename, move-only)."""
+
+    def _make_client(self, dir_listing: dict):
+        """Return a mock client whose list_dir returns the given mapping
+        of path → list-of-items."""
+        client = MagicMock()
+
+        def _list_dir(path):
+            if path in dir_listing:
+                return dir_listing[path]
+            raise FileNotFoundError(f"Not found: {path}")
+
+        client.list_dir.side_effect = _list_dir
+        return client
+
+    def test_verify_move_and_rename(self):
+        """Op with both new_folder and new_name → verified when new file exists."""
+        from media115.organizer import verify_organize
+
+        target_dir = "/影音/电影/Inception (2010)"
+        client = self._make_client({
+            target_dir: [{"name": "Inception (2010).mkv", "type": "file"}],
+        })
+
+        ops = [{
+            "file": "old.mkv",
+            "parent": "影音/电影/OldDir",
+            "action": "rename",
+            "new_folder": "Inception (2010)",
+            "new_name": "Inception (2010).mkv",
+        }]
+
+        verified, mismatches = verify_organize(client, ops, "/影音/电影")
+        assert verified == 1
+        assert mismatches == 0
+        client.refresh_paths.assert_called_once_with([target_dir])
+
+    def test_verify_inplace_rename(self):
+        """Op with new_name but no new_folder → verifies in original dir."""
+        from media115.organizer import verify_organize
+
+        original_dir = "/影音/电影/OldDir"
+        client = self._make_client({
+            original_dir: [{"name": "New Name (2020).mkv", "type": "file"}],
+        })
+
+        ops = [{
+            "file": "old.mkv",
+            "parent": "影音/电影/OldDir",
+            "action": "rename",
+            "new_folder": None,
+            "new_name": "New Name (2020).mkv",
+        }]
+
+        verified, mismatches = verify_organize(client, ops, "/影音/电影")
+        assert verified == 1
+        assert mismatches == 0
+        client.refresh_paths.assert_called_once_with([original_dir])
+
+    def test_verify_move_only(self):
+        """Op with new_folder but no new_name → verifies original filename in new folder."""
+        from media115.organizer import verify_organize
+
+        target_dir = "/影音/AV/DANDY-992"
+        client = self._make_client({
+            target_dir: [{"name": "DANDY-992.mp4", "type": "file"}],
+        })
+
+        ops = [{
+            "file": "DANDY-992.mp4",
+            "parent": "影音/AV/OldDir",
+            "action": "rename",
+            "new_folder": "DANDY-992",
+            "new_name": None,
+        }]
+
+        verified, mismatches = verify_organize(client, ops, "/影音/AV")
+        assert verified == 1
+        assert mismatches == 0
+
+    def test_verify_mismatch(self):
+        """File not found at expected location → mismatch count incremented."""
+        from media115.organizer import verify_organize
+
+        target_dir = "/影音/电影/Inception (2010)"
+        # Dir exists but does NOT contain the expected file
+        client = self._make_client({
+            target_dir: [{"name": "something_else.mkv", "type": "file"}],
+        })
+
+        ops = [{
+            "file": "old.mkv",
+            "parent": "影音/电影/OldDir",
+            "action": "rename",
+            "new_folder": "Inception (2010)",
+            "new_name": "Inception (2010).mkv",
+        }]
+
+        verified, mismatches = verify_organize(client, ops, "/影音/电影")
+        assert verified == 0
+        assert mismatches == 1
+
+    def test_verify_dir_not_found(self):
+        """Target dir raises FileNotFoundError → counted as mismatch."""
+        from media115.organizer import verify_organize
+
+        # list_dir always raises
+        client = MagicMock()
+        client.list_dir.side_effect = FileNotFoundError("not found")
+
+        ops = [{
+            "file": "old.mkv",
+            "parent": "影音/电影/OldDir",
+            "action": "rename",
+            "new_folder": "Inception (2010)",
+            "new_name": "Inception (2010).mkv",
+        }]
+
+        verified, mismatches = verify_organize(client, ops, "/影音/电影")
+        assert verified == 0
+        assert mismatches == 1
+
+    def test_verify_empty_ops(self):
+        """Empty ops list returns (0, 0) without calling refresh_paths."""
+        from media115.organizer import verify_organize
+
+        client = MagicMock()
+        verified, mismatches = verify_organize(client, [], "/影音/电影")
+        assert verified == 0
+        assert mismatches == 0
+        client.refresh_paths.assert_not_called()
