@@ -704,77 +704,67 @@ def register(cli: click.Group):
     @click.argument("path")
     @click.option("--execute", is_flag=True, help="执行删除（默认 dry-run）")
     def dedup(path, execute):
-        """清理目录下的重复文件。
-
-        扫描子目录，按文件名分组，同名文件保留一个，删除其余副本。
-        115 上传同名文件时不覆盖而是创建完全同名的副本，此命令清理这些副本。
-        """
+        """清理目录下的重复文件。按文件名分组，同名文件保留一个。"""
         from collections import defaultdict
 
-        try:
-            client = _get_client()
-        except click.ClickException as e:
-            raise e
+        client = _get_client()
 
-        try:
-            items = client.list_dir(path)
-        except FileNotFoundError:
-            raise click.ClickException(f"目录不存在: {path!r}")
+        # Get subdirectories (use cache for this)
+        items = client.list_dir(path)
+        subdirs = [(item["name"], item.get("cid", "")) for item in items if item.get("type") == "dir"]
 
-        subdirs = [
-            (item["name"], path.rstrip("/") + "/" + item["name"])
-            for item in items
-            if item.get("type") == "dir"
-        ]
+        if not subdirs:
+            click.echo("没有子目录")
+            return
 
         total_dupes = 0
-        all_dupe_paths: list[str] = []
+        all_dupe_fids = []
 
-        for dir_name, dir_path in subdirs:
-            files = client.list_dir_uncached(dir_path)
-            # 按文件名分组
-            by_name: dict[str, list[dict]] = defaultdict(list)
+        for dir_name, _ in subdirs:
+            subdir_path = path.rstrip("/") + "/" + dir_name
+            # Must use uncached listing to see same-name duplicates
+            files = client.list_dir_uncached(subdir_path)
+
+            # Group by name, keeping fid
+            by_name = defaultdict(list)
             for f in files:
                 if f.get("type") != "file":
                     continue
-                by_name[f["name"]].append(f)
+                by_name[f["name"]].append(f.get("fid", ""))
 
-            # 同名文件 > 1 个的，保留第一个，其余是重复
+            # Same name > 1 = duplicates (keep first, delete rest)
             dupes = []
-            for name, file_list in by_name.items():
-                if len(file_list) > 1:
-                    # Keep first, mark rest as dupes
-                    for f in file_list[1:]:
-                        dupe_path = dir_path.rstrip("/") + "/" + f["name"]
-                        dupes.append((name, dupe_path, f.get("fid", "")))
+            for name, fids in by_name.items():
+                if len(fids) > 1:
+                    dupes.extend((name, fid) for fid in fids[1:])
 
             if dupes:
                 click.echo(f"{dir_name}/: {len(dupes)} 个重复文件")
                 shown = set()
-                for name, _, _ in dupes[:5]:
+                for name, _fid in dupes[:5]:
                     if name not in shown:
-                        count = sum(1 for n, _, _ in dupes if n == name)
+                        count = sum(1 for n, _ in dupes if n == name)
                         click.echo(f"  {name} (x{count} 副本)")
                         shown.add(name)
                 if len(dupes) > 5:
-                    click.echo(f"  ...")
+                    click.echo("  ...")
                 total_dupes += len(dupes)
-                all_dupe_paths.extend(dp for _, dp, _ in dupes)
+                all_dupe_fids.extend(fid for _, fid in dupes if fid)
 
         click.echo(f"\n共 {total_dupes} 个重复文件待清理")
 
-        if not all_dupe_paths:
+        if not all_dupe_fids:
             return
 
         if execute:
             batch_size = 50
             deleted = 0
-            for i in range(0, len(all_dupe_paths), batch_size):
-                batch = all_dupe_paths[i:i + batch_size]
-                client.delete(batch)
+            for i in range(0, len(all_dupe_fids), batch_size):
+                batch = all_dupe_fids[i:i + batch_size]
+                client.delete_by_ids(batch)
                 deleted += len(batch)
-                click.echo(f"  已删除 {deleted}/{len(all_dupe_paths)}")
-            click.echo(f"清理完成: 删除 {len(all_dupe_paths)} 个重复文件")
+                click.echo(f"  已删除 {deleted}/{len(all_dupe_fids)}")
+            click.echo(f"清理完成: 删除 {len(all_dupe_fids)} 个重复文件")
         else:
             click.echo("(dry-run) 使用 --execute 执行删除")
 
