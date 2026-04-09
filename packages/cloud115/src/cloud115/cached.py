@@ -691,13 +691,13 @@ class CachedClient:
     # TREE CACHE (export_tree → SQLite tree_entry)
     # ================================================================
 
-    def save_tree(self, tree_text: str, video_exts: set[str], nfo_ext: str = ".nfo") -> int:
+    def save_tree(self, tree_text: str, video_exts: set[str], nfo_ext: str = ".nfo", root_path: str = "") -> int:
         """Parse export_tree text and save to SQLite tree_entry table.
 
         Returns the number of entries saved.
         """
         entries = self._parse_tree_text(tree_text, video_exts, nfo_ext)
-        self._cache.set_tree(entries)
+        self._cache.set_tree(entries, root_path=root_path)
         return len(entries)
 
     def get_tree_entries(self, category: str = "") -> list[dict]:

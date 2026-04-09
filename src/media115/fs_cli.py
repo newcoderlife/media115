@@ -356,7 +356,7 @@ def register(cli: click.Group):
         click.echo(f"已保存 tree_cache.txt：{len(lines)} 行，{video_count} 个视频文件")
 
         # Also save to SQLite tree_entry table
-        count = client.save_tree(text, VIDEO_EXTS)
+        count = client.save_tree(text, VIDEO_EXTS, root_path=path)
         stats = client.tree_stats()
         click.echo(
             f"已保存到缓存：{stats['total']} 条目，{stats['videos']} 个视频，{stats['nfos']} 个 NFO"
