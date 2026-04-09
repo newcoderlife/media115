@@ -1058,6 +1058,186 @@ def scrape(query, source, language):
         click.echo("  (network access to javbus.com required)")
 
 
+@main.command("scrape-fix")
+@click.argument("filename")
+@click.option("--tmdb-id", type=int, help="Specify exact TMDB ID (movie or TV)")
+@click.option("--search", "search_query", help="Search TMDB/jav321 with a different query")
+@click.option("--number", help="Specify AV number for AV files")
+@click.option("--category", default=None, help="Category (电影/剧目/AV), auto-detected if omitted")
+@click.option("--season", type=int, default=None, help="Season number (for TV)")
+@click.option("--episode", type=int, default=None, help="Episode number (for TV)")
+def scrape_fix(filename, tmdb_id, search_query, number, category, season, episode):
+    """手动修正刮削结果。用于 batch-scrape 匹配错误时。
+
+    FILENAME: the video filename (e.g. "Restart.2026...mkv")
+
+    Examples:
+
+        media115 scrape-fix "Restart.2026.mkv" --tmdb-id 1664596
+
+        media115 scrape-fix "Restart.2026.mkv" --search "守护游戏"
+
+        media115 scrape-fix "T-3800040.mkv" --number "T28-003"
+    """
+    from media115.scraper.analyzer import analyze_filename
+    from media115.scraper.scrape import scrape_av, scrape_movie, scrape_tv
+    from media115.utils import stem as _u_stem
+
+    # Auto-detect category from filename if not specified
+    if not category:
+        analysis = analyze_filename(filename)
+        if number:
+            category = "AV"
+        elif analysis.media_type == "av":
+            category = "AV"
+        elif analysis.media_type in ("tv", "anime"):
+            category = "剧目"
+        else:
+            category = "电影"
+
+    # Determine the scrape_output directory
+    # Try to find existing output dir from batch-scrape, or create one
+    entries = _get_tree_entries()
+    # Find this file in tree to get its parent path
+    matching = [e for e in entries if e["n"] == filename]
+    if matching:
+        parent = matching[0]["parent"]
+        search_name = parent.replace("/", "_")
+    else:
+        # Fallback: use filename stem
+        search_name = _u_stem(filename)
+
+    out_dir = media_cache._cache_dir("scrape_output") / category / search_name
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    click.echo(f"Category: {category}, Output: {out_dir}")
+
+    result = None
+
+    if category == "AV":
+        av_number = number or analyze_filename(filename).title
+        if not av_number:
+            click.echo("Error: cannot determine AV number. Use --number.", err=True)
+            return
+        click.echo(f"Scraping AV: {av_number}")
+        result = scrape_av(av_number, filename, out_dir)
+
+    elif category == "剧目":
+        if tmdb_id:
+            # Fetch TV by ID
+            from media115.scraper.tmdb import TMDBClient
+
+            token = os.environ.get("TMDB_READ_ACCESS_TOKEN", "")
+            if not token:
+                click.echo("Error: TMDB_READ_ACCESS_TOKEN not set", err=True)
+                return
+            client = TMDBClient(read_access_token=token)
+            try:
+                detail = client.tv_detail(tmdb_id)
+                title = detail.get("name", "")
+                click.echo(f"Found: {title} (TMDB TV {tmdb_id})")
+                s = season if season is not None else 1
+                e = episode
+                result = scrape_tv(title, s, e, filename, out_dir)
+            finally:
+                client.close()
+        elif search_query:
+            analysis = analyze_filename(filename)
+            s = season if season is not None else (analysis.season or 1)
+            e = episode if episode is not None else analysis.episode
+            result = scrape_tv(search_query, s, e, filename, out_dir)
+        else:
+            click.echo("Error: need --tmdb-id or --search for TV", err=True)
+            return
+
+    else:  # 电影
+        if tmdb_id:
+            # Fetch movie by ID directly
+            from media115.scraper.nfo import generate_movie_nfo
+            from media115.scraper.scrape import _get_tmdb_movie_full, _save_tmdb_poster
+            from media115.scraper.tmdb import TMDBClient
+            from media115.utils import stem as _stem
+
+            token = os.environ.get("TMDB_READ_ACCESS_TOKEN", "")
+            if not token:
+                click.echo("Error: TMDB_READ_ACCESS_TOKEN not set", err=True)
+                return
+            client = TMDBClient(read_access_token=token)
+            try:
+                detail, images, credits = _get_tmdb_movie_full(client, tmdb_id)
+                title = detail.get("title", "")
+                year = int((detail.get("release_date", "") or "0000")[:4]) or None
+                click.echo(f"Found: {title} ({year}) — TMDB {tmdb_id}")
+
+                # Build metadata (same as scrape_movie)
+                collection = detail.get("belongs_to_collection")
+                metadata = {
+                    "title": title,
+                    "originaltitle": detail.get("original_title", ""),
+                    "year": year or 0,
+                    "plot": detail.get("overview", ""),
+                    "tagline": detail.get("tagline", ""),
+                    "runtime": detail.get("runtime"),
+                    "rating": detail.get("vote_average"),
+                    "votes": detail.get("vote_count"),
+                    "premiered": detail.get("release_date", ""),
+                    "genres": [g["name"] for g in detail.get("genres", [])],
+                    "studios": [c["name"] for c in detail.get("production_companies", [])],
+                    "countries": [c["name"] for c in detail.get("production_countries", [])],
+                    "set": collection["name"] if collection else None,
+                    "directors": [
+                        p["name"] for p in credits.get("crew", []) if p.get("job") == "Director"
+                    ],
+                    "actors": [
+                        {"name": a["name"], "role": a.get("character", "")}
+                        for a in credits.get("cast", [])[:15]
+                    ],
+                    "uniqueids": {"tmdb": str(tmdb_id)},
+                    "thumb": (
+                        f"https://image.tmdb.org/t/p/original{detail['poster_path']}"
+                        if detail.get("poster_path")
+                        else None
+                    ),
+                    "fanart": (
+                        f"https://image.tmdb.org/t/p/original{detail['backdrop_path']}"
+                        if detail.get("backdrop_path")
+                        else None
+                    ),
+                }
+
+                stem = _stem(filename)
+                generate_movie_nfo(metadata, out_dir / f"{stem}.nfo")
+                _save_tmdb_poster(images, out_dir)
+
+                # Update file_map
+                media_cache.put("file_map", stem, {
+                    "type": "movie",
+                    "title": title,
+                    "year": year or 0,
+                    "tmdb_id": tmdb_id,
+                })
+
+                result = {"status": "ok", "match": title, "tmdb_id": tmdb_id}
+            finally:
+                client.close()
+        elif search_query:
+            analysis = analyze_filename(filename)
+            result = scrape_movie(search_query, analysis.year, filename, out_dir)
+        else:
+            click.echo("Error: need --tmdb-id or --search", err=True)
+            return
+
+    # Report
+    if result and result.get("status") == "ok":
+        match = result.get("match", "")
+        sid = result.get("tmdb_id", result.get("number", ""))
+        click.echo(f"✓ {match} ({sid})")
+        click.echo(f"Output: {out_dir}")
+        click.echo(f"\nNext: run 'organize {category}' to apply.")
+    else:
+        click.echo(f"✗ {result}")
+
+
 def _get_client():
     """Get authenticated CachedClient."""
     import os
