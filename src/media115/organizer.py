@@ -64,10 +64,13 @@ def _extract_av_suffix(after_number: str) -> str:
     if s.startswith("-C") and (len(s) == 2 or not s[2].isalpha()):
         return "-C"
 
-    # Pattern 2: Single letter A-D immediately after number (multi-disc)
-    # e.g., "A.FHD", "B_4K", "A_4K^WM"
+    # Pattern 2: Single letter A-D (multi-disc)
+    # e.g., "A.FHD", "B_4K", "A_4K^WM", ".A", ".B" (already organized)
     if s and s[0] in "ABCDabcd" and (len(s) == 1 or not s[1].isalnum() or s[1].isdigit()):
         return "." + s[0].upper()
+    # Also match ".A", ".B" etc (after previous organize added the dot)
+    if len(s) >= 2 and s[0] in "._" and s[1] in "ABCDabcd" and (len(s) == 2 or not s[2].isalnum()):
+        return "." + s[1].upper()
 
     # Pattern 3: .Part1, _Part2 etc
     part_m = re.match(r'[._-]?(Part\d+)', s, re.IGNORECASE)
