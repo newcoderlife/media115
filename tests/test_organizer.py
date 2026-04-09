@@ -684,13 +684,16 @@ class TestExecuteOrganizePlanBasic:
 
         client = make_mock_client()
         # Phase 1: list_dir for parent dir returns the file
+        # Phase 2: pre-list category dir (new_folder not present → mkdir called)
         # Phase 6: list_dir for category + OldDir cleanup
         client.list_dir.side_effect = [
-            # First call: list files inside OldDir (Phase 1)
+            # Phase 1: list files inside OldDir
             [{"name": "old.mkv", "type": "file", "fid": "fid_1"}],
-            # Second call: Phase 6 category listing
+            # Phase 2: category listing (new_folder not present → mkdir will be called)
             [{"name": "OldDir", "type": "dir", "cid": "dir_cid_1"}],
-            # Third call: Phase 6 list OldDir contents (no videos)
+            # Phase 6: category listing
+            [{"name": "OldDir", "type": "dir", "cid": "dir_cid_1"}],
+            # Phase 6: list OldDir contents (no videos)
             [{"name": "poster.jpg", "type": "file", "fid": "fid_poster"}],
         ]
 
@@ -725,6 +728,8 @@ class TestExecuteOrganizePlanRenameOnly:
         client.list_dir.side_effect = [
             # Phase 1: list files inside OldDir
             [{"name": "old.mkv", "type": "file", "fid": "fid_1"}],
+            # Phase 2: pre-list category dir (no new_folder → no mkdir)
+            [{"name": "OldDir", "type": "dir", "cid": "dir_cid_1"}],
         ]
         monkeypatch.setattr("media115.organizer._plan_scrape_upload", lambda *a, **kw: [])
 
@@ -754,6 +759,8 @@ class TestExecuteOrganizePlanMoveFailure:
         client.list_dir.side_effect = [
             # Phase 1: list files inside OldDir
             [{"name": "old.mkv", "type": "file", "fid": "fid_1"}],
+            # Phase 2: pre-list category dir (new_folder not present → mkdir called)
+            [{"name": "OldDir", "type": "dir", "cid": "dir_cid_1"}],
             # Phase 6: category listing (OldDir still has video since move failed)
             [{"name": "OldDir", "type": "dir", "cid": "dir_cid_1"}],
             # Phase 6: OldDir contents
@@ -787,6 +794,8 @@ class TestExecuteOrganizePlanRenameFailure:
         client.list_dir.side_effect = [
             # Phase 1: list files inside OldDir
             [{"name": "old.mkv", "type": "file", "fid": "fid_1"}],
+            # Phase 2: pre-list category dir (no new_folder → no mkdir)
+            [{"name": "OldDir", "type": "dir", "cid": "dir_cid_1"}],
         ]
         # No new_folder so no move happens; only rename
         client.batch_rename.side_effect = Exception("rename API error")
@@ -815,6 +824,8 @@ class TestExecuteOrganizePlanPhase6Cleanup:
         client.list_dir.side_effect = [
             # Phase 1: files in OldDir
             [{"name": "old.mkv", "type": "file", "fid": "fid_1"}],
+            # Phase 2: pre-list category dir (new_folder not present → mkdir called)
+            [{"name": "OldDir", "type": "dir", "cid": "dir_cid_1"}],
             # Phase 6: category listing
             [{"name": "OldDir", "type": "dir", "cid": "dir_cid_1"}],
             # Phase 6: OldDir contents -- only metadata, no video
@@ -843,6 +854,8 @@ class TestExecuteOrganizePlanPhase6SkipVideo:
         client.list_dir.side_effect = [
             # Phase 1: list files inside OldDir
             [{"name": "old.mkv", "type": "file", "fid": "fid_1"}],
+            # Phase 2: pre-list category dir (new_folder not present → mkdir called)
+            [{"name": "OldDir", "type": "dir", "cid": "dir_cid_1"}],
             # Phase 6: category listing
             [{"name": "OldDir", "type": "dir", "cid": "dir_cid_1"}],
             # Phase 6: OldDir still has a video file
@@ -869,8 +882,10 @@ class TestExecuteOrganizePlanNotFound:
 
         client = make_mock_client()
         client.list_dir.side_effect = [
-            # Files in OldDir -- does NOT include old.mkv
+            # Phase 1: files in OldDir -- does NOT include old.mkv
             [{"name": "different.mkv", "type": "file", "fid": "fid_other"}],
+            # Phase 2: pre-list category dir (resolved is empty, target_folders empty)
+            [{"name": "OldDir", "type": "dir", "cid": "dir_cid_1"}],
         ]
         monkeypatch.setattr("media115.organizer._plan_scrape_upload", lambda *a, **kw: [])
 
@@ -940,6 +955,8 @@ class TestExecuteOrganizePlanMkdirException:
         client.list_dir.side_effect = [
             # Phase 1: files in OldDir
             [{"name": "old.mkv", "type": "file", "fid": "fid_1"}],
+            # Phase 2: pre-list category dir (new_folder not present → mkdir attempted)
+            [{"name": "OldDir", "type": "dir", "cid": "dir_cid_1"}],
             # Phase 6: category listing
             [{"name": "OldDir", "type": "dir", "cid": "dir_cid_1"}],
             # Phase 6: OldDir contents
@@ -955,6 +972,135 @@ class TestExecuteOrganizePlanMkdirException:
         client.move.assert_called_once_with(
             ["/影音/电影/OldDir/old.mkv"], "/影音/电影/New Title (2024)"
         )
+
+
+class TestPhase2PrelistCategoryDir:
+    """Phase 2 pre-lists the category dir once before mkdir to skip existing dirs."""
+
+    def test_list_dir_called_once_before_mkdir(self, monkeypatch):
+        """list_dir(cat_path) is called once in Phase 2; mkdir is skipped for existing dirs."""
+        from media115 import cache as _cache
+        from media115.organizer import execute_organize_plan
+        from unittest.mock import call
+
+        monkeypatch.setattr(_cache, "get", lambda *a, **kw: None)
+        monkeypatch.setattr(_cache, "put", lambda *a, **kw: None)
+
+        client = make_mock_client()
+        # "New Title (2024)" already exists in the category dir
+        client.list_dir.side_effect = [
+            # Phase 1: files in OldDir
+            [{"name": "old.mkv", "type": "file", "fid": "fid_1"}],
+            # Phase 2: category dir listing — target folder already present
+            [{"name": "New Title (2024)", "type": "dir", "cid": "dir_cid_2"}],
+            # Phase 6: category listing
+            [{"name": "OldDir", "type": "dir", "cid": "dir_cid_1"}],
+            # Phase 6: OldDir contents (no video)
+            [{"name": "poster.jpg", "type": "file", "fid": "fid_poster"}],
+        ]
+        monkeypatch.setattr("media115.organizer._plan_scrape_upload", lambda *a, **kw: [])
+
+        ops = [_make_op()]
+        results = execute_organize_plan(ops, client, "影音/电影")
+
+        assert results[0]["status"] == "ok"
+        # mkdir should NOT be called since the folder already exists
+        client.mkdir.assert_not_called()
+        # The Phase 2 list_dir call should be for the category path
+        list_dir_calls = client.list_dir.call_args_list
+        phase2_call = list_dir_calls[1]  # second call is Phase 2
+        assert phase2_call == call("/影音/电影")
+
+    def test_mkdir_called_for_new_dirs_only(self, monkeypatch):
+        """When the target folder is absent from the pre-list, mkdir is called."""
+        from media115 import cache as _cache
+        from media115.organizer import execute_organize_plan
+
+        monkeypatch.setattr(_cache, "get", lambda *a, **kw: None)
+        monkeypatch.setattr(_cache, "put", lambda *a, **kw: None)
+
+        client = make_mock_client()
+        client.list_dir.side_effect = [
+            # Phase 1: files in OldDir
+            [{"name": "old.mkv", "type": "file", "fid": "fid_1"}],
+            # Phase 2: category dir listing — new folder NOT present
+            [{"name": "OtherDir", "type": "dir", "cid": "dir_cid_x"}],
+            # Phase 6: category listing
+            [{"name": "OldDir", "type": "dir", "cid": "dir_cid_1"}],
+            # Phase 6: OldDir contents (no video)
+            [{"name": "poster.jpg", "type": "file", "fid": "fid_poster"}],
+        ]
+        monkeypatch.setattr("media115.organizer._plan_scrape_upload", lambda *a, **kw: [])
+
+        ops = [_make_op()]
+        results = execute_organize_plan(ops, client, "影音/电影")
+
+        assert results[0]["status"] == "ok"
+        client.mkdir.assert_called_once_with("/影音/电影/New Title (2024)")
+
+
+class TestSyncSidecarsSkipListing:
+    """sync_sidecars skip_listing parameter avoids list_dir for new empty dirs."""
+
+    def test_skip_listing_true_does_not_call_list_dir(self, tmp_path, monkeypatch):
+        """With skip_listing=True, list_dir is never called."""
+        from media115.organizer import sync_sidecars
+        from media115 import cache as media_cache
+
+        scrape_dir = tmp_path / "scrape_output" / "movie" / "影音_电影_OldDir"
+        scrape_dir.mkdir(parents=True)
+        (scrape_dir / "old.nfo").write_text("<movie/>")
+        (scrape_dir / "poster.jpg").write_bytes(b"fake")
+
+        monkeypatch.setattr(media_cache, "_cache_root", lambda: tmp_path)
+
+        client = MagicMock()
+        video_files = [{"file": "old.mkv", "parent": "影音/电影/OldDir", "new_name": "New (2024).mkv"}]
+        count = sync_sidecars(client, "/影音/电影/New (2024)", video_files, skip_listing=True)
+
+        client.list_dir.assert_not_called()
+        client.delete.assert_not_called()
+        assert count == 2
+
+    def test_skip_listing_false_calls_list_dir(self, tmp_path, monkeypatch):
+        """With skip_listing=False (default), list_dir is called once."""
+        from media115.organizer import sync_sidecars
+        from media115 import cache as media_cache
+
+        scrape_dir = tmp_path / "scrape_output" / "movie" / "影音_电影_OldDir"
+        scrape_dir.mkdir(parents=True)
+        (scrape_dir / "old.nfo").write_text("<movie/>")
+
+        monkeypatch.setattr(media_cache, "_cache_root", lambda: tmp_path)
+
+        client = MagicMock()
+        client.list_dir.return_value = []
+        target_dir = "/影音/电影/New (2024)"
+        video_files = [{"file": "old.mkv", "parent": "影音/电影/OldDir", "new_name": "New (2024).mkv"}]
+        count = sync_sidecars(client, target_dir, video_files, skip_listing=False)
+
+        client.list_dir.assert_called_once_with(target_dir)
+        assert count == 1
+
+    def test_skip_listing_default_is_false(self, tmp_path, monkeypatch):
+        """Default behavior (no skip_listing arg) calls list_dir."""
+        from media115.organizer import sync_sidecars
+        from media115 import cache as media_cache
+
+        scrape_dir = tmp_path / "scrape_output" / "movie" / "影音_电影_OldDir"
+        scrape_dir.mkdir(parents=True)
+        (scrape_dir / "old.nfo").write_text("<movie/>")
+
+        monkeypatch.setattr(media_cache, "_cache_root", lambda: tmp_path)
+
+        client = MagicMock()
+        client.list_dir.return_value = []
+        target_dir = "/影音/电影/New (2024)"
+        video_files = [{"file": "old.mkv", "parent": "影音/电影/OldDir", "new_name": "New (2024).mkv"}]
+        count = sync_sidecars(client, target_dir, video_files)
+
+        client.list_dir.assert_called_once_with(target_dir)
+        assert count == 1
 
 
 class TestSanitize:

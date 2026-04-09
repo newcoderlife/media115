@@ -294,17 +294,30 @@ def execute_organize_plan(
 
     logger.info("  Resolved %d/%d files", len(resolved), len(active_ops))
 
-    # Phase 2: Create all target directories
+    # Phase 2: Create target directories (only those that don't exist)
     target_folders = {op.get("new_folder") for op, _ in resolved if op.get("new_folder")}
     created_folders: set[str] = set()
+    newly_created: set[str] = set()
     logger.info("  Creating %d directories...", len(target_folders))
+
+    # List category dir once to find existing subdirs — avoids blind mkdir calls
+    try:
+        existing_items = client.list_dir(cat_path)
+        existing_dirs = {item["name"] for item in existing_items if item.get("type") == "dir"}
+    except Exception:
+        existing_dirs = set()
+
     for folder in target_folders:
+        if folder in existing_dirs:
+            # Already exists — treat as created so moves/renames proceed
+            created_folders.add(folder)
+            continue
         try:
             client.mkdir(cat_path + "/" + folder)
             created_folders.add(folder)
+            newly_created.add(folder)
         except Exception:
-            # mkdir may fail if already exists in some edge cases;
-            # try to verify it exists
+            # Last-resort: mkdir may still fail for other reasons; verify existence
             try:
                 client.resolve_path(cat_path + "/" + folder)
                 created_folders.add(folder)
@@ -403,7 +416,9 @@ def execute_organize_plan(
             f"\r  [{idx}/{num_groups}] {display_dir}",
             end="", file=sys.stderr, flush=True,
         )
-        total_uploaded += sync_sidecars(client, upload_dir, vf_list)
+        dir_name = upload_dir.rsplit("/", 1)[-1]
+        is_new = dir_name in newly_created
+        total_uploaded += sync_sidecars(client, upload_dir, vf_list, skip_listing=is_new)
 
     print("", file=sys.stderr)  # newline
     logger.info(
@@ -544,6 +559,7 @@ def sync_sidecars(
     target_dir: str,
     video_files: list[dict],
     category: str = "",
+    skip_listing: bool = False,
 ) -> int:
     """Sync local scrape_output (NFO/poster) to a 115 directory.
 
@@ -558,6 +574,8 @@ def sync_sidecars(
         video_files: list of dicts, each with at least {"file": "name.mkv",
             "parent": "category/dir"} and optionally {"new_name": "optional_new.mkv"}
         category: optional category string (unused, reserved for future filtering)
+        skip_listing: if True, skip the initial list_dir call (for newly created
+            empty directories where no stale sidecars can exist)
 
     Returns:
         number of files uploaded
@@ -579,28 +597,29 @@ def sync_sidecars(
     if not uploads:
         return 0
 
-    # Step 2: List target directory once
+    # Step 2: List target directory once (skip for newly created empty dirs)
     existing_names: dict[str, bool] = {}
-    try:
-        items = client.list_dir(target_dir)
-        existing_names = {
-            item["name"]: True for item in items if item.get("type") == "file"
-        }
-    except Exception:
-        pass
-
-    # Step 3: Batch delete stale sidecars
-    to_delete = [
-        target_dir + "/" + remote_name
-        for _, remote_name in uploads
-        if existing_names.get(remote_name)
-    ]
-    if to_delete:
+    if not skip_listing:
         try:
-            client.delete(to_delete)
-            _log.debug("  deleted %d old sidecar(s) in %s", len(to_delete), target_dir)
-        except Exception as e:
-            _log.warning("  delete old sidecars failed in %s: %s", target_dir, e)
+            items = client.list_dir(target_dir)
+            existing_names = {
+                item["name"]: True for item in items if item.get("type") == "file"
+            }
+        except Exception:
+            pass
+
+        # Step 3: Batch delete stale sidecars
+        to_delete = [
+            target_dir + "/" + remote_name
+            for _, remote_name in uploads
+            if existing_names.get(remote_name)
+        ]
+        if to_delete:
+            try:
+                client.delete(to_delete)
+                _log.debug("  deleted %d old sidecar(s) in %s", len(to_delete), target_dir)
+            except Exception as e:
+                _log.warning("  delete old sidecars failed in %s: %s", target_dir, e)
 
     # Step 4: Upload new sidecar files
     uploaded = 0
