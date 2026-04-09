@@ -349,7 +349,7 @@ def register(cli: click.Group):
         tree_path.write_text(text, encoding="utf-8")
 
         lines = text.strip().split("\n")
-        VIDEO_EXTS = {".mkv", ".mp4", ".avi", ".ts", ".rmvb", ".wmv", ".flv", ".mov", ".m4v"}
+        VIDEO_EXTS = {".mkv", ".mp4", ".avi", ".ts", ".rmvb", ".wmv", ".flv", ".mov", ".m4v", ".iso"}
         video_count = sum(
             1 for ln in lines if any(ln.rstrip().lower().endswith(ext) for ext in VIDEO_EXTS)
         )
