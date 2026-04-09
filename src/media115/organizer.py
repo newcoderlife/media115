@@ -444,6 +444,47 @@ def execute_organize_plan(
     return results
 
 
+def verify_organize(client, ops: list[dict], cat_path: str) -> tuple[int, int]:
+    """Verify organize results by refreshing touched directories.
+
+    Returns (verified_count, mismatch_count).
+    """
+    # Collect unique target directories
+    touched = set()
+    for op in ops:
+        if op.get("new_folder"):
+            touched.add(cat_path + "/" + op["new_folder"])
+
+    if not touched:
+        return 0, 0
+
+    # Refresh only touched dirs
+    client.refresh_paths(list(touched))
+
+    # Verify: check each renamed file exists at expected location
+    verified = 0
+    mismatches = 0
+    for op in ops:
+        if not op.get("new_name"):
+            continue
+        target_dir = (
+            cat_path + "/" + op["new_folder"]
+            if op.get("new_folder")
+            else "/" + op["parent"]
+        )
+        try:
+            items = client.list_dir(target_dir)
+            names = {item["name"] for item in items}
+            if op["new_name"] in names:
+                verified += 1
+            else:
+                mismatches += 1
+        except FileNotFoundError:
+            mismatches += 1
+
+    return verified, mismatches
+
+
 def _plan_scrape_upload(
     op: dict, new_video_name: str | None = None,
 ) -> list[tuple]:
