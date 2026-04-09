@@ -321,7 +321,7 @@ def export_tree(path):
     click.echo(f"Saved to {tree_path}")
 
     # Also save to SQLite tree_entry table
-    count = client.save_tree(text, VIDEO_EXTS)
+    count = client.save_tree(text, VIDEO_EXTS, root_path=path)
     stats = client.tree_stats()
     click.echo(
         f"Saved to SQLite: {stats['total']} entries, {stats['videos']} videos, {stats['nfos']} NFOs"

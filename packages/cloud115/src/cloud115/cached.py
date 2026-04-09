@@ -381,14 +381,14 @@ class CachedClient:
             parent_cid, node_id, new_name,
         )
 
-    def delete_by_ids(self, file_ids: list) -> None:
-        """Delete files by their fid/cid directly. For dedup and other id-targeted operations."""
+    def delete_by_ids(self, file_ids: list, refresh_dirs=None) -> None:
+        """Delete files by fid. Optionally refresh parent dirs after."""
         if not file_ids:
             return
         get_logger().debug("API        delete   %d items by id", len(file_ids))
         self._api.delete(file_ids)
-        # Can't do precise write-through without knowing parent_cid
-        # Just invalidate dirs that might be affected — callers should refresh
+        if refresh_dirs:
+            self.refresh_paths(refresh_dirs)
 
     def delete(self, paths: list) -> None:
         """Delete one or more files/directories."""

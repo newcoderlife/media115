@@ -410,6 +410,20 @@ def register(cli: click.Group):
         click.echo(f"  目录树:      {tree_entries} 条目")
         click.echo(f"  数据库大小:  {_format_size(db_size) if isinstance(db_size, int) else '?'}")
 
+        # Snapshot info
+        try:
+            cache_only = _get_cache_only()
+            if cache_only:
+                meta = cache_only.get_snapshot_meta()
+                if meta:
+                    root = meta.get("root_path", "?")
+                    exported = meta.get("exported_at", "?")
+                    entries = meta.get("entry_count", "?")
+                    click.echo(f"  tree snapshot: root={root}, {entries} entries, exported={exported}")
+                cache_only.close()
+        except Exception:
+            pass
+
         # Rate limit status
         now = _time.time()
         for name, state in rate_limit.items():
@@ -719,6 +733,7 @@ def register(cli: click.Group):
 
         total_dupes = 0
         all_dupe_fids = []
+        touched_dirs = set()
 
         for dir_name, _ in subdirs:
             subdir_path = path.rstrip("/") + "/" + dir_name
@@ -750,6 +765,7 @@ def register(cli: click.Group):
                     click.echo("  ...")
                 total_dupes += len(dupes)
                 all_dupe_fids.extend(fid for _, fid in dupes if fid)
+                touched_dirs.add(subdir_path)
 
         click.echo(f"\n共 {total_dupes} 个重复文件待清理")
 
@@ -764,6 +780,9 @@ def register(cli: click.Group):
                 client.delete_by_ids(batch)
                 deleted += len(batch)
                 click.echo(f"  已删除 {deleted}/{len(all_dupe_fids)}")
+            # Refresh touched directories so cache reflects the deletions
+            if touched_dirs:
+                client.refresh_paths(list(touched_dirs))
             click.echo(f"清理完成: 删除 {len(all_dupe_fids)} 个重复文件")
         else:
             click.echo("(dry-run) 使用 --execute 执行删除")

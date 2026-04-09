@@ -455,8 +455,11 @@ def verify_organize(client, ops: list[dict], cat_path: str) -> tuple[int, int]:
     # Collect unique target directories
     touched = set()
     for op in ops:
+        # Target directory (where file should end up)
         if op.get("new_folder"):
             touched.add(cat_path + "/" + op["new_folder"])
+        else:
+            touched.add("/" + op["parent"])  # in-place rename stays in original dir
 
     if not touched:
         return 0, 0
@@ -464,21 +467,21 @@ def verify_organize(client, ops: list[dict], cat_path: str) -> tuple[int, int]:
     # Refresh only touched dirs
     client.refresh_paths(list(touched))
 
-    # Verify: check each renamed file exists at expected location
+    # Verify: check each op's expected file exists
     verified = 0
     mismatches = 0
     for op in ops:
-        if not op.get("new_name"):
-            continue
-        target_dir = (
-            cat_path + "/" + op["new_folder"]
-            if op.get("new_folder")
-            else "/" + op["parent"]
-        )
+        # Determine expected file name and directory
+        expected_name = op.get("new_name") or op["file"]  # if no rename, original name
+        if op.get("new_folder"):
+            target_dir = cat_path + "/" + op["new_folder"]
+        else:
+            target_dir = "/" + op["parent"]
+
         try:
             items = client.list_dir(target_dir)
             names = {item["name"] for item in items}
-            if op["new_name"] in names:
+            if expected_name in names:
                 verified += 1
             else:
                 mismatches += 1
