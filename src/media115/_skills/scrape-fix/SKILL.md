@@ -1,65 +1,73 @@
 ---
 name: scrape-fix
-description: Correct a scraping result and record the decision for future agents to learn from
-version: 3.0
+description: Fix a wrong scrape result using the CLI command
+version: 4.0
 ---
 
-修正一个错误的刮削结果，并记录决策过程。
+修正一个错误的刮削结果。
 
 ## 何时使用
 
-1. 用户说"这个结果不对" — 用户纠正
-2. Agent 在 `/scrape` 过程中发现匹配不准确 — 主动纠正
-3. Agent 解决了一个 `not_found` 文件 — 记录推理过程
+1. 用户说"这个结果不对"
+2. Agent 在 `/scrape` 过程中发现匹配不准确
+3. 一个文件显示 `not_found` 但你知道它是什么
 
-## Input
-$ARGUMENTS — 纠正指令，如 "xxx.mkv 是电影《满江红》" 或 "Youth.Periplous 是青春环游记"
+## Step 1: 确认正确的内容
 
-## Steps
-
-### 1. 理解纠正内容
-提取：文件名、正确类型（movie/tv/av）、正确标题、数据源、source_id。
-
-### 2. 搜索确认
-```bash
-media115 scrape "正确的标题"
-media115 scrape "正确的标题" --source bangumi
-```
-
-从结果中确认 ID。
-
-### 3. 记录决策
-
-Case 记录有两个目的：
-- **给 LLM agent 看**：未来遇到类似文件名时参考推理模式
-- **给回归测试用**：确保代码的 analyzer 解析结果不退化
+对于电影/剧目，先搜索确认 TMDB ID：
 
 ```bash
-media115 -c "
-from media115.scraper.analyzer import add_case, AnalysisResult
-from pathlib import Path
-r = AnalysisResult(
-    filename='FILENAME', media_type='TYPE', title='TITLE',
-    year=YEAR, source='SOURCE', source_id='SOURCE_ID',
-)
-add_case(Path('tests/scrape_cases.json'), r)
-"
+media115 scrape "守护游戏"
+media115 scrape "守护游戏" --source bangumi
 ```
 
-### 4. 验证回归测试
+从搜索结果中找到正确的 ID。
+
+## Step 2: 执行修正
+
+### 方法 A: 按 TMDB ID（最精确，推荐）
+
 ```bash
-media115 -m pytest tests/test_scrape_regression.py -v
+media115 scrape-fix "Restart.2026.mkv" --tmdb-id 1664596
 ```
 
-### 5. 报告
+### 方法 B: 按搜索词
 
-说明：
-- 原始文件名
-- 错误匹配（如有）
-- 正确匹配 + 推理过程
-- Case ID
+```bash
+media115 scrape-fix "Restart.2026.mkv" --search "守护游戏"
+```
 
-**推理过程很重要** — 记录你为什么选择这个匹配。例如：
-> "Youth.Periplous.2019 → 搜 Youth Periplous 无结果 → Periplous 可能是 Perilous 的变体或音译 → 搜中文'青春环游记' → 命中 TMDB 106938，年份 2019 吻合"
+### 方法 C: AV 番号错误
 
-这个推理链条帮助未来的 agent 学习如何处理类似的非标准文件名。
+```bash
+media115 scrape-fix "T-3800040.mkv" --number "T28-003"
+```
+
+### 方法 D: 指定分类（当自动检测错误时）
+
+```bash
+media115 scrape-fix "SomeFile.mkv" --search "标题" --category 电影
+```
+
+### 方法 E: 指定剧集信息
+
+```bash
+media115 scrape-fix "SomeShow.S02E03.mkv" --tmdb-id 12345 --season 2 --episode 3
+```
+
+## Step 3: 运行 organize 应用修正
+
+```bash
+media115 organize $CATEGORY --execute
+```
+
+## 错误处理
+
+如果 `scrape-fix` 报 `not found`:
+1. 换一个搜索词再试
+2. 尝试不同数据源：`--search "X" --category 剧目`（Bangumi 会自动尝试）
+3. 如果确实找不到，告诉用户需要手动处理
+
+如果修正后 organize 仍然显示 "0 to rename":
+1. 运行 `media115 scan-tree $CATEGORY` 检查文件状态
+2. 可能需要 `batch-scrape --force` 重新生成 NFO
