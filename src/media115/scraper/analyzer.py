@@ -48,6 +48,10 @@ def match_against_cases(filename: str, cases: list[dict]) -> AnalysisResult | No
     return None
 
 
+# Gravure: photobook/idol number prefixes
+GRAVURE_PREFIXES = {"IMBD", "IMOG", "LCBD", "ENFD", "TSDV", "SBVD", "LPFD", "LCDV", "ENCO", "OME"}
+
+
 def analyze_filename(filename: str) -> AnalysisResult:
     """Heuristic analysis of a media filename.
 
@@ -55,6 +59,20 @@ def analyze_filename(filename: str) -> AnalysisResult:
     than these heuristics — this exists so the system works without LLM too.
     """
     name = Path(filename).stem
+
+    # Gravure: photobook/idol number prefixes — check BEFORE general AV regex
+    gravure_match = re.match(r"^(?:.*?\s)?([A-Z]{3,5}-\d{3,5})", name, re.IGNORECASE)
+    if gravure_match:
+        number = gravure_match.group(1).upper()
+        prefix = number.split("-")[0]
+        if prefix in GRAVURE_PREFIXES:
+            return AnalysisResult(
+                filename=filename,
+                media_type="gravure",
+                title=number,
+                source="jav321",
+                confidence="medium",
+            )
 
     # AV:番号模式 (ABC-123, ABC-123.2026.2160p..., FC2-PPV-1234567, 012345_678)
     av_match = re.match(r"^([A-Z]{2,10}-\d{3,5})", name, re.IGNORECASE)
@@ -73,6 +91,34 @@ def analyze_filename(filename: str) -> AnalysisResult:
             media_type="av",
             title=name,
             source="javbus",
+            confidence="medium",
+        )
+
+    # Western adult: "Studio - Performer - Title" pattern
+    western_match = re.match(r"^([A-Za-z]+(?:\s[A-Za-z]+)?)\s*-\s*(.+?)\s*-\s*(.+?)$", name)
+    if western_match:
+        studio = western_match.group(1).strip()
+        title = f"{western_match.group(2).strip()} - {western_match.group(3).strip()}"
+        return AnalysisResult(
+            filename=filename,
+            media_type="av_west",
+            title=title,
+            source="theporndb",
+            confidence="medium",
+        )
+
+    # Western adult: "Studio.YY.MM.DD.Performer.Name.Title.XXX.Resolution" pattern
+    western_date_match = re.match(
+        r"^([A-Za-z]+)\.(\d{2}\.\d{2}\.\d{2})\.(.+?)\.(?:XXX|xxx)\b", name
+    )
+    if western_date_match:
+        studio = western_date_match.group(1)
+        title = western_date_match.group(3).replace(".", " ")
+        return AnalysisResult(
+            filename=filename,
+            media_type="av_west",
+            title=f"{studio} {title}",
+            source="theporndb",
             confidence="medium",
         )
 
