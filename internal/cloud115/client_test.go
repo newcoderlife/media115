@@ -117,11 +117,13 @@ func (m *mockAPI) RapidUpload(dirID, filename string, fileSize int64, fileSHA1 s
 	return map[string]any{"status": float64(2)}, nil
 }
 
-func (m *mockAPI) QRLogin(app string) error        { return nil }
-func (m *mockAPI) CheckLogin() bool                { return true }
-func (m *mockAPI) RenewCookies(app string) bool    { return true }
-func (m *mockAPI) SaveCookies(path string) error   { return nil }
-func (m *mockAPI) GetCookies() string              { return "mock=cookie" }
+func (m *mockAPI) QRLogin(app string) error                          { return nil }
+func (m *mockAPI) QRGetToken(app string) (*QRSession, error)         { return &QRSession{}, nil }
+func (m *mockAPI) QRWaitAndLogin(sess *QRSession) error              { return nil }
+func (m *mockAPI) CheckLogin() bool                                  { return true }
+func (m *mockAPI) RenewCookies(app string) bool                      { return true }
+func (m *mockAPI) SaveCookies(path string) error                     { return nil }
+func (m *mockAPI) GetCookies() string                                { return "mock=cookie" }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
