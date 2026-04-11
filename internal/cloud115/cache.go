@@ -107,7 +107,7 @@ func NewCache(dbPath string) (*Cache, error) {
 		return nil, fmt.Errorf("cache: user_version: %w", err)
 	}
 	if version < schemaVersion {
-		for _, tbl := range []string{"dir_entry", "dir_meta", "path_index", "tree_entry", "snapshot_meta"} {
+		for _, tbl := range []string{"dir_entry", "dir_meta", "path_index", "tree_entry", "snapshot_meta", "rate_limit"} {
 			if _, err := db.Exec("DROP TABLE IF EXISTS " + tbl); err != nil {
 				_ = db.Close()
 				return nil, fmt.Errorf("cache: drop %s: %w", tbl, err)

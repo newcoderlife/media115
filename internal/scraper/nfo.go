@@ -44,13 +44,16 @@ type movieNFO struct {
 	XMLName       xml.Name      `xml:"movie"`
 	Title         string        `xml:"title,omitempty"`
 	OriginalTitle string        `xml:"originaltitle,omitempty"`
+	SortTitle     string        `xml:"sorttitle,omitempty"`
 	Year          string        `xml:"year,omitempty"`
 	Premiered     string        `xml:"premiered,omitempty"`
 	Plot          string        `xml:"plot,omitempty"`
+	Outline       string        `xml:"outline,omitempty"`
 	Tagline       string        `xml:"tagline,omitempty"`
 	Runtime       string        `xml:"runtime,omitempty"`
 	Rating        string        `xml:"rating,omitempty"`
 	Votes         string        `xml:"votes,omitempty"`
+	MPAA          string        `xml:"mpaa,omitempty"`
 	Set           *xmlSet       `xml:"set,omitempty"`
 	Studios       []string      `xml:"studio"`
 	Genres        []string      `xml:"genre"`
@@ -93,6 +96,7 @@ type tvshowNFO struct {
 	Rating        string        `xml:"rating,omitempty"`
 	Votes         string        `xml:"votes,omitempty"`
 	Premiered     string        `xml:"premiered,omitempty"`
+	Status        string        `xml:"status,omitempty"`
 	Studios       []string      `xml:"studio"`
 	Genres        []string      `xml:"genre"`
 	Tags          []string      `xml:"tag"`
@@ -109,8 +113,11 @@ func GenerateMovieNFO(meta *Metadata, outputPath string) error {
 	nfo := movieNFO{
 		Title:         meta.Title,
 		OriginalTitle: meta.OriginalTitle,
+		SortTitle:     meta.SortTitle,
 		Plot:          meta.Plot,
+		Outline:       meta.Outline,
 		Tagline:       meta.Tagline,
+		MPAA:          meta.MPAA,
 		Premiered:     meta.Premiered,
 		Genres:        meta.Genres,
 		Tags:          meta.Tags,
@@ -195,6 +202,7 @@ func GenerateTVShowNFO(meta *Metadata, outputPath string) error {
 		ShowTitle:     showTitle,
 		Premiered:     meta.Premiered,
 		Plot:          meta.Plot,
+		Status:        meta.Status,
 		Studios:       meta.Studios,
 		Genres:        meta.Genres,
 		Tags:          meta.Tags,
@@ -261,13 +269,17 @@ func writeNFO(v any, path string) error {
 type nfoRaw struct {
 	Title         string   `xml:"title"`
 	OriginalTitle string   `xml:"originaltitle"`
+	SortTitle     string   `xml:"sorttitle"`
 	ShowTitle     string   `xml:"showtitle"`
 	Year          string   `xml:"year"`
 	Plot          string   `xml:"plot"`
+	Outline       string   `xml:"outline"`
 	Tagline       string   `xml:"tagline"`
 	Runtime       string   `xml:"runtime"`
 	Rating        string   `xml:"rating"`
 	Votes         string   `xml:"votes"`
+	MPAA          string   `xml:"mpaa"`
+	Status        string   `xml:"status"`
 	Premiered     string   `xml:"premiered"`
 	Aired         string   `xml:"aired"`
 	Season        string   `xml:"season"`
@@ -324,9 +336,13 @@ func parseNFOBytes(data []byte) (*Metadata, error) {
 	meta := &Metadata{
 		Title:         raw.Title,
 		OriginalTitle: raw.OriginalTitle,
+		SortTitle:     raw.SortTitle,
 		ShowTitle:     raw.ShowTitle,
 		Plot:          raw.Plot,
+		Outline:       raw.Outline,
 		Tagline:       raw.Tagline,
+		MPAA:          raw.MPAA,
+		Status:        raw.Status,
 		Premiered:     raw.Premiered,
 		Aired:         raw.Aired,
 		Genres:        raw.Genres,
