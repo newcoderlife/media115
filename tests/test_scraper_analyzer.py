@@ -60,6 +60,32 @@ class TestAnalyzeAV:
         assert r.media_type == "av"
 
 
+class TestAnalyzeGravure:
+    def test_gravure_imbd(self):
+        result = analyze_filename("尾野寺みさ IMBD-334.mp4")
+        assert result.media_type == "gravure"
+        assert result.title == "IMBD-334"
+
+    def test_gravure_imog(self):
+        result = analyze_filename("椎名もも 牧原あゆ IMOG-200 第1弾.mp4")
+        assert result.media_type == "gravure"
+        assert "IMOG-200" in result.title
+
+    def test_regular_av_not_gravure(self):
+        result = analyze_filename("ABP-040.HD.wmv")
+        assert result.media_type == "av"  # should NOT be gravure
+
+
+class TestAnalyzeWestern:
+    def test_western_studio_performer_title(self):
+        result = analyze_filename("Vixen - Lana Rhoades - Something Beautiful.mp4")
+        assert result.media_type == "av_west"
+
+    def test_western_date_format(self):
+        result = analyze_filename("SexArt.24.05.01.Mila.Azul.Summer.Heat.XXX.1080p.mp4")
+        assert result.media_type == "av_west"
+
+
 class TestAnalyzeUnknown:
     def test_unrecognizable(self):
         r = analyze_filename("random_stuff.mp4")

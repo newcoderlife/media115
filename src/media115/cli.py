@@ -72,6 +72,11 @@ _DEFAULT_CONFIG = {
             "naming": "{number}",
             "sources": ["jav321", "javfree"],
         },
+        "写真": {
+            "type": "gravure",
+            "naming": "{number}",
+            "sources": ["jav321", "javfree"],
+        },
     },
     "rate_limit": {
         "qps": 0.5,
@@ -537,6 +542,13 @@ def batch_scrape(category, output, max_count, force):
             elif analysis.media_type in ("tv", "anime"):
                 season = analysis.season if analysis.season is not None else 1
                 result = scrape_tv(analysis.title, season, analysis.episode, name, file_out)
+            elif analysis.media_type in ("av_west", "gravure"):
+                # Use provider registry for new types
+                from media115.scraper.scrape import scrape_by_type
+                result = scrape_by_type(
+                    analysis.media_type, analysis.title, name, file_out,
+                    year=analysis.year, season=analysis.season, episode=analysis.episode,
+                )
             else:
                 result = {"status": "skip", "reason": analysis.media_type}
 
