@@ -462,6 +462,131 @@ func (a *API) QRLogin(app string) error {
 	return nil
 }
 
+// QRSession holds the state needed for a two-phase QR login.
+type QRSession struct {
+	UID    string `json:"uid"`
+	Time   string `json:"time"`
+	Sign   string `json:"sign"`
+	App    string `json:"app"`
+	QRURL  string `json:"qr_url"`
+}
+
+// QRGetToken fetches a QR login token and returns the session (phase 1).
+// Call QRWaitAndLogin with the returned session to complete the login (phase 2).
+func (a *API) QRGetToken(app string) (*QRSession, error) {
+	if app == "" {
+		app = "tv"
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Get(QRAPI + "/api/1.0/" + app + "/1.0/token/")
+	if err != nil {
+		return nil, err
+	}
+	var tokenResult map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&tokenResult)
+	resp.Body.Close()
+
+	tokenData, _ := tokenResult["data"].(map[string]any)
+	if tokenData == nil {
+		return nil, fmt.Errorf("QRGetToken: no token data")
+	}
+	uid, _ := tokenData["uid"].(string)
+	qrTime := fmt.Sprintf("%v", tokenData["time"])
+	sign, _ := tokenData["sign"].(string)
+	qrURL := fmt.Sprintf("%s/api/1.0/web/1.0/qrcode?qrfrom=1&client=0d&uid=%s", QRAPI, uid)
+
+	return &QRSession{
+		UID:   uid,
+		Time:  qrTime,
+		Sign:  sign,
+		App:   app,
+		QRURL: qrURL,
+	}, nil
+}
+
+// QRWaitAndLogin polls for QR scan completion and finalizes login (phase 2).
+// Updates the API cookie string on success.
+func (a *API) QRWaitAndLogin(sess *QRSession) error {
+	client := &http.Client{Timeout: 35 * time.Second}
+
+statusLoop:
+	for {
+		params := url.Values{
+			"uid":  {sess.UID},
+			"time": {sess.Time},
+			"sign": {sess.Sign},
+			"_":    {fmt.Sprintf("%d", time.Now().Unix())},
+		}
+		u, _ := url.Parse(QRAPI + "/get/status/")
+		u.RawQuery = params.Encode()
+		statusResp, err := client.Get(u.String())
+		if err != nil {
+			time.Sleep(time.Second)
+			continue
+		}
+		body, _ := io.ReadAll(statusResp.Body)
+		statusResp.Body.Close()
+		if len(body) == 0 {
+			time.Sleep(time.Second)
+			continue
+		}
+		var statusResult map[string]any
+		if json.Unmarshal(body, &statusResult) != nil {
+			time.Sleep(time.Second)
+			continue
+		}
+		statusData, _ := statusResult["data"].(map[string]any)
+		status := 0
+		if s, ok := statusData["status"].(float64); ok {
+			status = int(s)
+		}
+		switch status {
+		case 0:
+			time.Sleep(2 * time.Second)
+		case 1:
+			fmt.Println("QR scanned, waiting for confirmation...")
+			time.Sleep(time.Second)
+		case 2:
+			fmt.Println("Login confirmed!")
+			break statusLoop
+		case -1:
+			return fmt.Errorf("QR code expired")
+		case -2:
+			return fmt.Errorf("login cancelled")
+		default:
+			time.Sleep(time.Second)
+		}
+	}
+
+	formData := url.Values{"account": {sess.UID}, "app": {sess.App}}
+	req, err := http.NewRequest("POST",
+		PassportAPI+"/app/1.0/"+sess.App+"/1.0/login/qrcode",
+		strings.NewReader(formData.Encode()))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	loginResp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer loginResp.Body.Close()
+	var loginResult map[string]any
+	_ = json.NewDecoder(loginResp.Body).Decode(&loginResult)
+	loginData, _ := loginResult["data"].(map[string]any)
+	if loginData == nil {
+		return fmt.Errorf("QR login: no data in response")
+	}
+	cookies, _ := loginData["cookie"].(map[string]any)
+	var parts []string
+	for k, v := range cookies {
+		parts = append(parts, fmt.Sprintf("%s=%v", k, v))
+	}
+	a.cookies = strings.Join(parts, "; ")
+	fmt.Printf("Login success! Cookie length: %d\n", len(a.cookies))
+	return nil
+}
+
 // SaveCookies updates the TOML config file at path, replacing the cookies value.
 func (a *API) SaveCookies(path string) error {
 	data, err := os.ReadFile(path)
@@ -864,10 +989,6 @@ func (a *API) UploadFile(localPath, targetDirID, filename string) (map[string]an
 	if filename == "" {
 		filename = filepath.Base(localPath)
 	}
-	content, err := os.ReadFile(localPath)
-	if err != nil {
-		return nil, fmt.Errorf("upload: read file: %w", err)
-	}
 
 	if err := a.limiter.Acquire(); err != nil {
 		return nil, err
@@ -887,6 +1008,8 @@ func (a *API) UploadFile(localPath, targetDirID, filename string) (map[string]an
 		}
 		req.Header.Set("Cookie", a.cookies)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Origin", "https://115.com")
+		req.Header.Set("Referer", "https://115.com/")
 		resp, err := a.http.Do(req)
 		if err != nil {
 			if attempt < 2 {
@@ -904,35 +1027,51 @@ func (a *API) UploadFile(localPath, targetDirID, filename string) (map[string]an
 		return nil, fmt.Errorf("upload: init returned nil")
 	}
 
-	// Step 2: POST to OSS.
+	// Step 2: POST to OSS using a streaming multipart writer with io.Pipe.
+	// Re-open the file for each attempt so retries work correctly.
 	for attempt := 0; attempt < 3; attempt++ {
-		var buf bytes.Buffer
-		mw := multipart.NewWriter(&buf)
-		for _, kv := range []struct{ k, v string }{
-			{"key", fmt.Sprintf("%v", initResult["object"])},
-			{"OSSAccessKeyId", fmt.Sprintf("%v", initResult["accessid"])},
-			{"policy", fmt.Sprintf("%v", initResult["policy"])},
-			{"signature", fmt.Sprintf("%v", initResult["signature"])},
-			{"callback", fmt.Sprintf("%v", initResult["callback"])},
-		} {
-			_ = mw.WriteField(kv.k, kv.v)
-		}
-		fw, err := mw.CreateFormFile("file", filename)
+		f, err := os.Open(localPath)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("upload: open file: %w", err)
 		}
-		_, _ = fw.Write(content)
-		mw.Close()
+
+		pr, pw := io.Pipe()
+		mw := multipart.NewWriter(pw)
+		go func() {
+			defer f.Close()
+			for _, kv := range []struct{ k, v string }{
+				{"key", fmt.Sprintf("%v", initResult["object"])},
+				{"OSSAccessKeyId", fmt.Sprintf("%v", initResult["accessid"])},
+				{"policy", fmt.Sprintf("%v", initResult["policy"])},
+				{"signature", fmt.Sprintf("%v", initResult["signature"])},
+				{"callback", fmt.Sprintf("%v", initResult["callback"])},
+			} {
+				_ = mw.WriteField(kv.k, kv.v)
+			}
+			fw, err := mw.CreateFormFile("file", filename)
+			if err != nil {
+				pw.CloseWithError(err)
+				return
+			}
+			if _, err := io.Copy(fw, f); err != nil {
+				pw.CloseWithError(err)
+				return
+			}
+			mw.Close()
+			pw.Close()
+		}()
 
 		host := fmt.Sprintf("%v", initResult["host"])
-		req, err := http.NewRequest("POST", host, &buf)
+		req, err := http.NewRequest("POST", host, pr)
 		if err != nil {
+			pr.CloseWithError(err)
 			return nil, err
 		}
 		req.Header.Set("Content-Type", mw.FormDataContentType())
 		ossClient := &http.Client{Timeout: 60 * time.Second}
 		resp, err := ossClient.Do(req)
 		if err != nil {
+			pr.CloseWithError(err)
 			if attempt < 2 {
 				a.logger.Warn("OSS upload failed", "attempt", attempt+1)
 				time.Sleep(time.Duration(3*(attempt+1)) * time.Second)
@@ -944,7 +1083,7 @@ func (a *API) UploadFile(localPath, targetDirID, filename string) (map[string]an
 			var ossResult map[string]any
 			_ = json.NewDecoder(resp.Body).Decode(&ossResult)
 			resp.Body.Close()
-			a.logger.Debug("upload", "filename", filename, "bytes", len(content), "dir", targetDirID)
+			a.logger.Debug("upload", "filename", filename, "path", localPath, "dir", targetDirID)
 			if data, ok := ossResult["data"].(map[string]any); ok {
 				return data, nil
 			}

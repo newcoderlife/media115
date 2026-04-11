@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/newcoderlife/media115/internal/cloud115"
 	"github.com/newcoderlife/media115/internal/config"
@@ -11,11 +13,13 @@ import (
 )
 
 var (
-	authCheck bool
-	authRenew bool
-	authQR    bool
-	authForce bool
-	authApp   string
+	authCheck   bool
+	authRenew   bool
+	authQR      bool
+	authForce   bool
+	authApp     string
+	authGetQR   bool
+	authWaitQR  bool
 )
 
 var authCmd = &cobra.Command{
@@ -71,6 +75,61 @@ var authCmd = &cobra.Command{
 			return nil
 		}
 
+		// --get-qr: generate QR token, print URL, save session, exit.
+		if authGetQR {
+			tmpClient, err := cloud115.NewClient("", cloud115.WithLogger(logger))
+			if err != nil {
+				return fmt.Errorf("初始化 client: %w", err)
+			}
+			defer tmpClient.Close()
+			sess, err := tmpClient.QRGetToken(authApp)
+			if err != nil {
+				return fmt.Errorf("获取 QR token 失败: %w", err)
+			}
+			fmt.Printf("QR URL: %s\n", sess.QRURL)
+			// Save session to temp file for --wait-qr.
+			sessFile := filepath.Join(os.TempDir(), "cloud115_qr_session.json")
+			data, _ := json.MarshalIndent(sess, "", "  ")
+			if err := os.WriteFile(sessFile, data, 0o600); err != nil {
+				return fmt.Errorf("保存 QR session 失败: %w", err)
+			}
+			fmt.Printf("Session saved to %s\n", sessFile)
+			fmt.Println("Scan the QR code, then run: cloud115 auth --wait-qr")
+			return nil
+		}
+
+		// --wait-qr: read saved session, poll for scan, save cookies.
+		if authWaitQR {
+			sessFile := filepath.Join(os.TempDir(), "cloud115_qr_session.json")
+			data, err := os.ReadFile(sessFile)
+			if err != nil {
+				return fmt.Errorf("未找到 QR session（先运行 cloud115 auth --get-qr）: %w", err)
+			}
+			var sess cloud115.QRSession
+			if err := json.Unmarshal(data, &sess); err != nil {
+				return fmt.Errorf("解析 QR session 失败: %w", err)
+			}
+			tmpClient, err := cloud115.NewClient("", cloud115.WithLogger(logger))
+			if err != nil {
+				return fmt.Errorf("初始化 client: %w", err)
+			}
+			defer tmpClient.Close()
+			if err := tmpClient.QRWaitAndLogin(&sess); err != nil {
+				return fmt.Errorf("QR 登录失败: %w", err)
+			}
+			_ = os.Remove(sessFile)
+			cfg, err := config.Load()
+			if err != nil {
+				cfg = config.Default()
+			}
+			cfg.Auth.Cookies = tmpClient.GetCookies()
+			if err := cfg.Save(); err != nil {
+				return fmt.Errorf("保存 config: %w", err)
+			}
+			fmt.Printf("登录成功！Cookies 已保存到 %s\n", config.ConfigPath())
+			return nil
+		}
+
 		// Default: QR login (--qr flag or no flags)
 		if !authForce {
 			cfg, err := config.Load()
@@ -116,5 +175,7 @@ func init() {
 	authCmd.Flags().BoolVar(&authQR, "qr", false, "生成二维码 URL（非阻塞）")
 	authCmd.Flags().BoolVar(&authForce, "force", false, "强制重新登录（即使已登录）")
 	authCmd.Flags().StringVar(&authApp, "app", "tv", "设备类型（tv/qandroid/web）")
+	authCmd.Flags().BoolVar(&authGetQR, "get-qr", false, "生成 QR URL 并退出（非阻塞，第一阶段）")
+	authCmd.Flags().BoolVar(&authWaitQR, "wait-qr", false, "等待 QR 扫描完成并保存 cookies（第二阶段）")
 	rootCmd.AddCommand(authCmd)
 }

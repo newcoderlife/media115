@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/newcoderlife/media115/internal/provider/tmdb"
 	"github.com/newcoderlife/media115/internal/scraper"
 	"github.com/spf13/cobra"
 )
@@ -74,6 +75,7 @@ Examples:
 		fmt.Printf("分类: %s, 输出: %s\n", category, outDir)
 
 		var sr *scraper.ScrapeResult
+		scrapeQuery := analysis.Title // original query, passed to saveFileMap
 
 		switch category {
 		case "AV":
@@ -84,15 +86,46 @@ Examples:
 			if avNumber == "" {
 				return fmt.Errorf("无法确定AV番号。请使用 --number 指定")
 			}
+			scrapeQuery = avNumber
 			fmt.Printf("刮削 AV: %s\n", avNumber)
 			sr = scraper.Scrape("av", avNumber, filename, outDir, scraper.ScrapeOpts{}, nil)
 
 		case "剧目":
-			query := searchQuery
-			if query == "" && tmdbID != 0 {
-				// Use tmdb_id as query hint; providers that support ID lookup will use it.
-				query = fmt.Sprintf("tmdb:%d", tmdbID)
+			if tmdbID != 0 {
+				// Direct fetch by TMDB ID, bypass search.
+				p := tmdb.New(cfg.Auth.TMDB.Token)
+				s := season
+				if s == 0 {
+					s = analysis.Season
+					if s == 0 {
+						s = 1
+					}
+				}
+				ep := episode
+				if ep == 0 {
+					ep = analysis.Episode
+				}
+				fmt.Printf("刮削 TV (TMDB ID=%d): S%02dE%02d\n", tmdbID, s, ep)
+				meta, detailErr := p.Detail(fmt.Sprintf("tv:%d", tmdbID))
+				if detailErr != nil {
+					return detailErr
+				}
+				meta.Season = s
+				meta.Episode = ep
+				stem := scraper.StemFilename(filename)
+				nfoPath := filepath.Join(outDir, stem+".nfo")
+				if err := scraper.GenerateEpisodeNFO(meta, nfoPath); err != nil {
+					return err
+				}
+				sr = &scraper.ScrapeResult{
+					Status: "ok",
+					Match:  meta.Title,
+					IDs:    meta.UniqueIDs,
+					Meta:   meta,
+				}
+				break
 			}
+			query := searchQuery
 			if query == "" {
 				return fmt.Errorf("TV 需要 --tmdb-id 或 --search")
 			}
@@ -114,10 +147,28 @@ Examples:
 			}, nil)
 
 		default: // 电影
-			query := searchQuery
-			if query == "" && tmdbID != 0 {
-				query = fmt.Sprintf("tmdb:%d", tmdbID)
+			if tmdbID != 0 {
+				// Direct fetch by TMDB ID, bypass search.
+				p := tmdb.New(cfg.Auth.TMDB.Token)
+				fmt.Printf("刮削 Movie (TMDB ID=%d)\n", tmdbID)
+				meta, detailErr := p.Detail(fmt.Sprintf("movie:%d", tmdbID))
+				if detailErr != nil {
+					return detailErr
+				}
+				stem := scraper.StemFilename(filename)
+				nfoPath := filepath.Join(outDir, stem+".nfo")
+				if err := scraper.GenerateMovieNFO(meta, nfoPath); err != nil {
+					return err
+				}
+				sr = &scraper.ScrapeResult{
+					Status: "ok",
+					Match:  meta.Title,
+					IDs:    meta.UniqueIDs,
+					Meta:   meta,
+				}
+				break
 			}
+			query := searchQuery
 			if query == "" {
 				query = analysis.Title
 			}
@@ -143,8 +194,13 @@ Examples:
 			fmt.Printf("输出: %s\n", outDir)
 			fmt.Printf("\n下一步: 运行 'media115 organize %s' 应用更改。\n", category)
 
-			// Save file_map
-			saveFileMap(filename, strings.ToLower(category), sr)
+			// Save file_map with normalized type.
+			typeMap := map[string]string{"电影": "movie", "剧目": "tv", "AV": "av", "写真": "av"}
+			fmType := typeMap[category]
+			if fmType == "" {
+				fmType = "av"
+			}
+			saveFileMap(filename, fmType, scrapeQuery, sr)
 		} else {
 			fmt.Printf("✗ 状态: %s", sr.Status)
 			if sr.Error != "" {
