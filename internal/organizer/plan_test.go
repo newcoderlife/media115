@@ -1,7 +1,11 @@
 package organizer
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/newcoderlife/media115/internal/cloud115"
 )
@@ -194,6 +198,78 @@ func TestBuildPlanSkip(t *testing.T) {
 	}
 	if op.Reason != "already in standard format" {
 		t.Errorf("unexpected reason %q", op.Reason)
+	}
+}
+
+// TestBuildPlanWithFullFileMap verifies that BuildPlan correctly reads a
+// file_map cache entry with all required fields and produces the right rename op.
+func TestBuildPlanWithFullFileMap(t *testing.T) {
+	// Create a temp dir with file_map JSON files.
+	tmpDir := t.TempDir()
+	fmDir := filepath.Join(tmpDir, "file_map")
+	if err := os.MkdirAll(fmDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write a movie file_map entry for stem "Test.Movie.2024".
+	movieFM := map[string]any{
+		"type":       "movie",
+		"title":      "测试电影",
+		"year":       float64(2024),
+		"tmdb_id":    float64(12345),
+		"_cached_at": float64(time.Now().Unix()),
+	}
+	data, err := json.Marshal(movieFM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fmDir, "Test.Movie.2024.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Tree entries: one video file under the 电影 category.
+	entries := []cloud115.TreeEntry{
+		{
+			Path:    "电影/TestDir/Test.Movie.2024.mkv",
+			Name:    "Test.Movie.2024.mkv",
+			Parent:  "电影/TestDir",
+			IsVideo: true,
+		},
+	}
+
+	// cacheGet reads JSON from our temp dir.
+	cacheGet := func(source, key string) map[string]any {
+		path := filepath.Join(fmDir, key+".json")
+		b, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		var result map[string]any
+		if jsonErr := json.Unmarshal(b, &result); jsonErr != nil {
+			return nil
+		}
+		return result
+	}
+
+	ops := BuildPlan("电影", entries, cacheGet)
+
+	// Should have exactly one rename op.
+	if len(ops) != 1 {
+		t.Fatalf("expected 1 op, got %d", len(ops))
+	}
+	op := ops[0]
+
+	if op.File != "Test.Movie.2024.mkv" {
+		t.Errorf("File = %q, want Test.Movie.2024.mkv", op.File)
+	}
+	if op.Action != "rename" {
+		t.Errorf("Action = %q, want rename", op.Action)
+	}
+	if op.NewFolder != "测试电影 (2024)" {
+		t.Errorf("NewFolder = %q, want 测试电影 (2024)", op.NewFolder)
+	}
+	if op.NewName != "测试电影 (2024).mkv" {
+		t.Errorf("NewName = %q, want 测试电影 (2024).mkv", op.NewName)
 	}
 }
 

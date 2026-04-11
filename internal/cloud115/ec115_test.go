@@ -86,3 +86,46 @@ func TestEC115Encode(t *testing.T) {
 		t.Fatalf("Encode() output length %d is not a multiple of 16", len(output))
 	}
 }
+
+// TestEC115DecodeShortData verifies that Decode rejects data shorter than 12 bytes.
+func TestEC115DecodeShortData(t *testing.T) {
+	c, err := NewEC115Cipher()
+	if err != nil {
+		t.Fatalf("NewEC115Cipher() error: %v", err)
+	}
+	_, decErr := c.Decode([]byte{1, 2, 3})
+	if decErr == nil {
+		t.Fatal("expected error for short data")
+	}
+}
+
+// TestEC115DecodeEmptyData verifies that Decode rejects nil input.
+func TestEC115DecodeEmptyData(t *testing.T) {
+	c, err := NewEC115Cipher()
+	if err != nil {
+		t.Fatalf("NewEC115Cipher() error: %v", err)
+	}
+	_, decErr := c.Decode(nil)
+	if decErr == nil {
+		t.Fatal("expected error for nil data")
+	}
+}
+
+// TestEC115EncodeProducesDecodableLength verifies that Encode produces
+// non-empty output with length that is a multiple of 16.
+func TestEC115EncodeProducesDecodableLength(t *testing.T) {
+	c, err := NewEC115Cipher()
+	if err != nil {
+		t.Fatalf("NewEC115Cipher() error: %v", err)
+	}
+	plaintext := []byte("test data for encoding")
+	encrypted := c.Encode(plaintext)
+	// Encode output must be non-empty.
+	if len(encrypted) == 0 {
+		t.Fatal("Encode produced empty output")
+	}
+	// Encode output length should be a multiple of 16 (AES block size).
+	if len(encrypted)%16 != 0 {
+		t.Fatalf("Encode output length %d is not multiple of 16", len(encrypted))
+	}
+}
