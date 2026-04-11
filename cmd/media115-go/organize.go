@@ -166,6 +166,15 @@ CATEGORY: AV, 电影, 剧目, etc.`,
 				Error:        r.Error,
 			})
 		}
+		// Also include skip ops in the log.
+		for _, op := range skips {
+			logEntries = append(logEntries, logEntry{
+				OriginalFile: op.File,
+				OriginalPath: op.Parent,
+				Status:       "skip",
+				Error:        op.Reason,
+			})
+		}
 		if data, err := json.MarshalIndent(logEntries, "", "  "); err == nil {
 			_ = os.WriteFile(logFile, data, 0o644)
 			fmt.Printf("日志保存至: %s\n", logFile)
@@ -214,8 +223,8 @@ func uploadMissingNFO(client *cloud115.Client, categoryPath string, skips []orga
 		}
 	}
 
-	// Find videos without a matching NFO by stem.
-	uploadedDirs := map[string]bool{}
+	// Group videos without a matching NFO by directory.
+	byDir := map[string][]organizer.VideoFile{}
 	for _, op := range skips {
 		if op.Reason != "already correct" && op.Reason != "already in standard format" {
 			continue
@@ -225,18 +234,23 @@ func uploadMissingNFO(client *cloud115.Client, categoryPath string, skips []orga
 			continue
 		}
 		parentDir := catPath + "/" + leafName(op.Parent)
-		if uploadedDirs[parentDir] {
-			continue
-		}
-		vf := organizer.VideoFile{
+		byDir[parentDir] = append(byDir[parentDir], organizer.VideoFile{
 			File:   op.File,
 			Parent: op.Parent,
-		}
-		n := organizer.SyncSidecars(client, parentDir, []organizer.VideoFile{vf}, false, logger, cacheRoot)
+		})
+	}
+
+	// Sync all videos per directory at once.
+	total := 0
+	for dir, vfs := range byDir {
+		n := organizer.SyncSidecars(client, dir, vfs, false, logger, cacheRoot)
 		if n > 0 {
-			logger.Info("organizer: uploaded missing NFO", "dir", parentDir, "count", n)
+			logger.Info("organizer: uploaded missing NFO", "dir", dir, "count", n)
 		}
-		uploadedDirs[parentDir] = true
+		total += n
+	}
+	if total > 0 {
+		logger.Info("organizer: total NFO uploads", "count", total)
 	}
 }
 

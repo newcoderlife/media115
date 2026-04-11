@@ -187,6 +187,8 @@ Use --limit N to scrape only the first N files.`,
 						}
 						fmt.Printf(" → %s (%s) (cached)\n", r.Match, r.SourceID)
 						okCount++
+						// Rebuild file_map from cached data.
+						saveFileMap(stemName, mediaType, analysis.Title, fakeSR)
 						results = append(results, r)
 						continue
 					}

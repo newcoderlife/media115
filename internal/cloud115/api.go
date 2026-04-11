@@ -1091,7 +1091,7 @@ func (a *API) UploadFile(localPath, targetDirID, filename string) (map[string]an
 		}
 		a.logger.Warn("115 upload failed", "filename", filename, "status", resp.StatusCode)
 		resp.Body.Close()
-		return nil, nil
+		return nil, fmt.Errorf("115 OSS upload failed: HTTP %d", resp.StatusCode)
 	}
 	return nil, fmt.Errorf("upload: all OSS attempts failed")
 }

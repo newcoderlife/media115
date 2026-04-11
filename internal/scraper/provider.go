@@ -51,6 +51,11 @@ type Metadata struct {
 	FanartURL     string
 	Set           string // collection/franchise name
 
+	SortTitle string
+	Outline   string
+	MPAA      string
+	Status    string // TV only
+
 	// TV / episode specific
 	ShowTitle string
 	Season    int

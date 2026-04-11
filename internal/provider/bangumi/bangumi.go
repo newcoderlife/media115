@@ -274,14 +274,20 @@ func (p *Provider) addHeaders(req *http.Request) {
 // ── Metadata builder ──────────────────────────────────────────────────────────
 
 func buildMetadata(subject map[string]any, season, episode int) *scraper.Metadata {
-	title := stringVal(subject, "name_cn", "name")
+	originalTitle := stringVal(subject, "name")   // Japanese name
+	chineseTitle := stringVal(subject, "name_cn") // Chinese name
+	title := chineseTitle
+	if title == "" {
+		title = originalTitle
+	}
 	m := &scraper.Metadata{
-		Title:     title,
-		ShowTitle: title,
-		Season:    season,
-		Episode:   episode,
-		Plot:      stringVal(subject, "summary"),
-		UniqueIDs: map[string]string{},
+		Title:         title,
+		OriginalTitle: originalTitle,
+		ShowTitle:     title,
+		Season:        season,
+		Episode:       episode,
+		Plot:          stringVal(subject, "summary"),
+		UniqueIDs:     map[string]string{},
 	}
 
 	if id := floatFromAny(subject["id"]); id != 0 {
