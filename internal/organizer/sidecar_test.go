@@ -90,6 +90,59 @@ func TestSyncSidecarsSkipListing(t *testing.T) {
 	}
 }
 
+// TestSyncSidecarsMultipleVideos verifies that PlanScrapeUpload correctly
+// handles multiple video files sharing the same sidecar directory, and that
+// when results are deduplicated the shared files appear only once.
+func TestSyncSidecarsMultipleVideos(t *testing.T) {
+	tmpDir := t.TempDir()
+	// cacheRoot is the "cloud115" path; sidecar.go replaces "cloud115" → "media115".
+	cacheRoot := filepath.Join(tmpDir, "cloud115")
+
+	// Build the scrape_output dir for the show directory.
+	// Parent for both episodes is "剧目/ShowDir", so searchName = "剧目_ShowDir".
+	outputDir := filepath.Join(tmpDir, "media115", "scrape_output", "剧目", "剧目_ShowDir")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(outputDir, "Show S01E01.nfo"), "<ep1/>")
+	writeFile(t, filepath.Join(outputDir, "Show S01E02.nfo"), "<ep2/>")
+	writeFile(t, filepath.Join(outputDir, "tvshow.nfo"), "<tvshow/>")
+	writeFile(t, filepath.Join(outputDir, "poster.jpg"), "img")
+
+	// Plan sidecar uploads for each episode.
+	pairs1 := PlanScrapeUpload(
+		Op{File: "Show S01E01.mkv", Parent: "剧目/ShowDir", NewName: "Show S01E01.mkv"},
+		"Show S01E01.mkv",
+		cacheRoot,
+	)
+	pairs2 := PlanScrapeUpload(
+		Op{File: "Show S01E02.mkv", Parent: "剧目/ShowDir", NewName: "Show S01E02.mkv"},
+		"Show S01E02.mkv",
+		cacheRoot,
+	)
+
+	// Deduplicate by remote name (simulating SyncSidecars dedup logic).
+	allPairs := map[string]bool{}
+	for _, p := range pairs1 {
+		allPairs[p.RemoteName] = true
+	}
+	for _, p := range pairs2 {
+		allPairs[p.RemoteName] = true
+	}
+
+	// Expected unique remote files: Show S01E01.nfo, Show S01E02.nfo, tvshow.nfo, poster.jpg
+	const wantUnique = 4
+	if len(allPairs) != wantUnique {
+		t.Fatalf("expected %d unique files after dedup, got %d: %v", wantUnique, len(allPairs), allPairs)
+	}
+
+	for _, name := range []string{"Show S01E01.nfo", "Show S01E02.nfo", "tvshow.nfo", "poster.jpg"} {
+		if !allPairs[name] {
+			t.Errorf("expected %q in combined pairs, but it was absent", name)
+		}
+	}
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
