@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf16"
 )
 
 // API endpoint base URLs.
@@ -590,6 +591,8 @@ func (a *API) DownloadURL(pickCode, userAgent string) (string, error) {
 		req.Header.Set("Cookie", a.cookies)
 		req.Header.Set("User-Agent", ua)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Origin", "https://115.com")
+		req.Header.Set("Referer", "https://115.com/")
 		return a.http.Do(req)
 	}
 
@@ -1088,7 +1091,8 @@ func toSliceOfMaps(v any) []map[string]any {
 	return nil
 }
 
-// decodeUTF16LE converts a UTF-16 LE byte slice to a Go string.
+// decodeUTF16LE converts a UTF-16 LE byte slice to a Go string,
+// correctly handling surrogate pairs via unicode/utf16.
 func decodeUTF16LE(b []byte) string {
 	if len(b) < 2 {
 		return string(b)
@@ -1097,10 +1101,9 @@ func decodeUTF16LE(b []byte) string {
 	if b[0] == 0xFF && b[1] == 0xFE {
 		b = b[2:]
 	}
-	runes := make([]rune, 0, len(b)/2)
-	for i := 0; i+1 < len(b); i += 2 {
-		r := rune(b[i]) | rune(b[i+1])<<8
-		runes = append(runes, r)
+	u16 := make([]uint16, len(b)/2)
+	for i := range u16 {
+		u16[i] = uint16(b[2*i]) | uint16(b[2*i+1])<<8
 	}
-	return string(runes)
+	return string(utf16.Decode(u16))
 }

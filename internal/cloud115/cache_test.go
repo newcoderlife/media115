@@ -333,12 +333,15 @@ func TestCacheRateLimit(t *testing.T) {
 	})
 
 	t.Run("set_merges", func(t *testing.T) {
+		// SetRateLimit now always overwrites all fields (no merge).
+		// A second call with only LastRequest set should clear CooldownUntil.
 		c := newTestCache(t)
 		c.SetRateLimit("x", RateLimitState{CooldownUntil: 50.0})
 		c.SetRateLimit("x", RateLimitState{LastRequest: 70.0})
 		rl := c.GetRateLimit("x")
-		if rl.CooldownUntil != 50.0 || rl.LastRequest != 70.0 {
-			t.Errorf("merge failed: %+v", rl)
+		// CooldownUntil is 0 because the second call overwrites with zero.
+		if rl.CooldownUntil != 0.0 || rl.LastRequest != 70.0 {
+			t.Errorf("overwrite failed: %+v", rl)
 		}
 	})
 

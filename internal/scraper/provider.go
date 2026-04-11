@@ -65,6 +65,7 @@ type ScrapeResult struct {
 	Source string
 	Error  string
 	IDs    map[string]string // e.g. {"tmdb": "12345"}
+	Meta   *Metadata         // full metadata when available (used for file_map caching)
 }
 
 // Provider is the interface every scraper backend must implement.

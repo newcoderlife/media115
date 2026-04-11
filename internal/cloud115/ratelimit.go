@@ -84,15 +84,13 @@ func (r *RateLimiter) waitForSlot() error {
 		}
 
 		// QPM exceeded?
-		minuteStart := state.LastRequest // fallback; cache stores it internally
-		_ = minuteStart
-		// Re-read full state from DB to decide: the cache row tracks minute_start
-		// but GetRateLimit only returns CooldownUntil, LastRequest, MinuteCount.
-		// Use LastRequest as minute_start proxy; the real minute_start is in TryAcquireSlot logic.
-		// We check MinuteCount against qpm.
 		if state.MinuteCount >= r.qpm {
-			// Wait until the minute window resets. We estimate based on LastRequest.
-			wait := 60.0 - (now - state.LastRequest)
+			// Wait until the minute window resets using the actual minute_start timestamp.
+			minuteStart := state.MinuteStart
+			if minuteStart == 0 {
+				minuteStart = state.LastRequest
+			}
+			wait := 60.0 - (now - minuteStart)
 			if wait < 0 {
 				wait = 0.1
 			}

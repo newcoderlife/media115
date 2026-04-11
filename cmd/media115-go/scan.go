@@ -11,6 +11,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// loadCases tries to load scrape_cases.json from the media115 cache dir.
+// Returns nil if the file does not exist.
+func loadCases() []scraper.Case {
+	path := filepath.Join(mediaCacheDir(), "scrape_cases.json")
+	cases, err := scraper.LoadCases(path)
+	if err != nil {
+		return nil
+	}
+	return cases
+}
+
 var (
 	avFolderPattern    = regexp.MustCompile(`^[A-Za-z]+-\d+$`)
 	movieFolderPattern = regexp.MustCompile(`^.+ \(\d{4}\)$`)
@@ -59,6 +70,7 @@ CATEGORY: AV, 电影, 剧目, etc. (optional; default shows all)`,
 		fmt.Printf("|%s|%s|%s|%s|%s|%s|%s|\n",
 			dashes(5), dashes(57), dashes(7), dashes(10), dashes(32), dashes(10), dashes(14))
 
+		cases := loadCases()
 		skipCount, scrapeCount, unrecognizedCount := 0, 0, 0
 
 		for i, item := range videos {
@@ -70,7 +82,7 @@ CATEGORY: AV, 电影, 剧目, etc. (optional; default shows all)`,
 				nfoMark = "✓"
 			}
 
-			result := scraper.AnalyzeFilename(name)
+			result := scraper.AnalyzeWithCases(name, cases)
 
 			var action string
 			if hasNFO {

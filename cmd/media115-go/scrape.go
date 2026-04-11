@@ -106,10 +106,12 @@ Use --limit N to scrape only the first N files.`,
 		var results []result
 		okCount, failCount, skipCount := 0, 0, 0
 
+		cases := loadCases()
+
 		for i, item := range videos {
 			name := item.Name
 			parent := item.Parent
-			analysis := scraper.AnalyzeFilename(name)
+			analysis := scraper.AnalyzeWithCases(name, cases)
 
 			fileOutDir := filepath.Join(outDir, strings.ReplaceAll(parent, "/", "_"))
 			if err := os.MkdirAll(fileOutDir, 0o755); err != nil {
@@ -140,9 +142,55 @@ Use --limit N to scrape only the first N files.`,
 				continue
 			}
 
-			sr := scraper.Scrape(mediaType, analysis.Title, name, fileOutDir, opts, nil)
+			// Cache key for this scrape.
+			stemName := strings.TrimSuffix(name, filepath.Ext(name))
+			cacheSource := normalizeMediaType(mediaType)
 
 			r := result{File: name, FileYear: analysis.Year}
+
+			// Check not_found cache (skip re-scraping recently failed titles).
+			if !force && scrapeIsNotFound(cacheSource, stemName) {
+				r.Status = "not_found"
+				fmt.Printf(" not_found (cached)\n")
+				failCount++
+				results = append(results, r)
+				continue
+			}
+
+			// Check success cache.
+			if !force {
+				if cached := scrapeGet(cacheSource, stemName); cached != nil {
+					if _, isNotFound := cached["_not_found"]; !isNotFound {
+						// Reconstruct a fake ScrapeResult from cache to save file_map.
+						fakeSR := &scraper.ScrapeResult{
+							Status: "ok",
+							IDs:    map[string]string{},
+						}
+						if title, ok := cached["title"].(string); ok {
+							fakeSR.Match = title
+						}
+						if tmdbID, ok := cached["tmdb_id"].(string); ok {
+							fakeSR.IDs["tmdb"] = tmdbID
+						}
+						if num, ok := cached["number"].(string); ok {
+							fakeSR.IDs["number"] = num
+						}
+						r.Status = "ok"
+						r.Match = fakeSR.Match
+						r.SourceID = fakeSR.IDs["tmdb"]
+						if r.SourceID == "" {
+							r.SourceID = fakeSR.IDs["number"]
+						}
+						fmt.Printf(" → %s (%s) (cached)\n", r.Match, r.SourceID)
+						okCount++
+						results = append(results, r)
+						continue
+					}
+				}
+			}
+
+			sr := scraper.Scrape(mediaType, analysis.Title, name, fileOutDir, opts, nil)
+
 			if sr.Status == "ok" {
 				r.Status = "ok"
 				r.Match = sr.Match
@@ -155,10 +203,28 @@ Use --limit N to scrape only the first N files.`,
 
 				// Save file_map cache entry
 				saveFileMap(name, mediaType, sr)
+
+				// Cache the successful scrape result.
+				cacheEntry := map[string]any{
+					"_cached_at": float64(time.Now().Unix()),
+					"title":      sr.Match,
+				}
+				if tmdbID := sr.IDs["tmdb"]; tmdbID != "" {
+					cacheEntry["tmdb_id"] = tmdbID
+				}
+				if num := sr.IDs["number"]; num != "" {
+					cacheEntry["number"] = num
+				}
+				scrapePut(cacheSource, stemName, cacheEntry)
 			} else if sr.Status == "not_found" {
 				r.Status = "not_found"
 				fmt.Printf(" not_found\n")
 				failCount++
+				// Cache the not_found result.
+				scrapePut(cacheSource, stemName, map[string]any{
+					"_not_found": true,
+					"_cached_at": float64(time.Now().Unix()),
+				})
 			} else {
 				r.Status = "error"
 				r.Error = sr.Error
@@ -207,22 +273,103 @@ Use --limit N to scrape only the first N files.`,
 	},
 }
 
+// normalizeMediaType maps internal type aliases to canonical Python types.
+func normalizeMediaType(mediaType string) string {
+	switch mediaType {
+	case "anime":
+		return "tv"
+	case "gravure":
+		return "av"
+	case "av_west":
+		return "av"
+	default:
+		return mediaType
+	}
+}
+
 // saveFileMap writes a file_map cache entry matching the Python format.
+// It persists the full metadata needed by the organizer.
 func saveFileMap(filename, mediaType string, sr *scraper.ScrapeResult) {
 	stemName := strings.TrimSuffix(filename, filepath.Ext(filename))
 	cacheDir := mediaCacheDir()
 	dir := filepath.Join(cacheDir, "scrape", "file_map")
 	_ = os.MkdirAll(dir, 0o755)
 
+	canonicalType := normalizeMediaType(mediaType)
+
 	entry := map[string]any{
-		"type":       mediaType,
+		"type":       canonicalType,
 		"_cached_at": float64(time.Now().Unix()),
 	}
-	if tmdbID, ok := sr.IDs["tmdb"]; ok && tmdbID != "" {
-		entry["tmdb_id"] = tmdbID
-	}
-	if num, ok := sr.IDs["number"]; ok && num != "" {
-		entry["number"] = num
+
+	m := sr.Meta
+
+	switch canonicalType {
+	case "movie":
+		if m != nil {
+			entry["title"] = m.Title
+			entry["originaltitle"] = m.OriginalTitle
+			if m.Year != 0 {
+				entry["year"] = m.Year
+			}
+		} else {
+			entry["title"] = sr.Match
+		}
+		if tmdbID, ok := sr.IDs["tmdb"]; ok && tmdbID != "" {
+			entry["tmdb_id"] = tmdbID
+		}
+
+	case "tv":
+		if m != nil {
+			showTitle := m.ShowTitle
+			if showTitle == "" {
+				showTitle = m.Title
+			}
+			entry["title"] = m.Title
+			entry["showtitle"] = showTitle
+			if m.Year != 0 {
+				entry["year"] = m.Year
+			}
+			if m.Season != 0 {
+				entry["season"] = m.Season
+			}
+			if m.Episode != 0 {
+				entry["episode"] = m.Episode
+			}
+		} else {
+			entry["title"] = sr.Match
+			entry["showtitle"] = sr.Match
+		}
+		if tmdbID, ok := sr.IDs["tmdb"]; ok && tmdbID != "" {
+			entry["tmdb_id"] = tmdbID
+		}
+
+	case "av":
+		// For AV the query was the number; use number from IDs or Match.
+		number := ""
+		for _, key := range []string{"jav321", "javfree", "number"} {
+			if v, ok := sr.IDs[key]; ok && v != "" {
+				number = v
+				break
+			}
+		}
+		if number == "" {
+			number = sr.Match
+		}
+		// For av_west the original query is the title; number comes from IDs.
+		if mediaType == "av_west" {
+			// number = query stored as filename stem is not accessible here;
+			// use the match title as number since av_west doesn't have numeric IDs.
+			if number == "" {
+				number = stemName
+			}
+		}
+		entry["number"] = number
+		if m != nil {
+			entry["title"] = m.Title
+		} else {
+			entry["title"] = sr.Match
+		}
 	}
 
 	path := filepath.Join(dir, stemName+".json")
@@ -234,6 +381,56 @@ func saveFileMap(filename, mediaType string, sr *scraper.ScrapeResult) {
 // mediaCacheDir returns the media115 cache directory path.
 func mediaCacheDir() string {
 	return strings.Replace(config.CacheDir(), "cloud115", "media115", 1)
+}
+
+// ── Scrape result cache ───────────────────────────────────────────────────────
+
+const scrapeCacheTTLDays = 7
+
+// scrapeCachePath returns the path for a scrape cache entry.
+func scrapeCachePath(source, key string) string {
+	return filepath.Join(mediaCacheDir(), "scrape", source, key+".json")
+}
+
+// scrapeGet reads a cached scrape result. Returns nil if absent or unreadable.
+func scrapeGet(source, key string) map[string]any {
+	data, err := os.ReadFile(scrapeCachePath(source, key))
+	if err != nil {
+		return nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil
+	}
+	return m
+}
+
+// scrapePut writes a scrape result to cache.
+func scrapePut(source, key string, data map[string]any) {
+	p := scrapeCachePath(source, key)
+	_ = os.MkdirAll(filepath.Dir(p), 0o755)
+	if b, err := json.MarshalIndent(data, "", "  "); err == nil {
+		_ = os.WriteFile(p, b, 0o644)
+	}
+}
+
+// scrapeIsNotFound returns true if the cache entry exists with _not_found=true
+// and was stored within the last scrapeCacheTTLDays days.
+func scrapeIsNotFound(source, key string) bool {
+	m := scrapeGet(source, key)
+	if m == nil {
+		return false
+	}
+	nf, _ := m["_not_found"].(bool)
+	if !nf {
+		return false
+	}
+	cachedAt, _ := m["_cached_at"].(float64)
+	if cachedAt == 0 {
+		return true // no timestamp, treat as expired? conservatively return true
+	}
+	age := time.Now().Unix() - int64(cachedAt)
+	return age < int64(scrapeCacheTTLDays*24*3600)
 }
 
 func init() {
