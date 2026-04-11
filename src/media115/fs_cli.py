@@ -579,8 +579,11 @@ def register(cli: click.Group):
         import shutil
         from media115.cache import _config_root
 
-        # 查找 _skills 目录
-        skills_src = Path(__file__).parent / "_skills"
+        # 查找 skills 目录（repo root 的 skills/）
+        skills_src = Path(__file__).resolve().parent.parent.parent / "skills"
+        if not skills_src.exists():
+            # fallback: 可能是 pip install 安装的，skills 在包内
+            skills_src = Path(__file__).parent / "_skills"
         if not skills_src.exists():
             raise click.ClickException(f"Skills 目录不存在: {skills_src}")
 
