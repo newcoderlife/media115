@@ -20,6 +20,7 @@ type Provider struct {
 	apiKey   string
 	endpoint string
 	client   *http.Client
+	throttle *scraper.Throttle
 }
 
 // New creates a new StashDB provider.
@@ -33,6 +34,7 @@ func NewWithEndpoint(apiKey, endpoint string) *Provider {
 		apiKey:   apiKey,
 		endpoint: endpoint,
 		client:   &http.Client{Timeout: 15 * time.Second},
+		throttle: scraper.NewThrottle(1.0),
 	}
 }
 
@@ -172,6 +174,7 @@ func (p *Provider) query(gql string, variables map[string]any) (map[string]any, 
 		return nil, err
 	}
 
+	p.throttle.Wait()
 	req, err := http.NewRequest(http.MethodPost, p.endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, err

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -22,9 +23,10 @@ const (
 
 // Provider implements scraper.Provider for Bangumi.
 type Provider struct {
-	token   string
-	baseURL string
-	client  *http.Client
+	token    string
+	baseURL  string
+	client   *http.Client
+	throttle *scraper.Throttle
 }
 
 // New creates a new Bangumi provider. token may be empty for unauthenticated access.
@@ -35,9 +37,10 @@ func New(token string) *Provider {
 // NewWithBaseURL creates a Bangumi provider with a custom base URL (for testing).
 func NewWithBaseURL(token, baseURL string) *Provider {
 	return &Provider{
-		token:   token,
-		baseURL: strings.TrimRight(baseURL, "/"),
-		client:  &http.Client{Timeout: 10 * time.Second},
+		token:    token,
+		baseURL:  strings.TrimRight(baseURL, "/"),
+		client:   &http.Client{Timeout: 10 * time.Second},
+		throttle: scraper.NewThrottle(0.8),
 	}
 }
 
@@ -111,6 +114,25 @@ func (p *Provider) Scrape(query, filename, outDir string, opts scraper.ScrapeOpt
 	nfoPath := filepath.Join(outDir, stem+".nfo")
 	if err := scraper.GenerateEpisodeNFO(m, nfoPath); err != nil {
 		return &scraper.ScrapeResult{Status: "error", Error: err.Error()}, err
+	}
+
+	// Generate tvshow.nfo if it doesn't already exist in outDir.
+	tvshowPath := filepath.Join(outDir, "tvshow.nfo")
+	if _, err := os.Stat(tvshowPath); os.IsNotExist(err) {
+		tvshowMeta := &scraper.Metadata{
+			Title:     m.Title,
+			ShowTitle: m.ShowTitle,
+			Year:      m.Year,
+			Premiered: m.Premiered,
+			Aired:     m.Aired,
+			Plot:      m.Plot,
+			Rating:    m.Rating,
+			Votes:     m.Votes,
+			PosterURL: m.PosterURL,
+			Tags:      m.Tags,
+			UniqueIDs: m.UniqueIDs,
+		}
+		_ = scraper.GenerateTVShowNFO(tvshowMeta, tvshowPath)
 	}
 
 	// Download poster if available
@@ -187,6 +209,7 @@ func (p *Provider) get(path string, params url.Values) (map[string]any, error) {
 	if len(params) > 0 {
 		reqURL += "?" + params.Encode()
 	}
+	p.throttle.Wait()
 	req, err := http.NewRequest(http.MethodGet, reqURL, nil)
 	if err != nil {
 		return nil, err
@@ -217,6 +240,7 @@ func (p *Provider) post(path string, params url.Values, body any) (map[string]an
 	if err != nil {
 		return nil, err
 	}
+	p.throttle.Wait()
 	req, err := http.NewRequest(http.MethodPost, reqURL, bytes.NewReader(b))
 	if err != nil {
 		return nil, err

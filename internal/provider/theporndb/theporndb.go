@@ -17,9 +17,10 @@ const defaultBaseURL = "https://api.theporndb.net"
 
 // Provider implements scraper.Provider for ThePornDB.
 type Provider struct {
-	token   string
-	baseURL string
-	client  *http.Client
+	token    string
+	baseURL  string
+	client   *http.Client
+	throttle *scraper.Throttle
 }
 
 // New creates a new ThePornDB provider.
@@ -30,9 +31,10 @@ func New(token string) *Provider {
 // NewWithBaseURL creates a ThePornDB provider with a custom base URL (for testing).
 func NewWithBaseURL(token, baseURL string) *Provider {
 	return &Provider{
-		token:   token,
-		baseURL: strings.TrimRight(baseURL, "/"),
-		client:  &http.Client{Timeout: 15 * time.Second},
+		token:    token,
+		baseURL:  strings.TrimRight(baseURL, "/"),
+		client:   &http.Client{Timeout: 15 * time.Second},
+		throttle: scraper.NewThrottle(1.5),
 	}
 }
 
@@ -143,6 +145,7 @@ func (p *Provider) get(path string, params url.Values) (map[string]any, error) {
 		reqURL += "?" + params.Encode()
 	}
 
+	p.throttle.Wait()
 	req, err := http.NewRequest(http.MethodGet, reqURL, nil)
 	if err != nil {
 		return nil, err

@@ -17,8 +17,9 @@ const defaultBaseURL = "https://javfree.me"
 
 // Provider implements scraper.Provider for javfree.
 type Provider struct {
-	baseURL string
-	client  *http.Client
+	baseURL  string
+	client   *http.Client
+	throttle *scraper.Throttle
 }
 
 // New creates a new javfree provider.
@@ -33,6 +34,7 @@ func NewWithBaseURL(baseURL string) *Provider {
 		client: &http.Client{
 			Timeout: 20 * time.Second,
 		},
+		throttle: scraper.NewThrottle(0.8),
 	}
 }
 
@@ -99,6 +101,7 @@ func (p *Provider) Scrape(query, filename, outDir string, opts scraper.ScrapeOpt
 
 // FetchMetadata retrieves AV metadata from javfree by number.
 func (p *Provider) FetchMetadata(number string) (map[string]any, error) {
+	p.throttle.Wait()
 	// GET /{number}/ (lowercase)
 	reqURL := p.baseURL + "/" + strings.ToLower(number) + "/"
 	req, err := http.NewRequest(http.MethodGet, reqURL, nil)

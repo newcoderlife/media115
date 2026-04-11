@@ -109,7 +109,7 @@ func (c *Config) Save() error {
 	if err := os.MkdirAll(ConfigDir(), 0o755); err != nil {
 		return err
 	}
-	f, err := os.Create(ConfigPath())
+	f, err := os.OpenFile(ConfigPath(), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
