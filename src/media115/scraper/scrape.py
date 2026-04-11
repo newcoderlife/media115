@@ -342,6 +342,14 @@ def _safe_int(value, chars=None):
         return None
 
 
+def scrape_by_type(media_type: str, query: str, filename: str, out_dir: Path, **kwargs) -> dict:
+    """Unified scrape entry point using provider registry."""
+    # Ensure providers are registered
+    import media115.scraper.providers  # triggers auto-registration
+    from media115.scraper.registry import scrape
+    return scrape(media_type, query, filename, out_dir, **kwargs)
+
+
 def _write_av_nfo(meta: dict, filename: str, out_dir: Path, source: str):
     """Generate NFO + download cover for AV."""
 
