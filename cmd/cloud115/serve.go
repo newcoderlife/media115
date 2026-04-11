@@ -198,17 +198,12 @@ func buildProxyMux(client *cloud115.Client, jellyfinURL string) http.Handler {
 func proxyToJellyfin(w http.ResponseWriter, r *http.Request, jellyfinURL string) {
 	target := jellyfinURL + r.URL.RequestURI()
 
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "read body failed", http.StatusInternalServerError)
-		return
-	}
-
-	req, err := http.NewRequest(r.Method, target, strings.NewReader(string(body)))
+	req, err := http.NewRequest(r.Method, target, r.Body)
 	if err != nil {
 		http.Error(w, "build request failed", http.StatusInternalServerError)
 		return
 	}
+	req.ContentLength = r.ContentLength
 
 	for k, vs := range r.Header {
 		if !excludedHeaders[strings.ToLower(k)] {

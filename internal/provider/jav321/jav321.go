@@ -21,8 +21,9 @@ const (
 
 // Provider implements scraper.Provider for jav321.
 type Provider struct {
-	baseURL string
-	client  *http.Client
+	baseURL  string
+	client   *http.Client
+	throttle *scraper.Throttle
 }
 
 // New creates a new jav321 provider.
@@ -42,6 +43,7 @@ func NewWithBaseURL(baseURL string) *Provider {
 				return http.ErrUseLastResponse // manual redirect handling
 			},
 		},
+		throttle: scraper.NewThrottle(0.8),
 	}
 }
 
@@ -111,6 +113,7 @@ func (p *Provider) Scrape(query, filename, outDir string, opts scraper.ScrapeOpt
 
 // FetchMetadata performs the jav321 POST search and parses the detail page.
 func (p *Provider) FetchMetadata(number string) (map[string]any, error) {
+	p.throttle.Wait()
 	// POST to /search with sn=number
 	formData := url.Values{"sn": {number}}
 	req, err := http.NewRequest(http.MethodPost, p.baseURL+"/search",
