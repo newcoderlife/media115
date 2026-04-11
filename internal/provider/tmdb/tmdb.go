@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -152,6 +153,7 @@ func (p *Provider) scrapeMovie(query, filename, outDir string, opts scraper.Scra
 		Status: "ok",
 		Match:  m.Title,
 		IDs:    m.UniqueIDs,
+		Meta:   m,
 	}, nil
 }
 
@@ -204,10 +206,44 @@ func (p *Provider) scrapeTV(query, filename, outDir string, opts scraper.ScrapeO
 		return &scraper.ScrapeResult{Status: "error", Error: err.Error()}, err
 	}
 
+	// Generate tvshow.nfo if it doesn't already exist in outDir.
+	tvshowPath := filepath.Join(outDir, "tvshow.nfo")
+	if _, err := os.Stat(tvshowPath); os.IsNotExist(err) {
+		tvshowMeta := &scraper.Metadata{
+			Title:         stringVal(detail, "name", "original_name"),
+			OriginalTitle: stringVal(detail, "original_name"),
+			ShowTitle:     stringVal(detail, "name", "original_name"),
+			Year:          yearFromDate(detail["first_air_date"]),
+			Premiered:     stringVal(detail, "first_air_date"),
+			Plot:          stringVal(detail, "overview"),
+			Rating:        floatVal(detail, "vote_average"),
+			Votes:         intVal(detail, "vote_count"),
+			UniqueIDs:     m.UniqueIDs,
+		}
+		if pp := stringVal(detail, "poster_path"); pp != "" {
+			tvshowMeta.PosterURL = imageBase + "/original" + pp
+		}
+		if bp := stringVal(detail, "backdrop_path"); bp != "" {
+			tvshowMeta.FanartURL = imageBase + "/original" + bp
+		}
+		for _, g := range asSlice(detail["genres"]) {
+			if gm, ok := g.(map[string]any); ok {
+				tvshowMeta.Genres = append(tvshowMeta.Genres, stringVal(gm, "name"))
+			}
+		}
+		for _, c := range asSlice(detail["production_companies"]) {
+			if cm, ok := c.(map[string]any); ok {
+				tvshowMeta.Studios = append(tvshowMeta.Studios, stringVal(cm, "name"))
+			}
+		}
+		_ = scraper.GenerateTVShowNFO(tvshowMeta, tvshowPath)
+	}
+
 	return &scraper.ScrapeResult{
 		Status: "ok",
 		Match:  m.Title,
 		IDs:    m.UniqueIDs,
+		Meta:   m,
 	}, nil
 }
 
@@ -277,41 +313,47 @@ func (p *Provider) get(path string, params url.Values) (map[string]any, error) {
 		reqURL += "?" + params.Encode()
 	}
 
-	req, err := http.NewRequest(http.MethodGet, reqURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	if p.token != "" {
-		req.Header.Set("Authorization", "Bearer "+p.token)
-	}
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusTooManyRequests {
-		retryAfter := 5
-		if v := resp.Header.Get("Retry-After"); v != "" {
-			if n, e := strconv.Atoi(v); e == nil {
-				retryAfter = n
-			}
+	for attempt := 0; attempt < 3; attempt++ {
+		req, err := http.NewRequest(http.MethodGet, reqURL, nil)
+		if err != nil {
+			return nil, err
 		}
-		time.Sleep(time.Duration(retryAfter) * time.Second)
-		return p.get(path, params)
-	}
+		if p.token != "" {
+			req.Header.Set("Authorization", "Bearer "+p.token)
+		}
+		req.Header.Set("Accept", "application/json")
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("tmdb: HTTP %d for %s", resp.StatusCode, path)
-	}
+		resp, err := p.client.Do(req)
+		if err != nil {
+			return nil, err
+		}
 
-	var result map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
+		if resp.StatusCode == http.StatusTooManyRequests {
+			retryAfter := 5
+			if v := resp.Header.Get("Retry-After"); v != "" {
+				if n, e := strconv.Atoi(v); e == nil {
+					retryAfter = n
+				}
+			}
+			resp.Body.Close()
+			time.Sleep(time.Duration(retryAfter) * time.Second)
+			continue
+		}
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			resp.Body.Close()
+			return nil, fmt.Errorf("tmdb: HTTP %d for %s", resp.StatusCode, path)
+		}
+
+		var result map[string]any
+		err = json.NewDecoder(resp.Body).Decode(&result)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
 	}
-	return result, nil
+	return nil, fmt.Errorf("tmdb: rate limit exceeded after 3 retries for %s", path)
 }
 
 // ── Metadata builders ─────────────────────────────────────────────────────────

@@ -93,6 +93,7 @@ func (p *Provider) Scrape(query, filename, outDir string, opts scraper.ScrapeOpt
 		Status: "ok",
 		Match:  m.Title,
 		IDs:    m.UniqueIDs,
+		Meta:   m,
 	}, nil
 }
 

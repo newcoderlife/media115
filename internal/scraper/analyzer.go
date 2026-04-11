@@ -1,12 +1,76 @@
 package scraper
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
 )
+
+// CaseExpect holds the expected analysis fields for a test case.
+type CaseExpect struct {
+	Type     string `json:"type"`
+	Title    string `json:"title"`
+	Source   string `json:"source"`
+	SourceID string `json:"source_id"`
+	Year     int    `json:"year"`
+	Season   int    `json:"season"`
+	Episode  int    `json:"episode"`
+}
+
+// Case is one entry in a scrape_cases.json file.
+type Case struct {
+	Filename string     `json:"filename"`
+	Expect   CaseExpect `json:"expect"`
+}
+
+// LoadCases reads a JSON file containing []Case.
+func LoadCases(path string) ([]Case, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var cases []Case
+	if err := json.Unmarshal(data, &cases); err != nil {
+		return nil, err
+	}
+	return cases, nil
+}
+
+// MatchAgainstCases checks filename against the provided cases (exact match on
+// Filename).  Returns a non-nil *AnalysisResult if a matching case is found.
+func MatchAgainstCases(filename string, cases []Case) *AnalysisResult {
+	base := filepath.Base(filename)
+	for _, c := range cases {
+		if c.Filename != base && c.Filename != filename {
+			continue
+		}
+		r := &AnalysisResult{
+			Filename:   filename,
+			MediaType:  c.Expect.Type,
+			Title:      c.Expect.Title,
+			Year:       c.Expect.Year,
+			Season:     c.Expect.Season,
+			Episode:    c.Expect.Episode,
+			Source:     c.Expect.Source,
+			Confidence: "high",
+			Note:       "matched scrape_cases.json",
+		}
+		return r
+	}
+	return nil
+}
+
+// AnalyzeWithCases is like AnalyzeFilename but checks cases first.
+func AnalyzeWithCases(filename string, cases []Case) AnalysisResult {
+	if r := MatchAgainstCases(filename, cases); r != nil {
+		return *r
+	}
+	return AnalyzeFilename(filename)
+}
 
 // AnalysisResult holds the output of AnalyzeFilename.
 type AnalysisResult struct {

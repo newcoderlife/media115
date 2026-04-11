@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/newcoderlife/media115/internal/cloud115"
+	"github.com/newcoderlife/media115/internal/config"
 	"github.com/newcoderlife/media115/internal/organizer"
 	"github.com/spf13/cobra"
 )
@@ -51,6 +53,15 @@ CATEGORY: AV, 电影, 剧目, etc.`,
 
 		if len(renames) == 0 {
 			fmt.Println("没有需要重命名的文件。")
+			if execute {
+				client, err := getClient()
+				if err == nil {
+					defer client.Close()
+					categoryPath := "影音/" + category
+					logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+					uploadMissingNFO(client, categoryPath, skips, logger)
+				}
+			}
 			return nil
 		}
 
@@ -172,8 +183,65 @@ CATEGORY: AV, 电影, 剧目, etc.`,
 			}
 		}
 
+		// Upload NFOs for files that are already correctly named (skips).
+		uploadMissingNFO(client, categoryPath, skips, logger)
+
 		return nil
 	},
+}
+
+// uploadMissingNFO uploads NFO/poster sidecars for skip ops (already-organized
+// files) that don't yet have a remote NFO.
+func uploadMissingNFO(client *cloud115.Client, categoryPath string, skips []organizer.Op, logger *slog.Logger) {
+	if len(skips) == 0 {
+		return
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	cacheRoot := config.CacheDir()
+	catPath := "/" + strings.TrimPrefix(categoryPath, "/")
+
+	// Build set of parent dirs that already have an NFO on 115.
+	nfoDirs := map[string]bool{}
+	for _, op := range skips {
+		if op.Reason == "already correct" || op.Reason == "already in standard format" {
+			parentDir := catPath + "/" + leafName(op.Parent)
+			if nfoDirs[parentDir] {
+				continue
+			}
+			entries, err := client.ListDir(parentDir)
+			if err != nil {
+				continue
+			}
+			hasNFO := false
+			for _, e := range entries {
+				if e.Type == "file" && strings.HasSuffix(strings.ToLower(e.Name), ".nfo") {
+					hasNFO = true
+					break
+				}
+			}
+			if !hasNFO {
+				vf := organizer.VideoFile{
+					File:   op.File,
+					Parent: op.Parent,
+				}
+				n := organizer.SyncSidecars(client, parentDir, []organizer.VideoFile{vf}, false, logger, cacheRoot)
+				if n > 0 {
+					logger.Info("organizer: uploaded missing NFO", "dir", parentDir, "count", n)
+				}
+			}
+			nfoDirs[parentDir] = true
+		}
+	}
+}
+
+// leafName returns the last path component.
+func leafName(p string) string {
+	if idx := strings.LastIndex(p, "/"); idx >= 0 {
+		return p[idx+1:]
+	}
+	return p
 }
 
 func init() {

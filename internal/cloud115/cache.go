@@ -332,31 +332,20 @@ func (c *Cache) DeleteDirMeta(cid string) {
 func (c *Cache) GetRateLimit(name string) RateLimitState {
 	var state RateLimitState
 	err := c.db.QueryRow(
-		"SELECT cooldown_until, last_request, minute_count FROM rate_limit WHERE name = ?",
+		"SELECT cooldown_until, last_request, minute_start, minute_count FROM rate_limit WHERE name = ?",
 		name,
-	).Scan(&state.CooldownUntil, &state.LastRequest, &state.MinuteCount)
+	).Scan(&state.CooldownUntil, &state.LastRequest, &state.MinuteStart, &state.MinuteCount)
 	if err != nil {
 		return RateLimitState{}
 	}
 	return state
 }
 
-// SetRateLimit upserts rate-limit fields, merging with current stored values.
+// SetRateLimit upserts rate-limit fields, always overwriting all columns.
 func (c *Cache) SetRateLimit(name string, state RateLimitState) {
-	current := c.GetRateLimit(name)
-	// Merge: only overwrite non-zero fields.
-	if state.CooldownUntil != 0 {
-		current.CooldownUntil = state.CooldownUntil
-	}
-	if state.LastRequest != 0 {
-		current.LastRequest = state.LastRequest
-	}
-	if state.MinuteCount != 0 {
-		current.MinuteCount = state.MinuteCount
-	}
 	_, _ = c.db.Exec(
-		"INSERT OR REPLACE INTO rate_limit (name, cooldown_until, last_request, minute_count) VALUES (?, ?, ?, ?)",
-		name, current.CooldownUntil, current.LastRequest, current.MinuteCount,
+		"INSERT OR REPLACE INTO rate_limit (name, cooldown_until, last_request, minute_start, minute_count) VALUES (?, ?, ?, ?, ?)",
+		name, state.CooldownUntil, state.LastRequest, state.MinuteStart, state.MinuteCount,
 	)
 }
 
@@ -564,14 +553,14 @@ func (c *Cache) Stats() CacheStats {
 		s.DBSizeBytes = fi.Size()
 	}
 
-	rows, err := c.db.Query("SELECT name, cooldown_until, last_request, minute_count FROM rate_limit")
+	rows, err := c.db.Query("SELECT name, cooldown_until, last_request, minute_start, minute_count FROM rate_limit")
 	if err == nil {
 		defer rows.Close()
 		s.RateLimit = make(map[string]RateLimitState)
 		for rows.Next() {
 			var name string
 			var state RateLimitState
-			if err := rows.Scan(&name, &state.CooldownUntil, &state.LastRequest, &state.MinuteCount); err == nil {
+			if err := rows.Scan(&name, &state.CooldownUntil, &state.LastRequest, &state.MinuteStart, &state.MinuteCount); err == nil {
 				s.RateLimit[name] = state
 			}
 		}

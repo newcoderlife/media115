@@ -60,9 +60,11 @@ func (p *Provider) Search(query string, opts scraper.SearchOpts) ([]scraper.Sear
 	if err != nil || meta == nil {
 		return nil, nil
 	}
+	number, _ := meta["number"].(string)
+	title, _ := meta["title"].(string)
 	return []scraper.SearchResult{{
-		ID:    meta["number"].(string),
-		Title: meta["title"].(string),
+		ID:    number,
+		Title: title,
 	}}, nil
 }
 
@@ -103,6 +105,7 @@ func (p *Provider) Scrape(query, filename, outDir string, opts scraper.ScrapeOpt
 		Status: "ok",
 		Match:  m.Title,
 		IDs:    m.UniqueIDs,
+		Meta:   m,
 	}, nil
 }
 

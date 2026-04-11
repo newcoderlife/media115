@@ -116,6 +116,19 @@ func isDigit(r rune) bool      { return r >= '0' && r <= '9' }
 func isAlphaNum(r rune) bool   { return isAlpha(r) || isDigit(r) }
 func isDiscLetter(r rune) bool { return r == 'A' || r == 'B' || r == 'C' || r == 'D' || r == 'a' || r == 'b' || r == 'c' || r == 'd' }
 
+// fileMapCachePut writes a JSON cache entry to
+// ~/.cache/media115/scrape/{source}/{key}.json.
+func fileMapCachePut(source, key string, data map[string]any) {
+	cacheDir := config.CacheDir()
+	cacheDir = strings.Replace(cacheDir, "cloud115", "media115", 1)
+	dir := filepath.Join(cacheDir, "scrape", source)
+	_ = os.MkdirAll(dir, 0o755)
+	path := filepath.Join(dir, key+".json")
+	if b, err := json.Marshal(data); err == nil {
+		_ = os.WriteFile(path, b, 0o644)
+	}
+}
+
 // fileMapCacheGet reads a JSON cache entry from
 // ~/.cache/media115/scrape/{source}/{key}.json.
 // Returns nil if absent or unreadable.

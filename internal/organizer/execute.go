@@ -186,6 +186,23 @@ func Execute(client *cloud115.Client, ops []Op, categoryPath string, logger *slo
 		}
 	}
 
+	// ── Phase 4.5: Update file_map for renamed files ─────────────────────────
+	for i, r := range resolvedOps {
+		if failedIdx[i] {
+			continue
+		}
+		if r.op.NewName == "" || r.op.NewName == r.op.File {
+			continue
+		}
+		oldStem := stemFilename(r.op.File)
+		newStem := stemFilename(r.op.NewName)
+		if oldStem != newStem {
+			if oldData := fileMapCacheGet("file_map", oldStem); oldData != nil {
+				fileMapCachePut("file_map", newStem, oldData)
+			}
+		}
+	}
+
 	// ── Phase 5: Upload sidecars ──────────────────────────────────────────────
 	// Group video_file dicts by target upload directory.
 	targetGroups := map[string][]VideoFile{} // target dir → []VideoFile
@@ -263,6 +280,15 @@ func Execute(client *cloud115.Client, ops []Op, categoryPath string, logger *slo
 var reVideoExt = regexp.MustCompile(`(?i)\.(mkv|mp4|avi|ts|rmvb|flv|wmv|mov|m4v|iso)$`)
 
 func isVideoFile(name string) bool { return reVideoExt.MatchString(name) }
+
+// stemFilename returns the filename without its extension.
+func stemFilename(name string) string {
+	base := leafName(name)
+	if idx := strings.LastIndex(base, "."); idx > 0 {
+		return base[:idx]
+	}
+	return base
+}
 
 // leafName returns the last path component (everything after the last "/").
 func leafName(p string) string {
