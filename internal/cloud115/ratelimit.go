@@ -34,14 +34,14 @@ func NewRateLimiter(name string, qps float64, qpm int, cache *Cache) *RateLimite
 
 // Acquire blocks until a slot is available, then increments the request count.
 // Returns an error only when a cooldown is active.
+// The mutex is released during any sleep so other goroutines are not blocked.
 func (r *RateLimiter) Acquire() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	if err := r.waitForSlot(); err != nil {
 		return err
 	}
+	r.mu.Lock()
 	r.count++
+	r.mu.Unlock()
 	return nil
 }
 
@@ -57,7 +57,9 @@ func (r *RateLimiter) SetCooldown(seconds float64) {
 	slog.Warn("COOLDOWN", "limiter", r.name, "seconds", int(seconds), "until", until)
 }
 
-// waitForSlot is the inner loop called with the mutex already held.
+// waitForSlot loops until a slot is available or a cooldown error is returned.
+// The mutex is acquired only for the check and TryAcquireSlot call, then
+// released before any sleep so other goroutines are not blocked.
 func (r *RateLimiter) waitForSlot() error {
 	if r.cache == nil {
 		return nil
@@ -66,9 +68,11 @@ func (r *RateLimiter) waitForSlot() error {
 	minInterval := 1.0 / r.qps
 
 	for {
+		r.mu.Lock()
 		now := float64(time.Now().UnixNano()) / 1e9
 
 		if r.cache.TryAcquireSlot(r.name, now, minInterval, r.qpm) {
+			r.mu.Unlock()
 			return nil
 		}
 
@@ -80,8 +84,11 @@ func (r *RateLimiter) waitForSlot() error {
 			remaining := int(state.CooldownUntil - now)
 			mins := remaining / 60
 			secs := remaining % 60
+			r.mu.Unlock()
 			return fmt.Errorf("rate limit cooldown: %dm%02ds remaining", mins, secs)
 		}
+
+		var waitDuration float64
 
 		// QPM exceeded?
 		if state.MinuteCount >= r.qpm {
@@ -90,33 +97,33 @@ func (r *RateLimiter) waitForSlot() error {
 			if minuteStart == 0 {
 				minuteStart = state.LastRequest
 			}
-			wait := 60.0 - (now - minuteStart)
-			if wait < 0 {
-				wait = 0.1
+			waitDuration = 60.0 - (now - minuteStart)
+			if waitDuration < 0 {
+				waitDuration = 0.1
 			}
 			slog.Debug("THROTTLE QPM",
 				"limiter", r.name,
 				"qpm", r.qpm,
 				"count", state.MinuteCount,
-				"wait_s", fmt.Sprintf("%.1f", wait),
+				"wait_s", fmt.Sprintf("%.1f", waitDuration),
 			)
-			sleep(wait)
-			continue
+		} else {
+			// QPS too fast?
+			waitDuration = minInterval - (now - state.LastRequest)
+			if waitDuration > 0 {
+				slog.Debug("THROTTLE QPS",
+					"limiter", r.name,
+					"qps", r.qps,
+					"wait_s", fmt.Sprintf("%.1f", waitDuration),
+				)
+			} else {
+				// Edge case: slot not obtained yet but no obvious reason — brief pause.
+				waitDuration = 0.05
+			}
 		}
 
-		// QPS too fast?
-		wait := minInterval - (now - state.LastRequest)
-		if wait > 0 {
-			slog.Debug("THROTTLE QPS",
-				"limiter", r.name,
-				"qps", r.qps,
-				"wait_s", fmt.Sprintf("%.1f", wait),
-			)
-			sleep(wait)
-		} else {
-			// Edge case: slot not obtained yet but no obvious reason — brief pause.
-			sleep(0.05)
-		}
+		r.mu.Unlock() // release before sleeping
+		sleep(waitDuration)
 	}
 }
 

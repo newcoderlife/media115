@@ -24,6 +24,13 @@ func Register(p Provider) {
 	}
 }
 
+// Reset clears all registered providers. Intended for use in tests.
+func Reset() {
+	mu.Lock()
+	defer mu.Unlock()
+	providers = make(map[string][]Provider)
+}
+
 // GetProviders returns the registered providers for the given media type,
 // ordered by priority (lowest first).  Returns nil when none are registered.
 func GetProviders(mediaType string) []Provider {

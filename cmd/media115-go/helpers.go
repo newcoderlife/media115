@@ -39,12 +39,21 @@ func getConfig() (*config.Config, error) {
 }
 
 func registerProviders(cfg *config.Config) {
-	scraper.Register(tmdb.New(cfg.Auth.TMDB.Token))
-	scraper.Register(bangumi.New(cfg.Auth.Bangumi.Token))
+	if cfg.Auth.TMDB.Token != "" {
+		scraper.Register(tmdb.New(cfg.Auth.TMDB.Token))
+	}
+	if cfg.Auth.Bangumi.Token != "" {
+		scraper.Register(bangumi.New(cfg.Auth.Bangumi.Token))
+	}
+	// jav321 and javfree don't need tokens
 	scraper.Register(jav321.New())
 	scraper.Register(javfree.New())
-	scraper.Register(theporndb.New(cfg.Auth.ThePornDB.Token))
-	scraper.Register(stashdb.New(cfg.Auth.StashDB.APIKey))
+	if cfg.Auth.ThePornDB.Token != "" {
+		scraper.Register(theporndb.New(cfg.Auth.ThePornDB.Token))
+	}
+	if cfg.Auth.StashDB.APIKey != "" {
+		scraper.Register(stashdb.New(cfg.Auth.StashDB.APIKey))
+	}
 }
 
 func formatSize(size int64) string {

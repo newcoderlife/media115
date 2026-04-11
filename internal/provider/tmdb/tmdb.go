@@ -28,6 +28,7 @@ type Provider struct {
 	baseURL  string
 	language string
 	client   *http.Client
+	throttle *scraper.Throttle
 }
 
 // New creates a TMDB provider with the given read-access token.
@@ -42,6 +43,7 @@ func NewWithBaseURL(token, baseURL string) *Provider {
 		baseURL:  strings.TrimRight(baseURL, "/"),
 		language: defaultLanguage,
 		client:   &http.Client{Timeout: 15 * time.Second},
+		throttle: scraper.NewThrottle(0.8),
 	}
 }
 
@@ -313,6 +315,7 @@ func (p *Provider) get(path string, params url.Values) (map[string]any, error) {
 		reqURL += "?" + params.Encode()
 	}
 
+	p.throttle.Wait()
 	for attempt := 0; attempt < 3; attempt++ {
 		req, err := http.NewRequest(http.MethodGet, reqURL, nil)
 		if err != nil {
