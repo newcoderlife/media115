@@ -1,0 +1,49 @@
+[auth]
+cookies = ""
+
+[auth.tmdb]
+token = ""
+
+[auth.bangumi]
+token = ""
+
+[auth.theporndb]
+token = ""
+
+[auth.stashdb]
+api_key = ""
+
+[cloud]
+root = "/影音"
+qps = 0.5
+qpm = 20
+cooldown_seconds = 3600
+
+[cache]
+listing_ttl = 3600
+path_ttl = 86400
+
+[categories.电影]
+type = "movie"
+naming = "{title} ({year})"
+sources = ["tmdb"]
+
+[categories.剧目]
+type = "tv"
+naming = "{title} ({year})"
+sources = ["tmdb", "bangumi"]
+
+[categories.AV]
+type = "av"
+naming = "{number}"
+sources = ["jav321", "javfree"]
+
+[categories.写真]
+type = "gravure"
+naming = "{number}"
+sources = ["jav321", "javfree"]
+
+[proxy]
+host = "127.0.0.1"
+port = 9000
+jellyfin_url = "http://localhost:8096"

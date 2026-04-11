@@ -14,3 +14,9 @@ build/
 htmlcov/
 .DS_Store
 debug.md
+
+# Go
+bin/
+*.exe
+*.test
+*.out
