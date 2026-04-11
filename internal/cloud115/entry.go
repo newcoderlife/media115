@@ -34,6 +34,7 @@ type CacheStats struct {
 type RateLimitState struct {
 	CooldownUntil float64 `json:"cooldown_until"`
 	LastRequest   float64 `json:"last_request"`
+	MinuteStart   float64 `json:"minute_start"`
 	MinuteCount   int     `json:"minute_count"`
 }
 
