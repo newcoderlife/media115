@@ -53,6 +53,8 @@ type apiCaller interface {
 	UploadFile(localPath, targetDirID, filename string) (map[string]any, error)
 	RapidUpload(dirID, filename string, fileSize int64, fileSHA1 string, fileStream io.ReadSeeker) (map[string]any, error)
 	QRLogin(app string) error
+	QRGetToken(app string) (*QRSession, error)
+	QRWaitAndLogin(sess *QRSession) error
 	CheckLogin() bool
 	RenewCookies(app string) bool
 	SaveCookies(path string) error
@@ -1030,6 +1032,16 @@ func parseTreeText(text string, videoExts map[string]struct{}, nfoExt string) []
 // QRLogin performs an interactive QR-code login and refreshes client cookies.
 func (c *Client) QRLogin(app string) error {
 	return c.api.QRLogin(app)
+}
+
+// QRGetToken fetches a QR login token (phase 1 of two-phase login).
+func (c *Client) QRGetToken(app string) (*QRSession, error) {
+	return c.api.QRGetToken(app)
+}
+
+// QRWaitAndLogin polls for QR scan and finalizes login (phase 2).
+func (c *Client) QRWaitAndLogin(sess *QRSession) error {
+	return c.api.QRWaitAndLogin(sess)
 }
 
 // CheckLogin returns true if the current cookies are valid.

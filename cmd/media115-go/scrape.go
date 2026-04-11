@@ -121,9 +121,13 @@ Use --limit N to scrape only the first N files.`,
 			pct := 100 * (i + 1) / len(videos)
 			fmt.Printf("  [%d/%d %d%%] %s ...", i+1, len(videos), pct, trunc(name, 60))
 
+			season := analysis.Season
+			if (analysis.MediaType == "tv" || analysis.MediaType == "anime") && season == 0 {
+				season = 1 // default to season 1
+			}
 			opts := scraper.ScrapeOpts{
 				Year:    analysis.Year,
-				Season:  analysis.Season,
+				Season:  season,
 				Episode: analysis.Episode,
 			}
 
@@ -202,7 +206,7 @@ Use --limit N to scrape only the first N files.`,
 				okCount++
 
 				// Save file_map cache entry
-				saveFileMap(name, mediaType, sr)
+				saveFileMap(name, mediaType, analysis.Title, sr)
 
 				// Cache the successful scrape result.
 				cacheEntry := map[string]any{
@@ -289,7 +293,8 @@ func normalizeMediaType(mediaType string) string {
 
 // saveFileMap writes a file_map cache entry matching the Python format.
 // It persists the full metadata needed by the organizer.
-func saveFileMap(filename, mediaType string, sr *scraper.ScrapeResult) {
+// query is the original search query (analysis.Title), used as the number for av_west.
+func saveFileMap(filename, mediaType, query string, sr *scraper.ScrapeResult) {
 	stemName := strings.TrimSuffix(filename, filepath.Ext(filename))
 	cacheDir := mediaCacheDir()
 	dir := filepath.Join(cacheDir, "scrape", "file_map")
@@ -345,24 +350,22 @@ func saveFileMap(filename, mediaType string, sr *scraper.ScrapeResult) {
 		}
 
 	case "av":
-		// For AV the query was the number; use number from IDs or Match.
+		// For av_west, the original query (analysis.Title) is the number/identifier.
+		// For regular av, number comes from provider IDs or the match.
 		number := ""
-		for _, key := range []string{"jav321", "javfree", "number"} {
-			if v, ok := sr.IDs[key]; ok && v != "" {
-				number = v
-				break
+		if mediaType == "av_west" {
+			number = query
+		}
+		if number == "" {
+			for _, key := range []string{"jav321", "javfree", "number"} {
+				if v, ok := sr.IDs[key]; ok && v != "" {
+					number = v
+					break
+				}
 			}
 		}
 		if number == "" {
 			number = sr.Match
-		}
-		// For av_west the original query is the title; number comes from IDs.
-		if mediaType == "av_west" {
-			// number = query stored as filename stem is not accessible here;
-			// use the match title as number since av_west doesn't have numeric IDs.
-			if number == "" {
-				number = stemName
-			}
 		}
 		entry["number"] = number
 		if m != nil {

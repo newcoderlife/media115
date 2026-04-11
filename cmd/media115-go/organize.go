@@ -59,7 +59,7 @@ CATEGORY: AV, 电影, 剧目, etc.`,
 					defer client.Close()
 					categoryPath := "影音/" + category
 					logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
-					uploadMissingNFO(client, categoryPath, skips, logger)
+					uploadMissingNFO(client, categoryPath, skips, entries, logger)
 				}
 			}
 			return nil
@@ -184,15 +184,15 @@ CATEGORY: AV, 电影, 剧目, etc.`,
 		}
 
 		// Upload NFOs for files that are already correctly named (skips).
-		uploadMissingNFO(client, categoryPath, skips, logger)
+		uploadMissingNFO(client, categoryPath, skips, entries, logger)
 
 		return nil
 	},
 }
 
 // uploadMissingNFO uploads NFO/poster sidecars for skip ops (already-organized
-// files) that don't yet have a remote NFO.
-func uploadMissingNFO(client *cloud115.Client, categoryPath string, skips []organizer.Op, logger *slog.Logger) {
+// files) that don't yet have a matching NFO in the tree cache (matched by stem).
+func uploadMissingNFO(client *cloud115.Client, categoryPath string, skips []organizer.Op, treeEntries []cloud115.TreeEntry, logger *slog.Logger) {
 	if len(skips) == 0 {
 		return
 	}
@@ -202,37 +202,41 @@ func uploadMissingNFO(client *cloud115.Client, categoryPath string, skips []orga
 	cacheRoot := config.CacheDir()
 	catPath := "/" + strings.TrimPrefix(categoryPath, "/")
 
-	// Build set of parent dirs that already have an NFO on 115.
-	nfoDirs := map[string]bool{}
-	for _, op := range skips {
-		if op.Reason == "already correct" || op.Reason == "already in standard format" {
-			parentDir := catPath + "/" + leafName(op.Parent)
-			if nfoDirs[parentDir] {
-				continue
-			}
-			entries, err := client.ListDir(parentDir)
-			if err != nil {
-				continue
-			}
-			hasNFO := false
-			for _, e := range entries {
-				if e.Type == "file" && strings.HasSuffix(strings.ToLower(e.Name), ".nfo") {
-					hasNFO = true
-					break
-				}
-			}
-			if !hasNFO {
-				vf := organizer.VideoFile{
-					File:   op.File,
-					Parent: op.Parent,
-				}
-				n := organizer.SyncSidecars(client, parentDir, []organizer.VideoFile{vf}, false, logger, cacheRoot)
-				if n > 0 {
-					logger.Info("organizer: uploaded missing NFO", "dir", parentDir, "count", n)
-				}
-			}
-			nfoDirs[parentDir] = true
+	// Extract category name from catPath (last component).
+	category := leafName(catPath)
+
+	// Build set of "parent/stem" that already have a matching NFO in the tree.
+	nfoStems := map[string]bool{}
+	for _, e := range treeEntries {
+		if e.IsNFO && strings.Contains("/"+e.Path+"/", "/"+category+"/") {
+			stem := strings.TrimSuffix(e.Name, filepath.Ext(e.Name))
+			nfoStems[e.Parent+"/"+stem] = true
 		}
+	}
+
+	// Find videos without a matching NFO by stem.
+	uploadedDirs := map[string]bool{}
+	for _, op := range skips {
+		if op.Reason != "already correct" && op.Reason != "already in standard format" {
+			continue
+		}
+		videoStem := strings.TrimSuffix(op.File, filepath.Ext(op.File))
+		if nfoStems[op.Parent+"/"+videoStem] {
+			continue
+		}
+		parentDir := catPath + "/" + leafName(op.Parent)
+		if uploadedDirs[parentDir] {
+			continue
+		}
+		vf := organizer.VideoFile{
+			File:   op.File,
+			Parent: op.Parent,
+		}
+		n := organizer.SyncSidecars(client, parentDir, []organizer.VideoFile{vf}, false, logger, cacheRoot)
+		if n > 0 {
+			logger.Info("organizer: uploaded missing NFO", "dir", parentDir, "count", n)
+		}
+		uploadedDirs[parentDir] = true
 	}
 }
 
