@@ -5,6 +5,7 @@ from media115.scraper import registry
 from media115.scraper.providers.tmdb_provider import TMDBMovieProvider, TMDBTVProvider
 from media115.scraper.providers.bangumi_provider import BangumiProvider
 from media115.scraper.providers.av_provider import Jav321Provider, JavFreeProvider
+from media115.scraper.providers.western_provider import ThePornDBProvider, StashDBProvider
 
 # Register providers
 # Movie
@@ -24,3 +25,7 @@ registry.register(BangumiProvider())
 # AV
 registry.register(Jav321Provider())
 registry.register(JavFreeProvider())
+
+# Western AV: ThePornDB primary, StashDB fallback
+registry.register(ThePornDBProvider())
+registry.register(StashDBProvider())
