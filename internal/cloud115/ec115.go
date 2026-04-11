@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
+	"fmt"
 	"hash/crc32"
 	mathrand "math/rand"
 	"time"
@@ -157,6 +158,9 @@ func (c *EC115Cipher) Encode(data []byte) []byte {
 //
 // Chunks are decompressed in at most 8 KiB steps until dst_size bytes are recovered.
 func (c *EC115Cipher) Decode(data []byte) ([]byte, error) {
+	if len(data) < 12 {
+		return nil, fmt.Errorf("ec115: data too short (%d bytes, need at least 12)", len(data))
+	}
 	ciphertext := data[:len(data)-12]
 	tail := make([]byte, 12)
 	copy(tail, data[len(data)-12:])

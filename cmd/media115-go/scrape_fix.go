@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/newcoderlife/media115/internal/provider/tmdb"
 	"github.com/newcoderlife/media115/internal/scraper"
@@ -117,6 +118,16 @@ Examples:
 				if err := scraper.GenerateEpisodeNFO(meta, nfoPath); err != nil {
 					return err
 				}
+				tvshowPath := filepath.Join(outDir, "tvshow.nfo")
+				if _, statErr := os.Stat(tvshowPath); os.IsNotExist(statErr) {
+					tvMeta := *meta
+					tvMeta.Season = 0
+					tvMeta.Episode = 0
+					_ = scraper.GenerateTVShowNFO(&tvMeta, tvshowPath)
+				}
+				if meta.PosterURL != "" {
+					_ = scraper.DownloadImage(meta.PosterURL, filepath.Join(outDir, "poster.jpg"), 30*time.Second, false)
+				}
 				sr = &scraper.ScrapeResult{
 					Status: "ok",
 					Match:  meta.Title,
@@ -159,6 +170,9 @@ Examples:
 				nfoPath := filepath.Join(outDir, stem+".nfo")
 				if err := scraper.GenerateMovieNFO(meta, nfoPath); err != nil {
 					return err
+				}
+				if meta.PosterURL != "" {
+					_ = scraper.DownloadImage(meta.PosterURL, filepath.Join(outDir, "poster.jpg"), 30*time.Second, false)
 				}
 				sr = &scraper.ScrapeResult{
 					Status: "ok",
