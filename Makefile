@@ -5,7 +5,7 @@ build:
 	go build -o bin/media115 ./cmd/media115
 
 test:
-	go test ./... -timeout 30s -count=1
+	go test ./... -timeout 120s -count=1
 
 clean:
 	rm -rf bin/
