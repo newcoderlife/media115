@@ -139,7 +139,7 @@ func normalizeItem(raw map[string]any) Entry {
 		case string:
 			nodeID = v
 		default:
-			nodeID = fmt.Sprintf("%v", v)
+			nodeID = formatNum(v)
 		}
 		size := int64(0)
 		switch v := raw["s"].(type) {
@@ -162,9 +162,9 @@ func normalizeItem(raw map[string]any) Entry {
 	// directory
 	var cid string
 	if v, ok := raw["cid"]; ok {
-		cid = fmt.Sprintf("%v", v)
+		cid = formatNum(v)
 	} else if v, ok := raw["fid"]; ok {
-		cid = fmt.Sprintf("%v", v)
+		cid = formatNum(v)
 	}
 	return Entry{
 		Name:   name,
@@ -425,9 +425,9 @@ func (c *Client) Mkdir(path string, parents bool) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("mkdir %s: %w", path, err)
 	}
-	newCID := fmt.Sprintf("%v", result["cid"])
-	if newCID == "<nil>" || newCID == "" {
-		newCID = fmt.Sprintf("%v", result["aid"])
+	newCID := formatNum(result["cid"])
+	if newCID == "" || newCID == "0" {
+		newCID = formatNum(result["aid"])
 	}
 	c.logger.Info("API        mkdir    "+path, "parent_cid", parentCID, "new_cid", newCID)
 	if c.stats != nil {
@@ -792,8 +792,8 @@ func (c *Client) Upload(localPath, remoteDir, filename string) (map[string]any, 
 			c.cache.AddEntry(cid, Entry{
 				Name:     filename,
 				Type:     "file",
-				NodeID:   fmt.Sprintf("%v", fid),
-				FID:      fmt.Sprintf("%v", fid),
+				NodeID:   formatNum(fid),
+				FID:      formatNum(fid),
 				Size:     size,
 				PickCode: pickCode,
 			})
