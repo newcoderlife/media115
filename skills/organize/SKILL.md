@@ -1,7 +1,7 @@
 ---
 name: organize
 description: Rename, move, upload NFO, and cleanup — the main operation
-version: 4.0
+version: 5.0
 ---
 
 The single operation that does everything: move files to correct dirs, rename to standard format, upload NFO/poster, clean up old dirs, and verify.
@@ -30,7 +30,7 @@ Organize plan for '电影': 5 to rename, 120 unchanged
 Show the plan table to the user. Check for:
 - Target conflicts (two files → same name) — resolve before executing
 - Unexpected titles — verify they look correct
-- "0 to rename" when anomalies exist — means you forgot `batch-scrape --force`
+- "0 to rename" when anomalies exist — means you forgot `media115 scrape --force`
 
 ## Step 2: Execute (after user confirms)
 
@@ -56,13 +56,13 @@ If it says "0 files verified" but you expected more, something went wrong — re
 ## Step 3: Verify
 
 ```bash
-media115 scan-tree $CATEGORY
+media115 scan $CATEGORY
 ```
 
 Expected: 0 anomalies, all files show `skip` (has NFO).
 
 If anomalies remain after organize, check:
-1. Was `batch-scrape --force` run if there were non-standard names?
+1. Was `media115 scrape --force` run if there were non-standard names?
 2. Did organize actually move/rename the files? Check the phase output.
 
 ## Optional: Also delete empty dirs
