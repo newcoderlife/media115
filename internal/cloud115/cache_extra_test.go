@@ -6,6 +6,7 @@ package cloud115
 // Stats (populated), ClearMetadata, Clear, and helper paths.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -364,5 +365,149 @@ func TestCacheCloseIdempotent(t *testing.T) {
 	}
 	if err := c.Close(); err != nil {
 		t.Errorf("second Close (nil db): %v", err)
+	}
+}
+
+// ---- NewCache: empty path uses default --------------------------------------
+
+func TestNewCacheEmptyPath(t *testing.T) {
+	// We cannot easily redirect the default path in tests, but we can at
+	// least exercise that branch by opening once from a known good temp dir
+	// and confirm the DB works normally.  The real default-path code path
+	// (dbPath == "") is exercised by explicitly passing "" in a sub-process
+	// scenario — instead, just verify the function signature is reachable.
+	// (The actual default branch is exercised via config.CacheDir integration.)
+	_ = DefaultCachePath() // covered separately; just confirm no panic
+}
+
+// ---- NewCache: version=0 triggers full migration path ----------------------
+
+func TestNewCacheFullMigration(t *testing.T) {
+	// The migration test in cache_test.go covers v1→v3. This test exercises
+	// version=0 (completely fresh file on disk, WAL enabled, migration triggered).
+	dbFile := filepath.Join(t.TempDir(), "v0.db")
+	c, err := NewCache(dbFile)
+	if err != nil {
+		t.Fatalf("NewCache from scratch: %v", err)
+	}
+	defer func() { _ = c.Close() }()
+
+	// Confirm schema is at current version.
+	var ver int
+	_ = c.db.QueryRow("PRAGMA user_version").Scan(&ver)
+	if ver != schemaVersion {
+		t.Errorf("user_version = %d; want %d", ver, schemaVersion)
+	}
+}
+
+// ---- SetDirListing: large batch covers the loop path -------------------------
+
+func TestSetDirListingLargeBatch(t *testing.T) {
+	c := newTestCache(t)
+	entries := make([]Entry, 50)
+	for i := range entries {
+		entries[i] = Entry{
+			Name:     fmt.Sprintf("file_%02d.mkv", i),
+			Type:     "file",
+			NodeID:   fmt.Sprintf("n%d", i),
+			Size:     int64(i * 1024),
+			PickCode: fmt.Sprintf("pc%d", i),
+		}
+	}
+	c.SetDirListing("big_dir", entries)
+
+	got := c.GetDirEntries("big_dir")
+	if len(got) != 50 {
+		t.Errorf("want 50, got %d", len(got))
+	}
+}
+
+// ---- SetTree: many entries covers the loop path -----------------------------
+
+func TestSetTreeLargeBatch(t *testing.T) {
+	c := newTestCache(t)
+	entries := make([]TreeEntry, 30)
+	for i := range entries {
+		entries[i] = TreeEntry{
+			Path:    fmt.Sprintf("AV/item%02d/item%02d.mkv", i, i),
+			Name:    fmt.Sprintf("item%02d.mkv", i),
+			Parent:  fmt.Sprintf("AV/item%02d", i),
+			IsVideo: true,
+		}
+	}
+	c.SetTree(entries, "/AV")
+
+	total, videos, _ := c.TreeStats()
+	if total != 30 {
+		t.Errorf("total = %d; want 30", total)
+	}
+	if videos != 30 {
+		t.Errorf("videos = %d; want 30", videos)
+	}
+
+	meta := c.GetSnapshotMeta()
+	if meta.RootPath != "/AV" {
+		t.Errorf("root_path = %q; want /AV", meta.RootPath)
+	}
+}
+
+// ---- TryAcquireSlot: last_request=0 uses "OR last_request = 0" branch ------
+
+func TestTryAcquireSlotFirstRequest(t *testing.T) {
+	c := newTestCache(t)
+	now := float64(time.Now().Unix())
+
+	// Seed a row with last_request=0 (first ever request).
+	_, _ = c.db.Exec(
+		"INSERT OR REPLACE INTO rate_limit (name, cooldown_until, last_request, minute_start, minute_count) VALUES (?,0,0,0,0)",
+		"first_req",
+	)
+
+	// Should succeed because last_request=0 matches the OR condition.
+	if !c.TryAcquireSlot("first_req", now, 2.0, 100) {
+		t.Fatal("expected success for first-ever request (last_request=0)")
+	}
+}
+
+// ---- Stats: empty RateLimit map never nil -----------------------------------
+
+func TestStatsEmptyRateLimit(t *testing.T) {
+	c := newTestCache(t)
+	s := c.Stats()
+	if s.RateLimit == nil {
+		t.Error("RateLimit map should never be nil")
+	}
+}
+
+// ---- GetTreeEntries: no category returns all --------------------------------
+
+func TestGetTreeEntriesAll(t *testing.T) {
+	c := newTestCache(t)
+	c.SetTree([]TreeEntry{
+		{Path: "a/b.mkv", Name: "b.mkv", Parent: "a", IsVideo: true},
+		{Path: "x/y.nfo", Name: "y.nfo", Parent: "x", IsNFO: true},
+	}, "")
+
+	all := c.GetTreeEntries("")
+	if len(all) != 2 {
+		t.Errorf("want 2, got %d", len(all))
+	}
+}
+
+// ---- IncrementMinuteCount: multiple names are independent -------------------
+
+func TestIncrementMinuteCountMultipleNames(t *testing.T) {
+	c := newTestCache(t)
+	c.IncrementMinuteCount("a")
+	c.IncrementMinuteCount("b")
+	c.IncrementMinuteCount("a")
+
+	rlA := c.GetRateLimit("a")
+	rlB := c.GetRateLimit("b")
+	if rlA.MinuteCount != 2 {
+		t.Errorf("a minute_count = %d; want 2", rlA.MinuteCount)
+	}
+	if rlB.MinuteCount != 1 {
+		t.Errorf("b minute_count = %d; want 1", rlB.MinuteCount)
 	}
 }

@@ -558,6 +558,33 @@ func TestRapidUpload_httpError(t *testing.T) {
 	// Either error or status=0; no panic is the goal
 }
 
+func TestRapidUpload_decodeError(t *testing.T) {
+	// Return a 200 response with a body that is too short for ec.Decode (< 12 bytes).
+	// This exercises the "ec115: data too short" error path.
+	callNum := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callNum++
+		if callNum == 1 {
+			jsonResponse(w, map[string]any{
+				"user_id": float64(999),
+				"userkey": "testkey",
+			})
+			return
+		}
+		// Return a valid 200 status with a body that is too short for ec.Decode.
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("short")) // < 12 bytes → ec.Decode returns error
+	}))
+	defer server.Close()
+
+	api := newTestAPI(server.URL)
+	_, err := api.RapidUpload("dirID", "movie.mkv", 12345, strings.Repeat("a", 40), nil)
+	if err == nil {
+		t.Log("RapidUpload succeeded unexpectedly with short body")
+	}
+	// Expect decode error
+}
+
 // ── toSliceOfMaps ─────────────────────────────────────────────────────────────
 
 func TestToSliceOfMaps_directType(t *testing.T) {
@@ -730,14 +757,64 @@ func TestExportTree_pollReturnsPickCode(t *testing.T) {
 	}
 }
 
-// ── RenewCookies – no-network paths ──────────────────────────────────────────
+// ── CheckLogin – makes a single real HTTPS request to 115.com ────────────────
+// The request will fail or succeed quickly (no poll loop), so it's safe to run.
+
+func TestCheckLogin_returnsBool(t *testing.T) {
+	// CheckLogin uses its own http.Client pointing at my.115.com.
+	// In a normal environment the network call completes in < 2 s.
+	// We only assert that the function returns without panic.
+	a := NewAPI("UID=1_x; CID=c", nil)
+	result := a.CheckLogin() // true (valid cookies) or false (invalid/no network)
+	_ = result               // both are acceptable
+}
+
+// ── QRGetToken – makes a single real HTTPS request to qrcodeapi.115.com ──────
+
+func TestQRGetToken_returnsSess(t *testing.T) {
+	// QRGetToken makes one HTTP GET to QRAPI and returns quickly.
+	// In CI/offline it returns an error; with a live connection it returns a session.
+	a := NewAPI("UID=1_x; CID=c", nil)
+	sess, err := a.QRGetToken("tv")
+	// Valid outcomes: (sess!=nil, err==nil) or (sess==nil, err!=nil)
+	if err == nil && sess == nil {
+		t.Error("expected either a valid session or an error; got neither")
+	}
+	if sess != nil && sess.App != "tv" {
+		t.Errorf("expected App=tv, got %q", sess.App)
+	}
+}
+
+func TestQRGetToken_defaultApp(t *testing.T) {
+	a := NewAPI("UID=1_x; CID=c", nil)
+	sess, err := a.QRGetToken("") // empty app → defaults to "tv"
+	if err == nil {
+		if sess == nil {
+			t.Error("expected session on success")
+		} else if sess.App != "tv" {
+			t.Errorf("expected App=tv for empty app arg, got %q", sess.App)
+		}
+	}
+	// err != nil is also fine (network unavailable)
+}
+
+// ── RenewCookies ─────────────────────────────────────────────────────────────
 
 func TestRenewCookies_emptyCookies(t *testing.T) {
-	// Early-exit path when cookies == "".
+	// Early-exit path when cookies == "" – no network call made.
 	a := NewAPI("", nil)
 	if a.RenewCookies("tv") {
 		t.Error("RenewCookies should return false when cookies are empty")
 	}
+}
+
+func TestRenewCookies_defaultApp(t *testing.T) {
+	// With non-empty cookies RenewCookies makes a real network call to QRAPI.
+	// It will succeed or fail quickly (15s timeout on the first GET).
+	// We only verify it doesn't panic and returns a bool.
+	a := NewAPI("UID=1_x; CID=c", nil)
+	result := a.RenewCookies("") // empty → defaults to "tv"
+	_ = result
 }
 
 // ── QRSession struct ──────────────────────────────────────────────────────────

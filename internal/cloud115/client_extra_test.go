@@ -979,3 +979,301 @@ func TestWalkCallbackError(t *testing.T) {
 		t.Errorf("expected sentinel error, got %v", err)
 	}
 }
+
+// ── WithStats: coverage for the option ───────────────────────────────────────
+
+func TestWithStats(t *testing.T) {
+	// logging.Stats is not accessible here without import; just test that the
+	// option sets the field on the struct correctly by passing nil (valid type).
+	c := &Client{}
+	opt := WithStats(nil)
+	opt(c)
+	// stats field is nil – no panic and the option ran.
+	if c.stats != nil {
+		t.Error("expected stats = nil")
+	}
+}
+
+// ── DownloadURL: with stats tracker ──────────────────────────────────────────
+
+func TestDownloadURLWithStats(t *testing.T) {
+	m := &mockAPI{
+		fnDownloadURL: func(pickCode, ua string) (string, error) {
+			return "https://cdn.example.com/" + pickCode, nil
+		},
+	}
+	c := newTestClient(t, m)
+	// stats is nil in test client; just cover the nil-guard path.
+	url, err := c.DownloadURL("pc_xyz", "UA/2")
+	if err != nil {
+		t.Fatalf("DownloadURL: %v", err)
+	}
+	if !strings.Contains(url, "pc_xyz") {
+		t.Errorf("unexpected url: %q", url)
+	}
+}
+
+// ── Rename: error paths ───────────────────────────────────────────────────────
+
+func TestRenameAPIError(t *testing.T) {
+	m := &mockAPI{
+		fnRename: func(fileID, newName string) (map[string]any, error) {
+			return nil, fmt.Errorf("rename API error")
+		},
+	}
+	c := newTestClient(t, m)
+	seedPath(c, "/movies", "cid_movies")
+	seedListing(c, "cid_movies", []Entry{
+		{Name: "old.mkv", Type: "file", NodeID: "fid_old"},
+	})
+
+	err := c.Rename("/movies/old.mkv", "new.mkv")
+	if err == nil {
+		t.Fatal("expected error from Rename API failure")
+	}
+}
+
+func TestRenameNotFound(t *testing.T) {
+	m := &mockAPI{
+		fnListFiles: func(cid string) ([]map[string]any, error) {
+			return []map[string]any{}, nil
+		},
+	}
+	c := newTestClient(t, m)
+	seedPath(c, "/movies", "cid_movies")
+	// listing is empty, so entry won't be found
+
+	err := c.Rename("/movies/nonexistent.mkv", "other.mkv")
+	if err == nil {
+		t.Fatal("expected error when entry not found")
+	}
+}
+
+// ── Move: entry not found, refresh also fails ─────────────────────────────────
+
+func TestMoveEntryNotFound(t *testing.T) {
+	m := &mockAPI{
+		fnListFiles: func(cid string) ([]map[string]any, error) {
+			return []map[string]any{}, nil
+		},
+	}
+	c := newTestClient(t, m)
+	seedPath(c, "/src", "cid_src")
+	seedPath(c, "/dst", "cid_dst")
+	// listing is empty, so entry won't be found after refresh
+
+	err := c.Move([]string{"/src/missing.mkv"}, "/dst")
+	if err == nil {
+		t.Fatal("expected error when source entry not found")
+	}
+}
+
+// ── BatchRename: entry not found ─────────────────────────────────────────────
+
+func TestBatchRenameEntryNotFound(t *testing.T) {
+	m := &mockAPI{
+		fnListFiles: func(cid string) ([]map[string]any, error) {
+			return []map[string]any{}, nil
+		},
+	}
+	c := newTestClient(t, m)
+	seedPath(c, "/movies", "cid_movies")
+	// listing is empty
+
+	err := c.BatchRename([]BatchRenameItem{
+		{Path: "/movies/nothere.mkv", NewName: "new.mkv"},
+	})
+	if err == nil {
+		t.Fatal("expected error when entry not found in BatchRename")
+	}
+}
+
+// ── Mkdir: API returns no valid cid ──────────────────────────────────────────
+
+func TestMkdirNoValidCID(t *testing.T) {
+	m := &mockAPI{
+		fnMkdir: func(parentID, name string) (map[string]any, error) {
+			return map[string]any{"cid": "0"}, nil
+		},
+	}
+	c := newTestClient(t, m)
+	seedPath(c, "/movies", "cid_movies")
+
+	cid, err := c.Mkdir("/movies/NewDir", false)
+	// "0" cid should still be returned (it's what the code does — only empty triggers fallback)
+	_ = cid
+	_ = err
+}
+
+// ── RapidUpload: file that exists (exercises hash and open paths) ─────────────
+
+func TestRapidUploadExistingFile(t *testing.T) {
+	tmp := t.TempDir()
+	localFile := filepath.Join(tmp, "existing.mkv")
+	if err := os.WriteFile(localFile, []byte("hello upload content for test"), 0o644); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+
+	// Use the standard mockAPI (returns status=2) — exercises hash/open/upload path.
+	m := &mockAPI{}
+	c := newTestClient(t, m)
+	seedPath(c, "/up", "cid_up")
+
+	result, err := c.RapidUpload(localFile, "/up")
+	if err != nil {
+		t.Fatalf("RapidUpload: %v", err)
+	}
+	if result.Status != 2 {
+		t.Errorf("status = %d; want 2", result.Status)
+	}
+}
+
+// ── RapidUpload: file stat error ─────────────────────────────────────────────
+
+func TestRapidUploadMissingFile(t *testing.T) {
+	c := newTestClient(t, &mockAPI{})
+	seedPath(c, "/up", "cid_up")
+
+	_, err := c.RapidUpload("/nonexistent/path/file.mkv", "/up")
+	if err == nil {
+		t.Fatal("expected error for missing local file")
+	}
+}
+
+// ── RateLimiter: QPM exceeded triggers wait then success ─────────────────────
+
+func TestRateLimiterWaitForSlotQPMPath(t *testing.T) {
+	// Use cache-backed limiter with QPM=1, QPS=100, so after 1 acquire
+	// the QPM is exhausted. But with minute window reset we can force it.
+	rl := newTestRateLimiter(t, "qpm_wait", 100, 1)
+
+	// First acquire should succeed.
+	if err := rl.Acquire(); err != nil {
+		t.Fatalf("first Acquire: %v", err)
+	}
+
+	// Now the QPM is 1/1. Force the minute_start to very old so next call
+	// resets and succeeds immediately.
+	now := float64(time.Now().Unix())
+	rl.cache.SetRateLimit("qpm_wait", RateLimitState{
+		LastRequest:   now - 5,
+		MinuteStart:   now - 120, // more than 60s ago
+		MinuteCount:   1,
+		CooldownUntil: 0,
+	})
+
+	if err := rl.Acquire(); err != nil {
+		t.Fatalf("second Acquire after window reset: %v", err)
+	}
+}
+
+// ── Delete: dir node ID invalidation branch ───────────────────────────────────
+
+func TestDeleteDirInvalidatesCache(t *testing.T) {
+	m := &mockAPI{
+		fnDelete: func(fids []string) (map[string]any, error) {
+			return map[string]any{}, nil
+		},
+	}
+	c := newTestClient(t, m)
+	seedPath(c, "/movies", "cid_movies")
+	seedListing(c, "cid_movies", []Entry{
+		{Name: "Action", Type: "dir", NodeID: "cid_action"},
+	})
+	// Also seed the Action dir's listing so we can check it gets invalidated.
+	seedListing(c, "cid_action", []Entry{
+		{Name: "film.mkv", Type: "file", NodeID: "f1"},
+	})
+
+	err := c.Delete([]string{"/movies/Action"})
+	if err != nil {
+		t.Fatalf("Delete dir: %v", err)
+	}
+
+	// The Action dir's own listing should be invalidated.
+	if _, ok := c.cache.GetDirTS("cid_action"); ok {
+		t.Error("cid_action dir_meta should be invalidated after Delete")
+	}
+}
+
+// ── Move: API error propagates ────────────────────────────────────────────────
+
+func TestMoveAPIError(t *testing.T) {
+	m := &mockAPI{
+		fnMove: func(fileIDs []string, targetDirID string) (map[string]any, error) {
+			return nil, fmt.Errorf("move API error")
+		},
+	}
+	c := newTestClient(t, m)
+	seedPath(c, "/src", "cid_src")
+	seedPath(c, "/dst", "cid_dst")
+	seedListing(c, "cid_src", []Entry{
+		{Name: "file.mkv", Type: "file", NodeID: "f1"},
+	})
+
+	err := c.Move([]string{"/src/file.mkv"}, "/dst")
+	if err == nil {
+		t.Fatal("expected error from Move API failure")
+	}
+}
+
+// ── BatchRename: API error propagates ────────────────────────────────────────
+
+func TestBatchRenameAPIError(t *testing.T) {
+	m := &mockAPI{
+		fnBatchRename: func(renames map[string]string) (map[string]any, error) {
+			return nil, fmt.Errorf("batch rename API error")
+		},
+	}
+	c := newTestClient(t, m)
+	seedPath(c, "/movies", "cid_movies")
+	seedListing(c, "cid_movies", []Entry{
+		{Name: "a.mkv", Type: "file", NodeID: "fid_a"},
+	})
+
+	err := c.BatchRename([]BatchRenameItem{
+		{Path: "/movies/a.mkv", NewName: "alpha.mkv"},
+	})
+	if err == nil {
+		t.Fatal("expected error from BatchRename API failure")
+	}
+}
+
+// ── normalizeItem: directory with cid/fid both missing ───────────────────────
+
+func TestNormalizeItemDirNoCID(t *testing.T) {
+	raw := map[string]any{
+		"n": "empty_dir",
+		// neither "cid" nor "fid"
+	}
+	e := normalizeItem(raw)
+	if e.Type != "dir" {
+		t.Errorf("type = %q; want dir", e.Type)
+	}
+	if e.Name != "empty_dir" {
+		t.Errorf("name = %q; want empty_dir", e.Name)
+	}
+}
+
+// ── mkdirParents: API returns invalid cid ────────────────────────────────────
+
+func TestMkdirParentsInvalidCID(t *testing.T) {
+	m := &mockAPI{
+		fnGetDirID: func(path string) (string, error) {
+			return "", fmt.Errorf("not found")
+		},
+		fnMkdir: func(parentID, name string) (map[string]any, error) {
+			// Return neither cid nor aid — simulates broken API.
+			return map[string]any{}, nil
+		},
+	}
+	c := newTestClient(t, m)
+
+	_, err := c.Mkdir("/a/b", true)
+	if err == nil {
+		t.Fatal("expected error when mkdir returns no valid cid")
+	}
+	if !strings.Contains(err.Error(), "no valid cid") {
+		t.Errorf("error = %q; want 'no valid cid'", err.Error())
+	}
+}
