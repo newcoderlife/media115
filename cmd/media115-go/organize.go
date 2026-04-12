@@ -29,13 +29,20 @@ CATEGORY: AV, 电影, 剧目, etc.`,
 		category := args[0]
 		execute, _ := cmd.Flags().GetBool("execute")
 
-		entries, err := getTreeEntries(category)
+		allEntries, err := getTreeEntries("")
 		if err != nil {
 			return fmt.Errorf("读取树缓存失败: %w", err)
 		}
-		if len(entries) == 0 {
+		if len(allEntries) == 0 {
 			fmt.Println("无树缓存。请先运行: cloud115 sync /影音")
 			return nil
+		}
+		// Filter by category
+		var entries []cloud115.TreeEntry
+		for _, e := range allEntries {
+			if strings.Contains("/"+e.Path+"/", "/"+category+"/") {
+				entries = append(entries, e)
+			}
 		}
 
 		plan := organizer.BuildPlan(category, entries, nil)
