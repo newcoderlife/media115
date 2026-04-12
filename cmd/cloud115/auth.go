@@ -3,12 +3,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 
 	"github.com/newcoderlife/media115/internal/cloud115"
 	"github.com/newcoderlife/media115/internal/config"
+	"github.com/newcoderlife/media115/internal/logging"
 	"github.com/spf13/cobra"
 )
 
@@ -27,7 +27,7 @@ var authCmd = &cobra.Command{
 	Short: "115 网盘登录认证",
 	Long:  "通过二维码登录 115 网盘并保存 cookies。",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+		logger := logging.Setup(verbose)
 
 		if authCheck {
 			cfg, err := config.Load()

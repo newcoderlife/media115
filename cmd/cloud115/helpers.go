@@ -2,12 +2,11 @@ package main
 
 import (
 	"fmt"
-	"log/slog"
-	"os"
 	"time"
 
 	"github.com/newcoderlife/media115/internal/cloud115"
 	"github.com/newcoderlife/media115/internal/config"
+	"github.com/newcoderlife/media115/internal/logging"
 )
 
 func getClient() (*cloud115.Client, error) {
@@ -18,7 +17,7 @@ func getClient() (*cloud115.Client, error) {
 	if cfg.Auth.Cookies == "" {
 		return nil, fmt.Errorf("未登录。请先运行: cloud115 auth")
 	}
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	logger := logging.Setup(verbose)
 	return cloud115.NewClient(
 		cfg.Auth.Cookies,
 		cloud115.WithListingTTL(time.Duration(cfg.Cache.ListingTTL)*time.Second),

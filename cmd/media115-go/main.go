@@ -7,6 +7,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var verbose bool
+
 var rootCmd = &cobra.Command{
 	Use:   "media115",
 	Short: "Media management CLI for 115 cloud drive",
@@ -20,6 +22,7 @@ func main() {
 }
 
 func init() {
+	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable debug logging")
 	rootCmd.AddCommand(scanCmd)
 	rootCmd.AddCommand(scrapeCmd)
 	rootCmd.AddCommand(scrapeFixCmd)
