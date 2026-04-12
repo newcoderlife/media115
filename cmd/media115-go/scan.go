@@ -43,7 +43,9 @@ CATEGORY: AV, 电影, 剧目, etc. (optional; default shows all)`,
 			category = args[0]
 		}
 
-		entries, err := getTreeEntries(category)
+		// Always fetch all entries, then filter by category in code
+		// (tree paths are "影音/电影/..." but category is just "电影")
+		entries, err := getTreeEntries("")
 		if err != nil {
 			return fmt.Errorf("读取树缓存失败: %w", err)
 		}
@@ -52,10 +54,16 @@ CATEGORY: AV, 电影, 剧目, etc. (optional; default shows all)`,
 			return nil
 		}
 
-		// Separate videos and build NFO stem set.
+		// Separate videos and build NFO stem set, filtering by category.
 		var videos []cloud115.TreeEntry
 		nfoSet := map[string]bool{} // "parent/stem" → true
 		for _, e := range entries {
+			// Filter by category: check if path contains /category/
+			if category != "" {
+				if !strings.Contains("/"+e.Path+"/", "/"+category+"/") {
+					continue
+				}
+			}
 			if e.IsVideo {
 				videos = append(videos, e)
 			} else if e.IsNFO {
