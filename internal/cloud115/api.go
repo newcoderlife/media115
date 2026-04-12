@@ -897,7 +897,7 @@ func (a *API) ExportTree(dirID string) (string, error) {
 	exportID := "0"
 	if d, ok := startResult["data"].(map[string]any); ok {
 		if id, ok := d["export_id"]; ok {
-			exportID = fmt.Sprintf("%v", id)
+			exportID = formatNum(id)
 		}
 	}
 
@@ -923,7 +923,7 @@ func (a *API) ExportTree(dirID string) (string, error) {
 			if pc, ok := statusData["pick_code"].(string); ok && pc != "" {
 				pickCode = pc
 				if fid, ok := statusData["file_id"]; ok {
-					fileID = fmt.Sprintf("%v", fid)
+					fileID = formatNum(fid)
 				}
 				break
 			}
@@ -1018,7 +1018,7 @@ func (a *API) UploadInfo() (userID, userKey string, err error) {
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", "", err
 	}
-	userID = fmt.Sprintf("%v", result["user_id"])
+	userID = formatNum(result["user_id"])
 	userKey, _ = result["userkey"].(string)
 	return userID, userKey, nil
 }
