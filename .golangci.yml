@@ -15,9 +15,10 @@ linters:
     - bodyclose
     - rowserrcheck
     - nolintlint
+    - gosec
   exclusions:
     rules:
-      - linters: [errcheck]
+      - linters: [errcheck, gosec]
         path: _test\.go
   settings:
     errcheck:
@@ -34,6 +35,21 @@ linters:
     gocritic:
       disabled-checks:
         - ifElseChain
+    gosec:
+      excludes:
+        - G101  # hardcoded credentials — TokenSalt is a public constant
+        - G115  # integer overflow — intentional crypto/timestamp conversions
+        - G301  # dir perm 0755 — standard for config/cache/log dirs
+        - G302  # file perm 0644 — standard for log files
+        - G304  # file inclusion — internal paths, not user input
+        - G306  # WriteFile perm 0644 — standard for NFO/config
+        - G401  # weak crypto — 115 API requires md5/sha1
+        - G501  # blocklisted md5 — 115 API protocol
+        - G505  # blocklisted sha1 — 115 API protocol
+        - G104  # errors unhandled — covered by errcheck
+        - G202  # SQL concat — table names are hardcoded constants
+        - G703  # path traversal — internal paths, not user input
+        - G704  # SSRF — serve.go is a proxy by design
     staticcheck:
       checks:
         - all
