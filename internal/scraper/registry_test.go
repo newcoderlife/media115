@@ -13,9 +13,9 @@ type mockProvider struct {
 	status   string
 }
 
-func (m *mockProvider) Name() string                { return m.name }
-func (m *mockProvider) SupportedTypes() []string    { return m.types }
-func (m *mockProvider) Priority() int               { return m.priority }
+func (m *mockProvider) Name() string             { return m.name }
+func (m *mockProvider) SupportedTypes() []string { return m.types }
+func (m *mockProvider) Priority() int            { return m.priority }
 func (m *mockProvider) Search(string, SearchOpts) ([]SearchResult, error) {
 	return nil, nil
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/bytedance/gg/gconv"
+
 	"github.com/newcoderlife/media115/internal/cloud115"
 	"github.com/newcoderlife/media115/internal/config"
 )
@@ -112,10 +113,12 @@ func ExtractAVSuffix(afterNumber string) string {
 	return ""
 }
 
-func isAlpha(r rune) bool      { return (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') }
-func isDigit(r rune) bool      { return r >= '0' && r <= '9' }
-func isAlphaNum(r rune) bool   { return isAlpha(r) || isDigit(r) }
-func isDiscLetter(r rune) bool { return r == 'A' || r == 'B' || r == 'C' || r == 'D' || r == 'a' || r == 'b' || r == 'c' || r == 'd' }
+func isAlpha(r rune) bool    { return (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') }
+func isDigit(r rune) bool    { return r >= '0' && r <= '9' }
+func isAlphaNum(r rune) bool { return isAlpha(r) || isDigit(r) }
+func isDiscLetter(r rune) bool {
+	return r == 'A' || r == 'B' || r == 'C' || r == 'D' || r == 'a' || r == 'b' || r == 'c' || r == 'd'
+}
 
 // fileMapCachePut writes a JSON cache entry to
 // ~/.cache/media115/scrape/{source}/{key}.json.

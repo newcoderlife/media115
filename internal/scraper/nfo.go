@@ -142,7 +142,7 @@ func GenerateMovieNFO(meta *Metadata, outputPath string) error {
 		nfo.Set = &xmlSet{Name: meta.Set}
 	}
 	for _, a := range meta.Actors {
-		nfo.Actors = append(nfo.Actors, xmlActor{Name: a.Name, Role: a.Role, Thumb: a.Thumb})
+		nfo.Actors = append(nfo.Actors, xmlActor(a))
 	}
 	for k, v := range meta.UniqueIDs {
 		nfo.UniqueIDs = append(nfo.UniqueIDs, xmlUniqueID{Type: k, Value: v})
@@ -182,7 +182,7 @@ func GenerateEpisodeNFO(meta *Metadata, outputPath string) error {
 		nfo.Runtime = strconv.Itoa(meta.Runtime)
 	}
 	for _, a := range meta.Actors {
-		nfo.Actors = append(nfo.Actors, xmlActor{Name: a.Name, Role: a.Role, Thumb: a.Thumb})
+		nfo.Actors = append(nfo.Actors, xmlActor(a))
 	}
 	for k, v := range meta.UniqueIDs {
 		nfo.UniqueIDs = append(nfo.UniqueIDs, xmlUniqueID{Type: k, Value: v})
@@ -217,7 +217,7 @@ func GenerateTVShowNFO(meta *Metadata, outputPath string) error {
 		nfo.Votes = strconv.Itoa(meta.Votes)
 	}
 	for _, a := range meta.Actors {
-		nfo.Actors = append(nfo.Actors, xmlActor{Name: a.Name, Role: a.Role, Thumb: a.Thumb})
+		nfo.Actors = append(nfo.Actors, xmlActor(a))
 	}
 	for k, v := range meta.UniqueIDs {
 		nfo.UniqueIDs = append(nfo.UniqueIDs, xmlUniqueID{Type: k, Value: v})

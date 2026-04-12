@@ -6,8 +6,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/newcoderlife/media115/internal/config"
 	"github.com/spf13/cobra"
+
+	"github.com/newcoderlife/media115/internal/config"
 )
 
 var doctorCmd = &cobra.Command{

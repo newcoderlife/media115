@@ -7,8 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/newcoderlife/media115/internal/cloud115"
 	"github.com/spf13/cobra"
+
+	"github.com/newcoderlife/media115/internal/cloud115"
 )
 
 var strmCmd = &cobra.Command{

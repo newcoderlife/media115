@@ -9,8 +9,9 @@ import (
 	"time"
 
 	"github.com/antchfx/htmlquery"
-	"github.com/newcoderlife/media115/internal/scraper"
 	"golang.org/x/net/html"
+
+	"github.com/newcoderlife/media115/internal/scraper"
 )
 
 const defaultBaseURL = "https://javfree.me"

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bytedance/gg/gconv"
+
 	"github.com/newcoderlife/media115/internal/scraper"
 )
 
@@ -277,7 +278,7 @@ func yearFromDate(date string) int {
 		return 0
 	}
 	n := 0
-	fmt.Sscanf(date[:4], "%d", &n)
+	_, _ = fmt.Sscanf(date[:4], "%d", &n)
 	return n
 }
 

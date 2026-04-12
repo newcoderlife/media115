@@ -8,10 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	cloud115 "github.com/newcoderlife/media115/internal/cloud115"
 	"github.com/newcoderlife/media115/internal/config"
 	"github.com/newcoderlife/media115/internal/scraper"
-	"github.com/spf13/cobra"
 )
 
 var scrapeCmd = &cobra.Command{

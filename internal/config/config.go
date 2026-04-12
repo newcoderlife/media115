@@ -11,7 +11,7 @@ type Config struct {
 	Auth       AuthConfig                `toml:"auth"`
 	Cloud      CloudConfig               `toml:"cloud"`
 	Cache      CacheConfig               `toml:"cache"`
-	Categories map[string]CategoryConfig  `toml:"categories"`
+	Categories map[string]CategoryConfig `toml:"categories"`
 	Proxy      ProxyConfig               `toml:"proxy"`
 }
 
@@ -23,10 +23,18 @@ type AuthConfig struct {
 	StashDB   StashDBAuth   `toml:"stashdb"`
 }
 
-type TMDBAuth struct{ Token string `toml:"token"` }
-type BangumiAuth struct{ Token string `toml:"token"` }
-type ThePornDBAuth struct{ Token string `toml:"token"` }
-type StashDBAuth struct{ APIKey string `toml:"api_key"` }
+type TMDBAuth struct {
+	Token string `toml:"token"`
+}
+type BangumiAuth struct {
+	Token string `toml:"token"`
+}
+type ThePornDBAuth struct {
+	Token string `toml:"token"`
+}
+type StashDBAuth struct {
+	APIKey string `toml:"api_key"`
+}
 
 type CloudConfig struct {
 	Root            string  `toml:"root"`
@@ -59,7 +67,7 @@ func Default() *Config {
 		Categories: map[string]CategoryConfig{
 			"电影": {Type: "movie", Naming: "{title} ({year})", Sources: []string{"tmdb"}},
 			"剧目": {Type: "tv", Naming: "{title} ({year})", Sources: []string{"tmdb", "bangumi"}},
-			"AV":  {Type: "av", Naming: "{number}", Sources: []string{"jav321", "javfree"}},
+			"AV": {Type: "av", Naming: "{number}", Sources: []string{"jav321", "javfree"}},
 			"写真": {Type: "gravure", Naming: "{number}", Sources: []string{"jav321", "javfree"}},
 		},
 		Proxy: ProxyConfig{Host: "127.0.0.1", Port: 9000, JellyfinURL: "http://localhost:8096"},
@@ -96,12 +104,24 @@ func Load() (*Config, error) {
 	}
 	// Fill zero values with defaults
 	d := Default()
-	if cfg.Cloud.QPS == 0 { cfg.Cloud.QPS = d.Cloud.QPS }
-	if cfg.Cloud.QPM == 0 { cfg.Cloud.QPM = d.Cloud.QPM }
-	if cfg.Cache.ListingTTL == 0 { cfg.Cache.ListingTTL = d.Cache.ListingTTL }
-	if cfg.Cache.PathTTL == 0 { cfg.Cache.PathTTL = d.Cache.PathTTL }
-	if cfg.Proxy.Port == 0 { cfg.Proxy.Port = d.Proxy.Port }
-	if cfg.Proxy.Host == "" { cfg.Proxy.Host = d.Proxy.Host }
+	if cfg.Cloud.QPS == 0 {
+		cfg.Cloud.QPS = d.Cloud.QPS
+	}
+	if cfg.Cloud.QPM == 0 {
+		cfg.Cloud.QPM = d.Cloud.QPM
+	}
+	if cfg.Cache.ListingTTL == 0 {
+		cfg.Cache.ListingTTL = d.Cache.ListingTTL
+	}
+	if cfg.Cache.PathTTL == 0 {
+		cfg.Cache.PathTTL = d.Cache.PathTTL
+	}
+	if cfg.Proxy.Port == 0 {
+		cfg.Proxy.Port = d.Proxy.Port
+	}
+	if cfg.Proxy.Host == "" {
+		cfg.Proxy.Host = d.Proxy.Host
+	}
 	return cfg, nil
 }
 

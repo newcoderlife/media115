@@ -1,17 +1,51 @@
+version: "2"
+
 run:
   timeout: 5m
 
 linters:
+  default: none
   enable:
     - errcheck
     - govet
     - staticcheck
     - unused
     - ineffassign
-    - gosimple
     - gocritic
+    - bodyclose
+    - rowserrcheck
+    - nolintlint
+  exclusions:
+    rules:
+      - linters: [errcheck]
+        path: _test\.go
+  settings:
+    errcheck:
+      exclude-functions:
+        - (io.Closer).Close
+        - (io.ReadCloser).Close
+        - (*os.File).Close
+        - (*database/sql.Rows).Close
+        - (*mime/multipart.Writer).Close
+        - (*io.PipeWriter).Close
+        - (net.Conn).Close
+        - (*github.com/newcoderlife/media115/internal/cloud115.Client).Close
+        - (*github.com/newcoderlife/media115/internal/cloud115.Cache).Close
+    gocritic:
+      disabled-checks:
+        - ifElseChain
+    staticcheck:
+      checks:
+        - all
+        - -ST1005
+        - -ST1000
+        - -QF1003
+        - -QF1008
 
-linters-settings:
-  errcheck:
-    exclude-functions:
-      - (io.Closer).Close
+formatters:
+  enable:
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/newcoderlife/media115

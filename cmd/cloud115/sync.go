@@ -70,7 +70,6 @@ var syncCmd = &cobra.Command{
 	},
 }
 
-
 func init() {
 	syncCmd.Flags().BoolVar(&syncDeep, "deep", false, "递归预热目录 listing 缓存")
 	syncCmd.Flags().IntVar(&syncDepth, "depth", 3, "预热深度（配合 --deep，默认 3）")
