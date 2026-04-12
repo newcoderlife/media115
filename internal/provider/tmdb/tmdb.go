@@ -446,6 +446,7 @@ func buildTVMetadata(detail, credits map[string]any, season, episode int) *scrap
 	m := &scraper.Metadata{
 		Title:     stringVal(detail, "name", "original_name"),
 		ShowTitle: stringVal(detail, "name", "original_name"),
+		Year:      yearFromDate(detail["first_air_date"]),
 		Season:    season,
 		Episode:   episode,
 		Plot:      stringVal(detail, "overview"),
