@@ -84,7 +84,7 @@ func (a *API) GetCookies() string { return a.cookies }
 
 // ── internal request helpers ────────────────────────────────────────────────
 
-// cookieRequest is the central HTTP dispatch: rate-limit → retry → 429/405 → parse.
+// cookieRequest is the central HTTP dispatch: rate-limit retry 429/405 parse.
 func (a *API) cookieRequest(method, rawURL string, params url.Values, data url.Values, limiter *RateLimiter, userAgent string) (map[string]any, error) {
 	if limiter == nil {
 		limiter = a.limiter
@@ -167,7 +167,7 @@ func (a *API) cookieRequest(method, rawURL string, params url.Values, data url.V
 	}
 	defer resp.Body.Close()
 
-	// Handle 429 → set cooldown.
+	// Handle 429 set cooldown.
 	if resp.StatusCode == 429 {
 		a.limiter.SetCooldown(3600)
 		a.dlLimiter.SetCooldown(3600)
@@ -175,7 +175,7 @@ func (a *API) cookieRequest(method, rawURL string, params url.Values, data url.V
 		return nil, fmt.Errorf("115 API rate limit hit (429). Cooling down for 1 hour.")
 	}
 
-	// Handle 405 → try renew cookies, then retry once.
+	// Handle 405 try renew cookies, then retry once.
 	if resp.StatusCode == 405 {
 		resp.Body.Close()
 		if a.RenewCookies("tv") {
@@ -256,7 +256,7 @@ func (a *API) CheckLogin() bool {
 		return false
 	}
 	state, _ := result["state"].(bool)
-	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("checkLogin → state=%t", state), "api")
+	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("checkLogin state=%t", state), "api")
 	return state
 }
 
@@ -737,7 +737,7 @@ func (a *API) ListFilesAll(dirID string) ([]map[string]any, error) {
 		}
 		offset += len(batch)
 	}
-	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("listFilesAll cid=%s → %d items (%d pages)", dirID, len(all), pages), "api")
+	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("listFilesAll cid=%s %d items (%d pages)", dirID, len(all), pages), "api")
 	return all, nil
 }
 
@@ -759,7 +759,7 @@ func (a *API) GetDirID(path string) (string, error) {
 		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("getDirID not found (id=0) path=%s", path), "api")
 		return "", nil
 	}
-	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("getDirID path=%s → cid=%s", path, cid), "api")
+	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("getDirID path=%s cid=%s", path, cid), "api")
 	return cid, nil
 }
 
@@ -774,7 +774,7 @@ func (a *API) Search(keyword, dirID string) ([]map[string]any, error) {
 		return nil, err
 	}
 	data := toSliceOfMaps(result["data"])
-	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("search keyword=%s cid=%s → %d results", keyword, dirID, len(data)), "api")
+	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("search keyword=%s cid=%s %d results", keyword, dirID, len(data)), "api")
 	return data, nil
 }
 
@@ -1078,7 +1078,7 @@ func (a *API) Delete(fileIDs []string) (map[string]any, error) {
 }
 
 // BatchRename renames multiple files in one API call.
-// renames maps fileID → newName.
+// renames maps fileID newName.
 func (a *API) BatchRename(renames map[string]string) (map[string]any, error) {
 	data := url.Values{}
 	for fid, name := range renames {
