@@ -29,6 +29,18 @@ go install github.com/newcoderlife/media115/cmd/cloud115@latest
 go install github.com/newcoderlife/media115/cmd/media115@latest
 ```
 
+### Agent Skills (optional)
+
+Install skills for your AI coding agent (Claude Code, Cursor, OpenCode, Codex):
+
+```bash
+# Auto-detect installed agents
+curl -fsSL https://raw.githubusercontent.com/newcoderlife/media115/master/install-skills.sh | sh
+
+# Or install for a specific agent
+curl -fsSL https://raw.githubusercontent.com/newcoderlife/media115/master/install-skills.sh | sh -s -- -a claude
+```
+
 ## Quick Start
 
 ```bash
