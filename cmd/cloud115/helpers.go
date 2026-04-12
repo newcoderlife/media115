@@ -21,13 +21,11 @@ func getClient() (*cloud115.Client, error) {
 	if cfg.Auth.Cookies == "" {
 		return nil, fmt.Errorf("未登录。请先运行: cloud115 auth")
 	}
-	logger, s := logging.Setup(verbose)
-	stats = s
+	stats = logging.Setup(verbose)
 	return cloud115.NewClient(
 		cfg.Auth.Cookies,
 		cloud115.WithListingTTL(time.Duration(cfg.Cache.ListingTTL)*time.Second),
 		cloud115.WithPathTTL(time.Duration(cfg.Cache.PathTTL)*time.Second),
-		cloud115.WithLogger(logger),
 		cloud115.WithStats(stats),
 	)
 }

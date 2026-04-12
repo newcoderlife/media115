@@ -3,7 +3,6 @@ package cloud115
 import (
 	"fmt"
 	"io"
-	"log/slog"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -141,7 +140,6 @@ func newTestClient(t *testing.T, m *mockAPI) *Client {
 		cache:      cache,
 		listingTTL: defaultListingTTL,
 		pathTTL:    defaultPathTTL,
-		logger:     slog.Default(),
 	}
 }
 
