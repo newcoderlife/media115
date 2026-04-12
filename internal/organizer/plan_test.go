@@ -273,6 +273,36 @@ func TestBuildPlanWithFullFileMap(t *testing.T) {
 	}
 }
 
+func TestBuildPlanTVWithStringYear(t *testing.T) {
+	// Regression: Python file_map stores year as string "2021"
+	entries := []cloud115.TreeEntry{
+		{Path: "剧目/Show (2021)/Show S01E01.mkv", Name: "Show S01E01.mkv",
+			Parent: "剧目/Show (2021)", IsVideo: true},
+	}
+	cacheGet := func(source, key string) map[string]any {
+		if key == "Show S01E01" {
+			return map[string]any{
+				"type": "tv", "showtitle": "Show", "title": "Ep1",
+				"year": "2021", "season": float64(1), "episode": float64(1),
+			}
+		}
+		return nil
+	}
+	ops := BuildPlan("剧目", entries, cacheGet)
+	for _, op := range ops {
+		if op.File == "Show S01E01.mkv" {
+			if op.Action != "skip" {
+				// Already in correct folder "Show (2021)" with correct name
+				if op.NewFolder != "" && op.NewFolder != "Show (2021)" {
+					t.Errorf("unexpected NewFolder: %q", op.NewFolder)
+				}
+			}
+			return
+		}
+	}
+	t.Fatal("expected op for Show S01E01.mkv")
+}
+
 func TestExtractAVSuffix(t *testing.T) {
 	cases := []struct {
 		in   string

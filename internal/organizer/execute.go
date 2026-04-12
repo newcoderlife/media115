@@ -1,12 +1,14 @@
 package organizer
 
 import (
+	"fmt"
 	"log/slog"
 	"regexp"
 	"strings"
 
 	"github.com/newcoderlife/media115/internal/cloud115"
 	"github.com/newcoderlife/media115/internal/config"
+	"github.com/newcoderlife/media115/internal/logging"
 )
 
 // Execute runs the 6-phase organize plan against the live 115 API.
@@ -50,7 +52,7 @@ func Execute(client *cloud115.Client, ops []Op, categoryPath string, logger *slo
 	}
 
 	// ── Phase 1: Resolve files ────────────────────────────────────────────────
-	logger.Info("organizer: resolving files", "count", len(activeOps))
+	logging.Log(slog.LevelInfo, fmt.Sprintf("organizer: resolving files count=%d", len(activeOps)), "client")
 
 	type resolved struct {
 		op         Op
@@ -84,7 +86,7 @@ func Execute(client *cloud115.Client, ops []Op, categoryPath string, logger *slo
 		}
 		resolvedOps = append(resolvedOps, resolved{op, parentPath})
 	}
-	logger.Info("organizer: resolved", "ok", len(resolvedOps), "total", len(activeOps))
+	logging.Log(slog.LevelInfo, fmt.Sprintf("organizer: resolved ok=%d total=%d", len(resolvedOps), len(activeOps)), "client")
 
 	// ── Phase 2: Create target directories ───────────────────────────────────
 	targetFolders := map[string]bool{}
@@ -93,7 +95,7 @@ func Execute(client *cloud115.Client, ops []Op, categoryPath string, logger *slo
 			targetFolders[r.op.NewFolder] = true
 		}
 	}
-	logger.Info("organizer: creating dirs", "count", len(targetFolders))
+	logging.Log(slog.LevelInfo, fmt.Sprintf("organizer: creating dirs count=%d", len(targetFolders)), "client")
 
 	existingItems, _ := client.ListDir(catPath)
 	existingDirs := map[string]bool{}
@@ -145,12 +147,12 @@ func Execute(client *cloud115.Client, ops []Op, categoryPath string, logger *slo
 	for _, g := range moveGroups {
 		totalMoves += len(g.srcPaths)
 	}
-	logger.Info("organizer: moving files", "moves", totalMoves, "dirs", len(moveGroups))
+	logging.Log(slog.LevelInfo, fmt.Sprintf("organizer: moving files moves=%d dirs=%d", totalMoves, len(moveGroups)), "client")
 
 	for folder, g := range moveGroups {
 		targetDir := catPath + "/" + folder
 		if err := client.Move(g.srcPaths, targetDir); err != nil {
-			logger.Error("organizer: move failed", "target", folder, "error", err)
+			logging.Log(slog.LevelError, fmt.Sprintf("organizer: move failed target=%s error=%v", folder, err), "client")
 			for _, idx := range g.srcOps {
 				failedIdx[idx] = true
 			}
@@ -177,9 +179,9 @@ func Execute(client *cloud115.Client, ops []Op, categoryPath string, logger *slo
 		renameIdx = append(renameIdx, i)
 	}
 	if len(renameItems) > 0 {
-		logger.Info("organizer: renaming files", "count", len(renameItems))
+		logging.Log(slog.LevelInfo, fmt.Sprintf("organizer: renaming files count=%d", len(renameItems)), "client")
 		if err := client.BatchRename(renameItems); err != nil {
-			logger.Error("organizer: batch rename failed", "error", err)
+			logging.Log(slog.LevelError, fmt.Sprintf("organizer: batch rename failed error=%v", err), "client")
 			for _, idx := range renameIdx {
 				failedIdx[idx] = true
 			}
@@ -225,14 +227,14 @@ func Execute(client *cloud115.Client, ops []Op, categoryPath string, logger *slo
 		results = append(results, OpResult{Op: r.op, Status: "ok"})
 	}
 
-	logger.Info("organizer: uploading sidecars", "dirs", len(targetGroups))
+	logging.Log(slog.LevelInfo, fmt.Sprintf("organizer: uploading sidecars dirs=%d", len(targetGroups)), "client")
 	totalUploaded := 0
 	for uploadDir, vfList := range targetGroups {
 		dirName := leafName(uploadDir)
 		isNew := newlyCreated[dirName]
 		totalUploaded += SyncSidecars(client, uploadDir, vfList, isNew, logger, cacheRoot)
 	}
-	logger.Info("organizer: sidecar uploads complete", "uploaded", totalUploaded)
+	logging.Log(slog.LevelInfo, fmt.Sprintf("organizer: sidecar uploads complete uploaded=%d", totalUploaded), "client")
 
 	// ── Phase 6: Cleanup empty source dirs ───────────────────────────────────
 	sourceDirs := map[string]bool{}
@@ -247,7 +249,7 @@ func Execute(client *cloud115.Client, ops []Op, categoryPath string, logger *slo
 	}
 
 	if len(sourceDirs) > 0 {
-		logger.Info("organizer: cleaning up old dirs", "count", len(sourceDirs))
+		logging.Log(slog.LevelInfo, fmt.Sprintf("organizer: cleaning up old dirs count=%d", len(sourceDirs)), "client")
 		catItems, _ := client.ListDir(catPath)
 		for _, item := range catItems {
 			if item.Type != "dir" || !sourceDirs[item.Name] {
@@ -266,9 +268,9 @@ func Execute(client *cloud115.Client, ops []Op, categoryPath string, logger *slo
 			}
 			if !hasVideo {
 				if err := client.Delete([]string{catPath + "/" + item.Name}); err != nil {
-					logger.Error("organizer: delete dir failed", "name", item.Name, "error", err)
+					logging.Log(slog.LevelError, fmt.Sprintf("organizer: delete dir failed name=%s error=%v", item.Name, err), "client")
 				} else {
-					logger.Debug("organizer: deleted empty dir", "name", item.Name)
+					logging.Log(slog.LevelDebug, fmt.Sprintf("organizer: deleted empty dir name=%s", item.Name), "client")
 				}
 			}
 		}
