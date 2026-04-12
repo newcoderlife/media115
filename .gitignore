@@ -20,6 +20,5 @@ bin/
 *.exe
 *.test
 *.out
-media115
-cloud115
-bin/
+/media115
+/cloud115

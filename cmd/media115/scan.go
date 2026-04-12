@@ -153,6 +153,9 @@ CATEGORY: AV, 电影, 剧目, etc. (optional; default shows all)`,
 		nfoCount := map[string]int{}
 		for _, e := range entries {
 			if e.IsNFO {
+				if category != "" && !strings.Contains("/"+e.Path+"/", "/"+category+"/") {
+					continue
+				}
 				nfoCount[e.Parent+"/"+e.Name]++
 			}
 		}
@@ -172,6 +175,9 @@ CATEGORY: AV, 电影, 剧目, etc. (optional; default shows all)`,
 		nfoParents := map[string]bool{}
 		for _, e := range entries {
 			if e.IsNFO {
+				if category != "" && !strings.Contains("/"+e.Path+"/", "/"+category+"/") {
+					continue
+				}
 				nfoParents[e.Parent] = true
 			}
 		}
