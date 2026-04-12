@@ -66,7 +66,7 @@ func (p *Provider) Search(query string, opts scraper.SearchOpts) ([]scraper.Sear
 		if airDate, ok := s["air_date"].(string); ok && len(airDate) >= 4 {
 			yr, _ = strconv.Atoi(airDate[:4])
 		}
-		id := fmt.Sprintf("%v", s["id"])
+		id := gconv.To[string, any](s["id"])
 		title := stringVal(s, "name_cn", "name")
 		results = append(results, scraper.SearchResult{ID: id, Title: title, Year: yr})
 	}

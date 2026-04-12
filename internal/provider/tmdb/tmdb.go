@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/bytedance/gg/gconv"
+	"github.com/bytedance/gg/gvalue"
 	"github.com/newcoderlife/media115/internal/scraper"
 )
 
@@ -254,7 +255,7 @@ func (p *Provider) scrapeTV(query, filename, outDir string, opts scraper.ScrapeO
 
 // SearchMovie searches the TMDB movie database.
 func (p *Provider) SearchMovie(query, language string) ([]map[string]any, error) {
-	params := url.Values{"query": {query}, "language": {coalesce(language, p.language)}}
+	params := url.Values{"query": {query}, "language": {gvalue.Or(language, p.language)}}
 	data, err := p.get("/search/movie", params)
 	if err != nil {
 		return nil, err
@@ -264,7 +265,7 @@ func (p *Provider) SearchMovie(query, language string) ([]map[string]any, error)
 
 // MovieDetail fetches full movie detail.
 func (p *Provider) MovieDetail(id int, language string) (map[string]any, error) {
-	params := url.Values{"language": {coalesce(language, p.language)}}
+	params := url.Values{"language": {gvalue.Or(language, p.language)}}
 	return p.get(fmt.Sprintf("/movie/%d", id), params)
 }
 
@@ -276,13 +277,13 @@ func (p *Provider) MovieImages(id int) (map[string]any, error) {
 
 // MovieCredits fetches movie credits.
 func (p *Provider) MovieCredits(id int, language string) (map[string]any, error) {
-	params := url.Values{"language": {coalesce(language, p.language)}}
+	params := url.Values{"language": {gvalue.Or(language, p.language)}}
 	return p.get(fmt.Sprintf("/movie/%d/credits", id), params)
 }
 
 // SearchTV searches the TMDB TV database.
 func (p *Provider) SearchTV(query, language string) ([]map[string]any, error) {
-	params := url.Values{"query": {query}, "language": {coalesce(language, p.language)}}
+	params := url.Values{"query": {query}, "language": {gvalue.Or(language, p.language)}}
 	data, err := p.get("/search/tv", params)
 	if err != nil {
 		return nil, err
@@ -292,19 +293,19 @@ func (p *Provider) SearchTV(query, language string) ([]map[string]any, error) {
 
 // TVDetail fetches full TV show detail.
 func (p *Provider) TVDetail(id int, language string) (map[string]any, error) {
-	params := url.Values{"language": {coalesce(language, p.language)}}
+	params := url.Values{"language": {gvalue.Or(language, p.language)}}
 	return p.get(fmt.Sprintf("/tv/%d", id), params)
 }
 
 // SeasonDetail fetches season detail including episodes.
 func (p *Provider) SeasonDetail(tvID, season int, language string) (map[string]any, error) {
-	params := url.Values{"language": {coalesce(language, p.language)}}
+	params := url.Values{"language": {gvalue.Or(language, p.language)}}
 	return p.get(fmt.Sprintf("/tv/%d/season/%d", tvID, season), params)
 }
 
 // TVCredits fetches TV show credits.
 func (p *Provider) TVCredits(id int, language string) (map[string]any, error) {
-	params := url.Values{"language": {coalesce(language, p.language)}}
+	params := url.Values{"language": {gvalue.Or(language, p.language)}}
 	return p.get(fmt.Sprintf("/tv/%d/credits", id), params)
 }
 
@@ -642,13 +643,4 @@ func asSlice(v any) []any {
 		return nil
 	}
 	return s
-}
-
-func coalesce(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
