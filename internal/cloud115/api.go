@@ -60,8 +60,8 @@ func NewAPI(cookies string, cache *Cache, logger *slog.Logger) *API {
 			Timeout: 30 * time.Second,
 		},
 		cookies:   cookies,
-		limiter:   NewRateLimiter("api", 0.5, 20, cache),
-		dlLimiter: NewRateLimiter("download", 0.5, 20, cache),
+		limiter:   NewRateLimiter("api", 0.5, 20, cache, logger),
+		dlLimiter: NewRateLimiter("download", 0.5, 20, cache, logger),
 		logger:    logger,
 	}
 	// Extract numeric user ID from UID=<id>_<rest> cookie fragment.
@@ -211,7 +211,7 @@ func checkBusinessErrors(result map[string]any) error {
 	if result == nil {
 		return nil
 	}
-	if errNo, ok := result["errNo"]; ok {
+	if errNo, ok := result["err_no"]; ok {
 		var code float64
 		switch v := errNo.(type) {
 		case float64:
@@ -231,39 +231,39 @@ func checkBusinessErrors(result map[string]any) error {
 
 // CheckLogin returns true if the current cookies are valid.
 func (a *API) CheckLogin() bool {
-	logging.Log(a.logger, slog.LevelDebug, "checkLogin sending", "api")
+	logging.Log(a.logger, slog.LevelDebug, "check_login sending", "api")
 	req, err := http.NewRequest("GET", "https://my.115.com/?ct=guide&ac=status", nil)
 	if err != nil {
-		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("checkLogin failed to build request err=%v", err), "api")
+		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("check_login failed to build request err=%v", err), "api")
 		return false
 	}
 	req.Header.Set("Cookie", a.cookies)
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("checkLogin network error err=%v", err), "api")
+		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("check_login network error err=%v", err), "api")
 		return false
 	}
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
-		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("checkLogin unexpected status=%d", resp.StatusCode), "api")
+		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("check_login unexpected status=%d", resp.StatusCode), "api")
 		return false
 	}
 	defer resp.Body.Close()
 	var result map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("checkLogin JSON decode error err=%v", err), "api")
+		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("check_login JSON decode error err=%v", err), "api")
 		return false
 	}
 	state, _ := result["state"].(bool)
-	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("checkLogin state=%t", state), "api")
+	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("check_login state=%t", state), "api")
 	return state
 }
 
 // RenewCookies attempts to silently refresh the session cookies via QR token flow.
 func (a *API) RenewCookies(app string) bool {
 	if a.cookies == "" {
-		logging.Log(a.logger, slog.LevelDebug, "renewCookies no cookies, skipping", "api")
+		logging.Log(a.logger, slog.LevelDebug, "renew_cookies no cookies, skipping", "api")
 		return false
 	}
 	if app == "" {
@@ -290,80 +290,80 @@ func (a *API) RenewCookies(app string) bool {
 	}
 
 	// Step 1: get token.
-	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("renewCookies step1 fetching token app=%s", app), "api")
+	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("renew_cookies step1 fetching token app=%s", app), "api")
 	resp, err := doGet(QRAPI+"/api/1.0/"+app+"/1.0/token/", nil, "")
 	if err != nil {
-		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("renewCookies step1 failed err=%v", err), "api")
+		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("renew_cookies step1 failed err=%v", err), "api")
 		return false
 	}
 	defer resp.Body.Close()
 	var tokenResult map[string]any
 	if json.NewDecoder(resp.Body).Decode(&tokenResult) != nil {
-		logging.Log(a.logger, slog.LevelDebug, "renewCookies step1 JSON decode failed", "api")
+		logging.Log(a.logger, slog.LevelDebug, "renew_cookies step1 JSON decode failed", "api")
 		return false
 	}
 	tokenData, _ := tokenResult["data"].(map[string]any)
 	if tokenData == nil {
-		logging.Log(a.logger, slog.LevelDebug, "renewCookies step1 no token data", "api")
+		logging.Log(a.logger, slog.LevelDebug, "renew_cookies step1 no token data", "api")
 		return false
 	}
 	uid, _ := tokenData["uid"].(string)
 	if uid == "" {
-		logging.Log(a.logger, slog.LevelDebug, "renewCookies step1 empty uid", "api")
+		logging.Log(a.logger, slog.LevelDebug, "renew_cookies step1 empty uid", "api")
 		return false
 	}
-	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("renewCookies step1 ok uid=%s", uid), "api")
+	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("renew_cookies step1 ok uid=%s", uid), "api")
 
 	// Step 2: prompt.
-	logging.Log(a.logger, slog.LevelDebug, "renewCookies step2 prompt", "api")
+	logging.Log(a.logger, slog.LevelDebug, "renew_cookies step2 prompt", "api")
 	resp2, err := doGet(QRAPI+"/api/2.0/prompt.php", url.Values{"uid": {uid}}, a.cookies)
 	if err != nil {
-		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("renewCookies step2 failed err=%v", err), "api")
+		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("renew_cookies step2 failed err=%v", err), "api")
 		return false
 	}
 	resp2.Body.Close()
-	logging.Log(a.logger, slog.LevelDebug, "renewCookies step2 ok", "api")
+	logging.Log(a.logger, slog.LevelDebug, "renew_cookies step2 ok", "api")
 
 	// Step 3: slogin.
-	logging.Log(a.logger, slog.LevelDebug, "renewCookies step3 slogin", "api")
+	logging.Log(a.logger, slog.LevelDebug, "renew_cookies step3 slogin", "api")
 	resp3, err := doGet(QRAPI+"/api/2.0/slogin.php",
 		url.Values{"key": {uid}, "uid": {uid}, "client": {"0"}}, a.cookies)
 	if err != nil {
-		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("renewCookies step3 failed err=%v", err), "api")
+		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("renew_cookies step3 failed err=%v", err), "api")
 		return false
 	}
 	resp3.Body.Close()
-	logging.Log(a.logger, slog.LevelDebug, "renewCookies step3 ok", "api")
+	logging.Log(a.logger, slog.LevelDebug, "renew_cookies step3 ok", "api")
 
 	// Step 4: exchange for new cookies.
-	logging.Log(a.logger, slog.LevelDebug, "renewCookies step4 exchange for new cookies", "api")
+	logging.Log(a.logger, slog.LevelDebug, "renew_cookies step4 exchange for new cookies", "api")
 	formData := url.Values{"account": {uid}, "app": {app}}
 	req, err := http.NewRequest("POST", PassportAPI+"/app/1.0/"+app+"/1.0/login/qrcode",
 		strings.NewReader(formData.Encode()))
 	if err != nil {
-		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("renewCookies step4 build request failed err=%v", err), "api")
+		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("renew_cookies step4 build request failed err=%v", err), "api")
 		return false
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp4, err := client.Do(req)
 	if err != nil {
-		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("renewCookies step4 request failed err=%v", err), "api")
+		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("renew_cookies step4 request failed err=%v", err), "api")
 		return false
 	}
 	defer resp4.Body.Close()
 	var loginResult map[string]any
 	if json.NewDecoder(resp4.Body).Decode(&loginResult) != nil {
-		logging.Log(a.logger, slog.LevelDebug, "renewCookies step4 JSON decode failed", "api")
+		logging.Log(a.logger, slog.LevelDebug, "renew_cookies step4 JSON decode failed", "api")
 		return false
 	}
 	data, _ := loginResult["data"].(map[string]any)
 	if data == nil {
-		logging.Log(a.logger, slog.LevelDebug, "renewCookies step4 no data in response", "api")
+		logging.Log(a.logger, slog.LevelDebug, "renew_cookies step4 no data in response", "api")
 		return false
 	}
 	cookies, _ := data["cookie"].(map[string]any)
 	if len(cookies) == 0 {
-		logging.Log(a.logger, slog.LevelDebug, "renewCookies step4 empty cookies", "api")
+		logging.Log(a.logger, slog.LevelDebug, "renew_cookies step4 empty cookies", "api")
 		return false
 	}
 	var parts []string
@@ -372,7 +372,7 @@ func (a *API) RenewCookies(app string) bool {
 	}
 	cookieStr := strings.Join(parts, "; ")
 	if len(cookieStr) < 10 {
-		logging.Log(a.logger, slog.LevelDebug, "renewCookies step4 cookie string too short", "api")
+		logging.Log(a.logger, slog.LevelDebug, "renew_cookies step4 cookie string too short", "api")
 		return false
 	}
 	a.cookies = cookieStr
@@ -387,7 +387,7 @@ func (a *API) RenewCookies(app string) bool {
 			break
 		}
 	}
-	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("renewCookies success cookieLen=%d", len(cookieStr)), "api")
+	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("renew_cookies success cookieLen=%d", len(cookieStr)), "api")
 	return true
 }
 
@@ -415,12 +415,12 @@ func (a *API) QRLogin(app string) error {
 	if app == "" {
 		app = "tv"
 	}
-	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("qrLogin fetching token app=%s", app), "api")
+	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("qr_login fetching token app=%s", app), "api")
 	client := &http.Client{Timeout: 35 * time.Second}
 
 	resp, err := client.Get(QRAPI + "/api/1.0/" + app + "/1.0/token/")
 	if err != nil {
-		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("qrLogin token fetch failed err=%v", err), "api")
+		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("qr_login token fetch failed err=%v", err), "api")
 		return err
 	}
 	var tokenResult map[string]any
@@ -434,7 +434,7 @@ func (a *API) QRLogin(app string) error {
 	uid, _ := tokenData["uid"].(string)
 	qrTime := formatNum(tokenData["time"])
 	sign, _ := tokenData["sign"].(string)
-	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("qrLogin token obtained uid=%s", uid), "api")
+	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("qr_login token obtained uid=%s", uid), "api")
 
 	qrImageURL := fmt.Sprintf("%s/api/1.0/web/1.0/qrcode?qrfrom=1&client=0d&uid=%s", QRAPI, uid)
 	fmt.Printf("Scan QR: %s\n", qrImageURL)
@@ -453,7 +453,7 @@ func (a *API) QRLogin(app string) error {
 		u.RawQuery = params.Encode()
 		statusResp, err := client.Get(u.String())
 		if err != nil {
-			logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("qrLogin poll error attempt=%d err=%v", i, err), "api")
+			logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("qr_login poll error attempt=%d err=%v", i, err), "api")
 			time.Sleep(time.Second)
 			continue
 		}
@@ -473,7 +473,7 @@ func (a *API) QRLogin(app string) error {
 		if s, ok := statusData["status"].(float64); ok {
 			status = int(s)
 		}
-		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("qrLogin poll attempt=%d status=%d", i, status), "api")
+		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("qr_login poll attempt=%d status=%d", i, status), "api")
 		switch status {
 		case 0:
 			time.Sleep(2 * time.Second)
@@ -573,7 +573,7 @@ func (a *API) QRGetToken(app string) (*QRSession, error) {
 // QRWaitAndLogin polls for QR scan completion and finalizes login (phase 2).
 // Updates the API cookie string on success.
 func (a *API) QRWaitAndLogin(sess *QRSession) error {
-	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("qrWaitAndLogin starting poll uid=%s app=%s", sess.UID, sess.App), "api")
+	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("qr_wait_and_login starting poll uid=%s app=%s", sess.UID, sess.App), "api")
 	client := &http.Client{Timeout: 35 * time.Second}
 
 	maxPolls := 180 // 3 minutes
@@ -589,7 +589,7 @@ func (a *API) QRWaitAndLogin(sess *QRSession) error {
 		u.RawQuery = params.Encode()
 		statusResp, err := client.Get(u.String())
 		if err != nil {
-			logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("qrWaitAndLogin poll error attempt=%d err=%v", i, err), "api")
+			logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("qr_wait_and_login poll error attempt=%d err=%v", i, err), "api")
 			time.Sleep(time.Second)
 			continue
 		}
@@ -609,7 +609,7 @@ func (a *API) QRWaitAndLogin(sess *QRSession) error {
 		if s, ok := statusData["status"].(float64); ok {
 			status = int(s)
 		}
-		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("qrWaitAndLogin poll attempt=%d status=%d", i, status), "api")
+		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("qr_wait_and_login poll attempt=%d status=%d", i, status), "api")
 		switch status {
 		case 0:
 			time.Sleep(2 * time.Second)
@@ -737,7 +737,7 @@ func (a *API) ListFilesAll(dirID string) ([]map[string]any, error) {
 		}
 		offset += len(batch)
 	}
-	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("listFilesAll cid=%s %d items (%d pages)", dirID, len(all), pages), "api")
+	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("list_files_all cid=%s %d items (%d pages)", dirID, len(all), pages), "api")
 	return all, nil
 }
 
@@ -750,16 +750,16 @@ func (a *API) GetDirID(path string) (string, error) {
 	}
 	state, _ := result["state"].(bool)
 	if !state {
-		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("getDirID not found (state=false) path=%s", path), "api")
+		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("get_dir_id not found (state=false) path=%s", path), "api")
 		return "", nil
 	}
 	cid := formatNum(result["id"])
 	// 115 returns id="0" for non-existent paths even when state=true.
 	if cid == "" || cid == "0" {
-		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("getDirID not found (id=0) path=%s", path), "api")
+		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("get_dir_id not found (id=0) path=%s", path), "api")
 		return "", nil
 	}
-	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("getDirID path=%s cid=%s", path, cid), "api")
+	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("get_dir_id path=%s cid=%s", path, cid), "api")
 	return cid, nil
 }
 
@@ -822,7 +822,7 @@ func (a *API) DownloadURL(pickCode, userAgent string) (string, error) {
 			break
 		}
 		if attempt < maxRetries-1 {
-			logging.Log(a.logger, slog.LevelWarn, fmt.Sprintf("downloadURL network error attempt=%d/%d", attempt+1, maxRetries), "api")
+			logging.Log(a.logger, slog.LevelWarn, fmt.Sprintf("download_url network error attempt=%d/%d", attempt+1, maxRetries), "api")
 			time.Sleep(time.Duration(3*(attempt+1)) * time.Second)
 		}
 	}
@@ -888,7 +888,7 @@ func (a *API) DownloadURL(pickCode, userAgent string) (string, error) {
 
 // ExportTree exports a directory tree and returns the UTF-16LE decoded text.
 func (a *API) ExportTree(dirID string) (string, error) {
-	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("exportTree starting cid=%s", dirID), "api")
+	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("export_tree starting cid=%s", dirID), "api")
 
 	// Start export.
 	startResult, err := a.cookieRequest("POST", WebAPI+"/files/export_dir",
@@ -996,7 +996,7 @@ func (a *API) ExportTree(dirID string) (string, error) {
 	}
 
 	text := decodeUTF16LE(content)
-	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("exportTree done cid=%s lines=%d", dirID, strings.Count(text, "\n")), "api")
+	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("export_tree done cid=%s lines=%d", dirID, strings.Count(text, "\n")), "api")
 	return text, nil
 }
 
@@ -1088,7 +1088,7 @@ func (a *API) BatchRename(renames map[string]string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("batchRename count=%d", len(renames)), "api")
+	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("batch_rename count=%d", len(renames)), "api")
 	return result, nil
 }
 
@@ -1121,7 +1121,7 @@ func (a *API) UploadFile(localPath, targetDirID, filename string) (map[string]an
 		resp, err := a.http.Do(req)
 		if err != nil {
 			if attempt < 2 {
-				logging.Log(a.logger, slog.LevelWarn, fmt.Sprintf("uploadFile init failed attempt=%d", attempt+1), "api")
+				logging.Log(a.logger, slog.LevelWarn, fmt.Sprintf("upload_file init failed attempt=%d", attempt+1), "api")
 				time.Sleep(time.Duration(3*(attempt+1)) * time.Second)
 				continue
 			}
@@ -1181,7 +1181,7 @@ func (a *API) UploadFile(localPath, targetDirID, filename string) (map[string]an
 		if err != nil {
 			pr.CloseWithError(err)
 			if attempt < 2 {
-				logging.Log(a.logger, slog.LevelWarn, fmt.Sprintf("uploadFile oss failed attempt=%d", attempt+1), "api")
+				logging.Log(a.logger, slog.LevelWarn, fmt.Sprintf("upload_file oss failed attempt=%d", attempt+1), "api")
 				time.Sleep(time.Duration(3*(attempt+1)) * time.Second)
 				continue
 			}
@@ -1191,13 +1191,13 @@ func (a *API) UploadFile(localPath, targetDirID, filename string) (map[string]an
 			var ossResult map[string]any
 			_ = json.NewDecoder(resp.Body).Decode(&ossResult)
 			resp.Body.Close()
-			logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("uploadFile filename=%s path=%s dir=%s", filename, localPath, targetDirID), "api")
+			logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("upload_file filename=%s path=%s dir=%s", filename, localPath, targetDirID), "api")
 			if data, ok := ossResult["data"].(map[string]any); ok {
 				return data, nil
 			}
 			return ossResult, nil
 		}
-		logging.Log(a.logger, slog.LevelWarn, fmt.Sprintf("uploadFile failed filename=%s status=%d", filename, resp.StatusCode), "api")
+		logging.Log(a.logger, slog.LevelWarn, fmt.Sprintf("upload_file failed filename=%s status=%d", filename, resp.StatusCode), "api")
 		resp.Body.Close()
 		return nil, fmt.Errorf("115 OSS upload failed: HTTP %d", resp.StatusCode)
 	}
@@ -1222,7 +1222,7 @@ func (a *API) RapidUpload(dirID, filename string, fileSize int64, fileSHA1 strin
 	signVal := ""
 
 	for attempt := 0; attempt < 3; attempt++ {
-		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("rapidUpload filename=%s attempt=%d", filename, attempt+1), "api")
+		logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("rapid_upload filename=%s attempt=%d", filename, attempt+1), "api")
 		timestamp := fmt.Sprintf("%d", time.Now().Unix())
 
 		userHashBytes := md5.Sum([]byte(userID))
@@ -1291,7 +1291,7 @@ func (a *API) RapidUpload(dirID, filename string, fileSize int64, fileSHA1 strin
 		status, _ := result["status"].(float64)
 		switch int(status) {
 		case 2:
-			logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("rapidUpload success filename=%s pickcode=%v", filename, result["pickcode"]), "api")
+			logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("rapid_upload success filename=%s pickcode=%v", filename, result["pickcode"]), "api")
 			return map[string]any{"status": 2, "pickcode": result["pickcode"]}, nil
 		case 7:
 			if sc, _ := result["statuscode"].(float64); int(sc) == 701 && fileStream != nil {
@@ -1311,11 +1311,11 @@ func (a *API) RapidUpload(dirID, filename string, fileSize int64, fileSHA1 strin
 			}
 			fallthrough
 		default:
-			logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("rapidUpload needs actual upload filename=%s status=%d", filename, int(status)), "api")
+			logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("rapid_upload needs actual upload filename=%s status=%d", filename, int(status)), "api")
 			return map[string]any{"status": int(status)}, nil
 		}
 	}
-	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("rapidUpload exceeded retries filename=%s", filename), "api")
+	logging.Log(a.logger, slog.LevelDebug, fmt.Sprintf("rapid_upload exceeded retries filename=%s", filename), "api")
 	return map[string]any{"status": 0}, nil
 }
 
