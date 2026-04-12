@@ -227,28 +227,39 @@ func checkBusinessErrors(result map[string]any) error {
 
 // CheckLogin returns true if the current cookies are valid.
 func (a *API) CheckLogin() bool {
+	a.logger.Debug("CheckLogin: sending request")
 	req, err := http.NewRequest("GET", "https://my.115.com/?ct=guide&ac=status", nil)
 	if err != nil {
+		a.logger.Debug("CheckLogin: failed to build request", "err", err)
 		return false
 	}
 	req.Header.Set("Cookie", a.cookies)
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
+	if err != nil {
+		a.logger.Debug("CheckLogin: network error", "err", err)
+		return false
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		a.logger.Debug("CheckLogin: unexpected status", "status", resp.StatusCode)
 		return false
 	}
 	defer resp.Body.Close()
 	var result map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		a.logger.Debug("CheckLogin: JSON decode error", "err", err)
 		return false
 	}
 	state, _ := result["state"].(bool)
+	a.logger.Debug("CheckLogin: result", "state", state)
 	return state
 }
 
 // RenewCookies attempts to silently refresh the session cookies via QR token flow.
 func (a *API) RenewCookies(app string) bool {
 	if a.cookies == "" {
+		a.logger.Debug("RenewCookies: no cookies, skipping")
 		return false
 	}
 	if app == "" {
@@ -275,62 +286,80 @@ func (a *API) RenewCookies(app string) bool {
 	}
 
 	// Step 1: get token.
+	a.logger.Debug("RenewCookies: step 1 — fetching token", "app", app)
 	resp, err := doGet(QRAPI+"/api/1.0/"+app+"/1.0/token/", nil, "")
 	if err != nil {
+		a.logger.Debug("RenewCookies: step 1 failed", "err", err)
 		return false
 	}
 	defer resp.Body.Close()
 	var tokenResult map[string]any
 	if json.NewDecoder(resp.Body).Decode(&tokenResult) != nil {
+		a.logger.Debug("RenewCookies: step 1 JSON decode failed")
 		return false
 	}
 	tokenData, _ := tokenResult["data"].(map[string]any)
 	if tokenData == nil {
+		a.logger.Debug("RenewCookies: step 1 no token data")
 		return false
 	}
 	uid, _ := tokenData["uid"].(string)
 	if uid == "" {
+		a.logger.Debug("RenewCookies: step 1 empty uid")
 		return false
 	}
+	a.logger.Debug("RenewCookies: step 1 ok", "uid", uid)
 
 	// Step 2: prompt.
+	a.logger.Debug("RenewCookies: step 2 — prompt")
 	resp2, err := doGet(QRAPI+"/api/2.0/prompt.php", url.Values{"uid": {uid}}, a.cookies)
 	if err != nil {
+		a.logger.Debug("RenewCookies: step 2 failed", "err", err)
 		return false
 	}
 	resp2.Body.Close()
+	a.logger.Debug("RenewCookies: step 2 ok")
 
 	// Step 3: slogin.
+	a.logger.Debug("RenewCookies: step 3 — slogin")
 	resp3, err := doGet(QRAPI+"/api/2.0/slogin.php",
 		url.Values{"key": {uid}, "uid": {uid}, "client": {"0"}}, a.cookies)
 	if err != nil {
+		a.logger.Debug("RenewCookies: step 3 failed", "err", err)
 		return false
 	}
 	resp3.Body.Close()
+	a.logger.Debug("RenewCookies: step 3 ok")
 
 	// Step 4: exchange for new cookies.
+	a.logger.Debug("RenewCookies: step 4 — exchange for new cookies")
 	formData := url.Values{"account": {uid}, "app": {app}}
 	req, err := http.NewRequest("POST", PassportAPI+"/app/1.0/"+app+"/1.0/login/qrcode",
 		strings.NewReader(formData.Encode()))
 	if err != nil {
+		a.logger.Debug("RenewCookies: step 4 build request failed", "err", err)
 		return false
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp4, err := client.Do(req)
 	if err != nil {
+		a.logger.Debug("RenewCookies: step 4 request failed", "err", err)
 		return false
 	}
 	defer resp4.Body.Close()
 	var loginResult map[string]any
 	if json.NewDecoder(resp4.Body).Decode(&loginResult) != nil {
+		a.logger.Debug("RenewCookies: step 4 JSON decode failed")
 		return false
 	}
 	data, _ := loginResult["data"].(map[string]any)
 	if data == nil {
+		a.logger.Debug("RenewCookies: step 4 no data in response")
 		return false
 	}
 	cookies, _ := data["cookie"].(map[string]any)
 	if len(cookies) == 0 {
+		a.logger.Debug("RenewCookies: step 4 empty cookies")
 		return false
 	}
 	var parts []string
@@ -339,6 +368,7 @@ func (a *API) RenewCookies(app string) bool {
 	}
 	cookieStr := strings.Join(parts, "; ")
 	if len(cookieStr) < 10 {
+		a.logger.Debug("RenewCookies: step 4 cookie string too short")
 		return false
 	}
 	a.cookies = cookieStr
@@ -353,6 +383,7 @@ func (a *API) RenewCookies(app string) bool {
 			break
 		}
 	}
+	a.logger.Debug("RenewCookies: success", "cookieLen", len(cookieStr))
 	return true
 }
 
@@ -361,10 +392,12 @@ func (a *API) QRLogin(app string) error {
 	if app == "" {
 		app = "tv"
 	}
+	a.logger.Debug("QRLogin: fetching token", "app", app)
 	client := &http.Client{Timeout: 35 * time.Second}
 
 	resp, err := client.Get(QRAPI + "/api/1.0/" + app + "/1.0/token/")
 	if err != nil {
+		a.logger.Debug("QRLogin: token fetch failed", "err", err)
 		return err
 	}
 	var tokenResult map[string]any
@@ -378,6 +411,7 @@ func (a *API) QRLogin(app string) error {
 	uid, _ := tokenData["uid"].(string)
 	qrTime := fmt.Sprintf("%v", tokenData["time"])
 	sign, _ := tokenData["sign"].(string)
+	a.logger.Debug("QRLogin: token obtained", "uid", uid)
 
 	qrImageURL := fmt.Sprintf("%s/api/1.0/web/1.0/qrcode?qrfrom=1&client=0d&uid=%s", QRAPI, uid)
 	fmt.Printf("Scan QR: %s\n", qrImageURL)
@@ -395,6 +429,7 @@ func (a *API) QRLogin(app string) error {
 		u.RawQuery = params.Encode()
 		statusResp, err := client.Get(u.String())
 		if err != nil {
+			a.logger.Debug("QRLogin: status poll error", "err", err)
 			time.Sleep(time.Second)
 			continue
 		}
@@ -414,6 +449,7 @@ func (a *API) QRLogin(app string) error {
 		if s, ok := statusData["status"].(float64); ok {
 			status = int(s)
 		}
+		a.logger.Debug("QRLogin: poll status", "status", status)
 		switch status {
 		case 0:
 			time.Sleep(2 * time.Second)
@@ -507,6 +543,7 @@ func (a *API) QRGetToken(app string) (*QRSession, error) {
 // QRWaitAndLogin polls for QR scan completion and finalizes login (phase 2).
 // Updates the API cookie string on success.
 func (a *API) QRWaitAndLogin(sess *QRSession) error {
+	a.logger.Debug("QRWaitAndLogin: starting poll", "uid", sess.UID, "app", sess.App)
 	client := &http.Client{Timeout: 35 * time.Second}
 
 statusLoop:
@@ -521,6 +558,7 @@ statusLoop:
 		u.RawQuery = params.Encode()
 		statusResp, err := client.Get(u.String())
 		if err != nil {
+			a.logger.Debug("QRWaitAndLogin: status poll error", "err", err)
 			time.Sleep(time.Second)
 			continue
 		}
@@ -540,6 +578,7 @@ statusLoop:
 		if s, ok := statusData["status"].(float64); ok {
 			status = int(s)
 		}
+		a.logger.Debug("QRWaitAndLogin: poll status", "status", status)
 		switch status {
 		case 0:
 			time.Sleep(2 * time.Second)
