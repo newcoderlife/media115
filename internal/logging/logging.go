@@ -52,7 +52,7 @@ func (s *Stats) Summary() string {
 
 // Setup creates a logger with console + JSON file handlers.
 // Console: prints only msg to stderr (Info default, Debug if verbose).
-// File: JSON with time/level/msg/cache/caller/run_id to ~/.cache/cloud115/logs.
+// File: JSON with time/level/msg/layer/run_id to ~/.cache/cloud115/logs.
 func Setup(verbose bool) (*slog.Logger, *Stats) {
 	stats := &Stats{StartTime: time.Now()}
 
@@ -80,12 +80,11 @@ func Setup(verbose bool) (*slog.Logger, *Stats) {
 }
 
 // Log emits a structured log message.
-func Log(logger *slog.Logger, level slog.Level, msg string, cache bool, layer string) {
+func Log(logger *slog.Logger, level slog.Level, msg string, layer string) {
 	if !logger.Enabled(context.Background(), level) {
 		return
 	}
 	r := slog.NewRecord(time.Now(), level, msg, 0)
-	r.Add("cache", cache)
 	r.Add("layer", layer)
 	r.Add("run_id", runID)
 	logger.Handler().Handle(context.Background(), r)
@@ -142,14 +141,11 @@ func (h *jsonFileHandler) Handle(_ context.Context, r slog.Record) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	// Extract cache, layer, run_id from attrs
-	cache := false
+	// Extract layer and run_id from attrs
 	layer := ""
 	rid := runID
 	r.Attrs(func(a slog.Attr) bool {
 		switch a.Key {
-		case "cache":
-			cache = a.Value.Bool()
 		case "layer":
 			layer = a.Value.String()
 		case "run_id":
@@ -163,11 +159,10 @@ func (h *jsonFileHandler) Handle(_ context.Context, r slog.Record) error {
 	msgJSON := strings.ReplaceAll(r.Message, `\`, `\\`)
 	msgJSON = strings.ReplaceAll(msgJSON, `"`, `\"`)
 
-	line := fmt.Sprintf(`{"time":"%s","level":"%s","msg":"%s","cache":%t,"layer":"%s","run_id":"%s"}`,
+	line := fmt.Sprintf(`{"time":"%s","level":"%s","msg":"%s","layer":"%s","run_id":"%s"}`,
 		r.Time.Format(time.RFC3339Nano),
 		r.Level.String(),
 		msgJSON,
-		cache,
 		layer,
 		rid,
 	)
