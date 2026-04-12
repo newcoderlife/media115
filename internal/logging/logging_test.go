@@ -436,7 +436,7 @@ func TestLogFilePath_DefaultsToHome(t *testing.T) {
 
 	got := logFilePath()
 	home, _ := os.UserHomeDir()
-	expected := filepath.Join(home, ".cache", "cloud115", "logs")
+	expected := filepath.Join(home, ".cache", "cloud115", "logs", "cloud115.log")
 	if got != expected {
 		t.Errorf("logFilePath() = %q, want %q", got, expected)
 	}
@@ -448,7 +448,7 @@ func TestLogFilePath_RespectsXDGCacheHome(t *testing.T) {
 	defer os.Setenv("XDG_CACHE_HOME", old)
 
 	got := logFilePath()
-	expected := "/tmp/testcache/cloud115/logs"
+	expected := "/tmp/testcache/cloud115/logs/cloud115.log"
 	if got != expected {
 		t.Errorf("logFilePath() = %q, want %q", got, expected)
 	}

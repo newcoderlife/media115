@@ -94,13 +94,19 @@ func Log(level slog.Level, msg string, layer string) {
 	_ = logger.Handler().Handle(context.Background(), r)
 }
 
+// appName is set by SetAppName before Setup. Defaults to "cloud115".
+var appName = "cloud115"
+
+// SetAppName sets the application name used for log file paths.
+func SetAppName(name string) { appName = name }
+
 func logFilePath() string {
 	base := os.Getenv("XDG_CACHE_HOME")
 	if base == "" {
 		home, _ := os.UserHomeDir()
 		base = filepath.Join(home, ".cache")
 	}
-	return filepath.Join(base, "cloud115", "logs")
+	return filepath.Join(base, appName, "logs", appName+".log")
 }
 
 // ---- Console handler: only prints msg ----
