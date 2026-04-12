@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bytedance/gg/gconv"
 	"github.com/bytedance/gg/gvalue"
 	"github.com/newcoderlife/media115/internal/scraper"
 )
@@ -574,43 +573,27 @@ func bestMatch(results []map[string]any, year int, dateField string) map[string]
 	return results[0]
 }
 
-func yearFromDate(v any) int {
-	s, ok := v.(string)
-	if !ok || len(s) < 4 {
-		return 0
-	}
-	n, _ := strconv.Atoi(s[:4])
-	return n
-}
+// yearFromDate delegates to the shared scraper utility.
+func yearFromDate(v any) int { return scraper.YearFromDate(v) }
 
-func stringVal(m map[string]any, keys ...string) string {
-	for _, k := range keys {
-		if v, ok := m[k]; ok {
-			if s, ok := v.(string); ok && s != "" {
-				return s
-			}
-		}
-	}
-	return ""
-}
+// stringVal delegates to the shared scraper utility.
+func stringVal(m map[string]any, keys ...string) string { return scraper.StringVal(m, keys...) }
 
+// intVal delegates to the shared scraper utility (first matching non-zero key).
 func intVal(m map[string]any, keys ...string) int {
 	for _, k := range keys {
-		if v, ok := m[k]; ok {
-			if n := gconv.To[int, any](v); n != 0 {
-				return n
-			}
+		if n := scraper.IntVal(m, k); n != 0 {
+			return n
 		}
 	}
 	return 0
 }
 
+// floatVal delegates to the shared scraper utility (first matching non-zero key).
 func floatVal(m map[string]any, keys ...string) float64 {
 	for _, k := range keys {
-		if v, ok := m[k]; ok {
-			if f := gconv.To[float64, any](v); f != 0 {
-				return f
-			}
+		if f := scraper.FloatVal(m, k); f != 0 {
+			return f
 		}
 	}
 	return 0
