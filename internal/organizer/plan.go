@@ -2,9 +2,7 @@
 package organizer
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -12,7 +10,7 @@ import (
 	"github.com/bytedance/gg/gconv"
 
 	"github.com/newcoderlife/media115/internal/cloud115"
-	"github.com/newcoderlife/media115/internal/config"
+	"github.com/newcoderlife/media115/internal/scraper"
 )
 
 // Op is one entry in the organize plan.
@@ -120,41 +118,14 @@ func isDiscLetter(r rune) bool {
 	return r == 'A' || r == 'B' || r == 'C' || r == 'D' || r == 'a' || r == 'b' || r == 'c' || r == 'd'
 }
 
-// fileMapCachePut writes a JSON cache entry to
-// ~/.cache/media115/scrape/{source}/{key}.json.
+// fileMapCachePut delegates to scraper.CachePut.
 func fileMapCachePut(source, key string, data map[string]any) {
-	cacheDir := config.CacheDir()
-	cacheDir = strings.Replace(cacheDir, "cloud115", "media115", 1)
-	dir := filepath.Join(cacheDir, "scrape", source)
-	_ = os.MkdirAll(dir, 0o755)
-	path := filepath.Join(dir, key+".json")
-	if b, err := json.Marshal(data); err == nil {
-		_ = os.WriteFile(path, b, 0o644)
-	}
+	scraper.CachePut(source, key, data)
 }
 
-// fileMapCacheGet reads a JSON cache entry from
-// ~/.cache/media115/scrape/{source}/{key}.json.
-// Returns nil if absent or unreadable.
-func fileMapCacheGet(source, key string) map[string]any {
-	cacheDir := config.CacheDir()
-	// Python media115 cache lives in ~/.cache/media115/, not ~/.cache/cloud115/
-	// Replace the cloud115-specific suffix with media115.
-	cacheDir = strings.Replace(cacheDir, "cloud115", "media115", 1)
-	path := filepath.Join(cacheDir, "scrape", source, key+".json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil
-	}
-	// Treat not_found entries as absent.
-	if nf, _ := m["_not_found"].(bool); nf {
-		return nil
-	}
-	return m
+// fileMapCacheGet delegates to scraper.CacheGetFileMap.
+func fileMapCacheGet(_ string, key string) map[string]any {
+	return scraper.CacheGetFileMap(key)
 }
 
 // BuildPlan builds a rename/move plan from the file_map cache.

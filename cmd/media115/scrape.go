@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/cobra"
 
 	cloud115 "github.com/newcoderlife/media115/internal/cloud115"
-	"github.com/newcoderlife/media115/internal/config"
 	"github.com/newcoderlife/media115/internal/scraper"
 )
 
@@ -393,59 +392,14 @@ func saveFileMap(filename, mediaType, query string, sr *scraper.ScrapeResult) {
 	}
 }
 
-// mediaCacheDir returns the media115 cache directory path.
-func mediaCacheDir() string {
-	return strings.Replace(config.CacheDir(), "cloud115", "media115", 1)
-}
-
-// ── Scrape result cache ───────────────────────────────────────────────────────
-
 const scrapeCacheTTLDays = 7
 
-// scrapeCachePath returns the path for a scrape cache entry.
-func scrapeCachePath(source, key string) string {
-	return filepath.Join(mediaCacheDir(), "scrape", source, key+".json")
-}
-
-// scrapeGet reads a cached scrape result. Returns nil if absent or unreadable.
-func scrapeGet(source, key string) map[string]any {
-	data, err := os.ReadFile(scrapeCachePath(source, key))
-	if err != nil {
-		return nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil
-	}
-	return m
-}
-
-// scrapePut writes a scrape result to cache.
-func scrapePut(source, key string, data map[string]any) {
-	p := scrapeCachePath(source, key)
-	_ = os.MkdirAll(filepath.Dir(p), 0o755)
-	if b, err := json.MarshalIndent(data, "", "  "); err == nil {
-		_ = os.WriteFile(p, b, 0o644)
-	}
-}
-
-// scrapeIsNotFound returns true if the cache entry exists with _not_found=true
-// and was stored within the last scrapeCacheTTLDays days.
+func mediaCacheDir() string                             { return scraper.CacheDir() }
+func scrapeCachePath(source, key string) string         { return scraper.CachePath(source, key) }
+func scrapeGet(source, key string) map[string]any       { return scraper.CacheGet(source, key) }
+func scrapePut(source, key string, data map[string]any) { scraper.CachePut(source, key, data) }
 func scrapeIsNotFound(source, key string) bool {
-	m := scrapeGet(source, key)
-	if m == nil {
-		return false
-	}
-	nf, _ := m["_not_found"].(bool)
-	if !nf {
-		return false
-	}
-	cachedAt, _ := m["_cached_at"].(float64)
-	if cachedAt == 0 {
-		return true // no timestamp, treat as expired? conservatively return true
-	}
-	age := time.Now().Unix() - int64(cachedAt)
-	return age < int64(scrapeCacheTTLDays*24*3600)
+	return scraper.CacheIsNotFound(source, key, scrapeCacheTTLDays)
 }
 
 func init() {
