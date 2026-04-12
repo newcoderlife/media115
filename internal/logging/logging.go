@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -80,28 +79,14 @@ func Setup(verbose bool) (*slog.Logger, *Stats) {
 	return slog.New(handler), stats
 }
 
-// CacheLog creates a log message with cache=true.
-func CacheLog(logger *slog.Logger, level slog.Level, msg string) {
+// Log emits a structured log message.
+func Log(logger *slog.Logger, level slog.Level, msg string, cache bool, layer string) {
 	if !logger.Enabled(context.Background(), level) {
 		return
 	}
-	var pcs [1]uintptr
-	runtime.Callers(2, pcs[:])
-	r := slog.NewRecord(time.Now(), level, msg, pcs[0])
-	r.Add("cache", true)
-	r.Add("run_id", runID)
-	logger.Handler().Handle(context.Background(), r)
-}
-
-// APILog creates a log message with cache=false.
-func APILog(logger *slog.Logger, level slog.Level, msg string) {
-	if !logger.Enabled(context.Background(), level) {
-		return
-	}
-	var pcs [1]uintptr
-	runtime.Callers(2, pcs[:])
-	r := slog.NewRecord(time.Now(), level, msg, pcs[0])
-	r.Add("cache", false)
+	r := slog.NewRecord(time.Now(), level, msg, 0)
+	r.Add("cache", cache)
+	r.Add("layer", layer)
 	r.Add("run_id", runID)
 	logger.Handler().Handle(context.Background(), r)
 }
@@ -157,43 +142,33 @@ func (h *jsonFileHandler) Handle(_ context.Context, r slog.Record) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	// Extract cache and run_id from attrs
+	// Extract cache, layer, run_id from attrs
 	cache := false
+	layer := ""
 	rid := runID
 	r.Attrs(func(a slog.Attr) bool {
 		switch a.Key {
 		case "cache":
 			cache = a.Value.Bool()
+		case "layer":
+			layer = a.Value.String()
 		case "run_id":
 			rid = a.Value.String()
 		}
 		return true
 	})
 
-	// Get caller info
-	caller := ""
-	if r.PC != 0 {
-		fs := runtime.CallersFrames([]uintptr{r.PC})
-		if f, ok := fs.Next(); ok {
-			file := f.File
-			if idx := strings.LastIndex(file, "/"); idx >= 0 {
-				file = file[idx+1:]
-			}
-			caller = fmt.Sprintf("%s:%d", file, f.Line)
-		}
-	}
-
 	// Write fixed-schema JSON
 	// Escape msg for JSON
 	msgJSON := strings.ReplaceAll(r.Message, `\`, `\\`)
 	msgJSON = strings.ReplaceAll(msgJSON, `"`, `\"`)
 
-	line := fmt.Sprintf(`{"time":"%s","level":"%s","msg":"%s","cache":%t,"caller":"%s","run_id":"%s"}`,
+	line := fmt.Sprintf(`{"time":"%s","level":"%s","msg":"%s","cache":%t,"layer":"%s","run_id":"%s"}`,
 		r.Time.Format(time.RFC3339Nano),
 		r.Level.String(),
 		msgJSON,
 		cache,
-		caller,
+		layer,
 		rid,
 	)
 	fmt.Fprintln(h.w, line)

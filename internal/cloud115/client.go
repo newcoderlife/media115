@@ -187,7 +187,7 @@ func (c *Client) ResolvePath(path string) (string, error) {
 	if cid, ts, ok := c.cache.GetPath(path); ok {
 		age := time.Now().Unix() - ts
 		if age < int64(c.pathTTL.Seconds()) {
-			logging.CacheLog(c.logger, slog.LevelDebug, fmt.Sprintf("cache.hit resolve %s → cid=%s age=%ds", path, cid, age))
+			logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("resolve %s → cid=%s age=%ds", path, cid, age), true, "cache")
 			if c.stats != nil {
 				c.stats.Incr("cache_hit")
 			}
@@ -204,7 +204,7 @@ func (c *Client) ResolvePath(path string) (string, error) {
 		return "", fmt.Errorf("path not found on 115: %s", path)
 	}
 	c.cache.SetPath(path, cid)
-	logging.CacheLog(c.logger, slog.LevelDebug, fmt.Sprintf("cache.miss resolve %s → api cid=%s", path, cid))
+	logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("resolve %s → api cid=%s", path, cid), false, "cache")
 	if c.stats != nil {
 		c.stats.Incr("cache_miss")
 	}
@@ -227,7 +227,7 @@ func (c *Client) listDirByCID(cid, label string) ([]Entry, error) {
 		age := time.Now().Unix() - ts
 		if age < int64(c.listingTTL.Seconds()) {
 			entries := c.cache.GetDirEntries(cid)
-			logging.CacheLog(c.logger, slog.LevelDebug, fmt.Sprintf("cache.hit list_dir %s cid=%s age=%ds", label, cid, age))
+			logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("list_dir %s cid=%s age=%ds", label, cid, age), true, "cache")
 			if c.stats != nil {
 				c.stats.Incr("cache_hit")
 			}
@@ -244,7 +244,7 @@ func (c *Client) listDirByCID(cid, label string) ([]Entry, error) {
 		entries = append(entries, normalizeItem(item))
 	}
 	c.cache.SetDirListing(cid, entries)
-	logging.CacheLog(c.logger, slog.LevelDebug, fmt.Sprintf("cache.miss list_dir %s cid=%s → %d items", label, cid, len(entries)))
+	logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("list_dir %s cid=%s → %d items", label, cid, len(entries)), false, "cache")
 	if c.stats != nil {
 		c.stats.Incr("cache_miss")
 	}
@@ -309,7 +309,7 @@ func (c *Client) ListDirUncached(path string) ([]Entry, error) {
 
 // DownloadURL returns the download URL for a pick code (direct API, no cache).
 func (c *Client) DownloadURL(pickCode, userAgent string) (string, error) {
-	logging.APILog(c.logger, slog.LevelDebug, fmt.Sprintf("api.download pick_code=%s", pickCode))
+	logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("download pick_code=%s", pickCode), false, "client")
 	if c.stats != nil {
 		c.stats.Incr("api")
 	}
@@ -429,7 +429,7 @@ func (c *Client) Mkdir(path string, parents bool) (string, error) {
 	if newCID == "" || newCID == "0" {
 		newCID = formatNum(result["aid"])
 	}
-	logging.APILog(c.logger, slog.LevelInfo, fmt.Sprintf("api.mkdir %s parent_cid=%s → new_cid=%s", path, parentCID, newCID))
+	logging.Log(c.logger, slog.LevelInfo, fmt.Sprintf("mkdir %s parent_cid=%s → new_cid=%s", path, parentCID, newCID), false, "client")
 	if c.stats != nil {
 		c.stats.Incr("api")
 	}
@@ -442,7 +442,7 @@ func (c *Client) Mkdir(path string, parents bool) (string, error) {
 		CID:    newCID,
 	})
 	c.cache.SetPath(path, newCID)
-	logging.CacheLog(c.logger, slog.LevelDebug, fmt.Sprintf("cache.write add_entry cid=%s name=%s type=dir", parentCID, name))
+	logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("write add_entry cid=%s name=%s type=dir", parentCID, name), true, "cache")
 	return newCID, nil
 }
 
@@ -481,7 +481,7 @@ func (c *Client) mkdirParents(path string) (string, error) {
 			CID:    newCID,
 		})
 		c.cache.SetPath(currentPath, newCID)
-		logging.APILog(c.logger, slog.LevelInfo, fmt.Sprintf("api.mkdir %s parent_cid=%s → new_cid=%s", currentPath, currentCID, newCID))
+		logging.Log(c.logger, slog.LevelInfo, fmt.Sprintf("mkdir %s parent_cid=%s → new_cid=%s", currentPath, currentCID, newCID), false, "client")
 		if c.stats != nil {
 			c.stats.Incr("api")
 		}
@@ -520,7 +520,7 @@ func (c *Client) Rename(path, newName string) error {
 	if _, err := c.api.Rename(e.NodeID, newName); err != nil {
 		return fmt.Errorf("rename %s: %w", path, err)
 	}
-	logging.APILog(c.logger, slog.LevelInfo, fmt.Sprintf("api.rename %s node_id=%s → new_name=%s", path, e.NodeID, newName))
+	logging.Log(c.logger, slog.LevelInfo, fmt.Sprintf("rename %s node=%s → %s", path, e.NodeID, newName), false, "client")
 	if c.stats != nil {
 		c.stats.Incr("api")
 	}
@@ -532,7 +532,7 @@ func (c *Client) Rename(path, newName string) error {
 		newPath := strings.TrimRight(parentPath, "/") + "/" + newName
 		c.cache.SetPath(newPath, e.NodeID)
 	}
-	logging.CacheLog(c.logger, slog.LevelDebug, fmt.Sprintf("cache.write rename_entry cid=%s node_id=%s new_name=%s", parentCID, e.NodeID, newName))
+	logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("write rename cid=%s node=%s → %s", parentCID, e.NodeID, newName), true, "cache")
 	return nil
 }
 
@@ -590,7 +590,7 @@ func (c *Client) Delete(paths []string) error {
 	if _, err := c.api.Delete(ids); err != nil {
 		return fmt.Errorf("delete: %w", err)
 	}
-	logging.APILog(c.logger, slog.LevelInfo, fmt.Sprintf("api.delete %d items", len(ids)))
+	logging.Log(c.logger, slog.LevelInfo, fmt.Sprintf("delete %d items", len(ids)), false, "client")
 	if c.stats != nil {
 		c.stats.Incr("api")
 	}
@@ -602,7 +602,7 @@ func (c *Client) Delete(paths []string) error {
 		if r.isDir && r.nodeID != "" {
 			c.cache.InvalidateDir(r.nodeID)
 		}
-		logging.CacheLog(c.logger, slog.LevelDebug, fmt.Sprintf("cache.write remove_entry cid=%s name=%s", r.parentCID, r.name))
+		logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("write remove cid=%s name=%s", r.parentCID, r.name), true, "cache")
 	}
 	return nil
 }
@@ -613,7 +613,7 @@ func (c *Client) DeleteByIDs(fids []string, refreshDirs []string) error {
 	if len(fids) == 0 {
 		return nil
 	}
-	logging.APILog(c.logger, slog.LevelInfo, fmt.Sprintf("api.delete %d items (by id)", len(fids)))
+	logging.Log(c.logger, slog.LevelInfo, fmt.Sprintf("delete %d items", len(fids)), false, "client")
 	if c.stats != nil {
 		c.stats.Incr("api")
 	}
@@ -676,7 +676,7 @@ func (c *Client) Move(srcPaths []string, destPath string) error {
 	if _, err := c.api.Move(fids, destCID); err != nil {
 		return fmt.Errorf("move: %w", err)
 	}
-	logging.APILog(c.logger, slog.LevelInfo, fmt.Sprintf("api.move %d items dest_cid=%s", len(fids), destCID))
+	logging.Log(c.logger, slog.LevelInfo, fmt.Sprintf("move %d items → %s", len(fids), destPath), false, "client")
 	if c.stats != nil {
 		c.stats.Incr("api")
 	}
@@ -688,7 +688,7 @@ func (c *Client) Move(srcPaths []string, destPath string) error {
 			newPath := strings.TrimRight(destPath, "/") + "/" + src.name
 			c.cache.SetPath(newPath, src.entry.NodeID)
 		}
-		logging.CacheLog(c.logger, slog.LevelDebug, fmt.Sprintf("cache.write move_entry src=%s dest_cid=%s", src.path, destCID))
+		logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("write remove cid=%s name=%s", src.parentCID, src.name), true, "cache")
 	}
 	return nil
 }
@@ -741,14 +741,14 @@ func (c *Client) BatchRename(renames []BatchRenameItem) error {
 	if _, err := c.api.BatchRename(apiRenames); err != nil {
 		return fmt.Errorf("batch_rename: %w", err)
 	}
-	logging.APILog(c.logger, slog.LevelInfo, fmt.Sprintf("api.batch_rename %d items", len(apiRenames)))
+	logging.Log(c.logger, slog.LevelInfo, fmt.Sprintf("rename %d items (batch)", len(apiRenames)), false, "client")
 	if c.stats != nil {
 		c.stats.Incr("api")
 	}
 
 	for _, inf := range infos {
 		c.cache.RenameEntry(inf.parentCID, inf.nodeID, inf.newName)
-		logging.CacheLog(c.logger, slog.LevelDebug, fmt.Sprintf("cache.write rename_entry cid=%s node_id=%s new_name=%s", inf.parentCID, inf.nodeID, inf.newName))
+		logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("write rename cid=%s node=%s → %s", inf.parentCID, inf.nodeID, inf.newName), true, "cache")
 	}
 	return nil
 }
@@ -769,7 +769,7 @@ func (c *Client) Upload(localPath, remoteDir, filename string) (map[string]any, 
 	if err != nil {
 		return nil, fmt.Errorf("upload: %w", err)
 	}
-	logging.APILog(c.logger, slog.LevelInfo, fmt.Sprintf("api.upload %s cid=%s", filename, cid))
+	logging.Log(c.logger, slog.LevelInfo, fmt.Sprintf("upload %s → %s", filename, remoteDir), false, "client")
 	if c.stats != nil {
 		c.stats.Incr("api")
 	}
@@ -797,14 +797,14 @@ func (c *Client) Upload(localPath, remoteDir, filename string) (map[string]any, 
 				Size:     size,
 				PickCode: pickCode,
 			})
-			logging.CacheLog(c.logger, slog.LevelDebug, fmt.Sprintf("cache.write add_entry cid=%s name=%s type=file fid=%v", cid, filename, fid))
+			logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("write add_entry cid=%s name=%s type=file", cid, filename), true, "cache")
 		} else {
 			c.cache.DeleteDirMeta(cid)
-			logging.CacheLog(c.logger, slog.LevelDebug, fmt.Sprintf("cache.write delete_dir_meta cid=%s", cid))
+			logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("write remove cid=%s name=%s", cid, filename), true, "cache")
 		}
 	} else {
 		c.cache.DeleteDirMeta(cid)
-		logging.CacheLog(c.logger, slog.LevelDebug, fmt.Sprintf("cache.write delete_dir_meta cid=%s", cid))
+		logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("write remove cid=%s name=%s", cid, filename), true, "cache")
 	}
 
 	return data, nil
@@ -872,14 +872,14 @@ func (c *Client) RapidUpload(localPath, remoteDir string) (*RapidResult, error) 
 	}
 	pickCode, _ := result["pickcode"].(string)
 
-	logging.APILog(c.logger, slog.LevelInfo, fmt.Sprintf("api.rapid_upload %s cid=%s status=%d", filename, cid, status))
+	logging.Log(c.logger, slog.LevelInfo, fmt.Sprintf("upload %s → %s (rapid status=%d)", filename, remoteDir, status), false, "client")
 	if c.stats != nil {
 		c.stats.Incr("api")
 	}
 
 	if status == 2 {
 		c.cache.DeleteDirMeta(cid)
-		logging.CacheLog(c.logger, slog.LevelDebug, fmt.Sprintf("cache.write delete_dir_meta cid=%s", cid))
+		logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("write remove cid=%s name=%s", cid, filename), true, "cache")
 	}
 
 	return &RapidResult{Status: status, PickCode: pickCode}, nil
@@ -945,7 +945,7 @@ func (c *Client) RefreshDir(path string) ([]Entry, error) {
 		entries = append(entries, normalizeItem(item))
 	}
 	c.cache.SetDirListing(cid, entries)
-	logging.APILog(c.logger, slog.LevelDebug, fmt.Sprintf("api.refresh list_dir %s cid=%s → %d items", path, cid, len(entries)))
+	logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("list_dir %s cid=%s → %d items (refresh)", path, cid, len(entries)), false, "client")
 	return entries, nil
 }
 
