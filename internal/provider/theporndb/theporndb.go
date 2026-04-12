@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bytedance/gg/gconv"
 	"github.com/newcoderlife/media115/internal/scraper"
 )
 
@@ -55,7 +56,7 @@ func (p *Provider) Search(query string, opts scraper.SearchOpts) ([]scraper.Sear
 	}
 	var results []scraper.SearchResult
 	for _, s := range scenes {
-		id := fmt.Sprintf("%v", s["id"])
+		id := gconv.To[string, any](s["id"])
 		title := stringVal(s, "title")
 		yr := yearFromDate(stringVal(s, "date"))
 		results = append(results, scraper.SearchResult{ID: id, Title: title, Year: yr})
@@ -187,7 +188,7 @@ func buildMetadata(scene map[string]any) *scraper.Metadata {
 		UniqueIDs: map[string]string{},
 	}
 
-	if id := fmt.Sprintf("%v", scene["id"]); id != "" && id != "<nil>" {
+	if id := gconv.To[string, any](scene["id"]); id != "" {
 		m.UniqueIDs["theporndb"] = id
 	}
 
