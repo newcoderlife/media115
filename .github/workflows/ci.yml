@@ -26,7 +26,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: go test ./... -timeout 30s -count=1 -race
+      - run: go test ./... -timeout 30s -count=1 -race -coverprofile=coverage.out
+      - uses: codecov/codecov-action@v5
+        with:
+          files: coverage.out
 
   build:
     runs-on: ubuntu-latest
