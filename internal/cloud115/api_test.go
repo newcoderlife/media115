@@ -12,7 +12,7 @@ import (
 // newTestAPI builds an API pointed at the given server URL with nil cache and logger.
 // It sets the host by replacing WebAPI/ProAPI in the target URL via a custom transport.
 func newTestAPI(serverURL string) *API {
-	a := NewAPI("UID=12345_test; CID=abc", nil, nil)
+	a := NewAPI("UID=12345_test; CID=abc", nil)
 	// Override the http client to redirect all requests to our test server.
 	a.http = &http.Client{
 		Transport: &redirectTransport{target: serverURL},
@@ -303,7 +303,7 @@ func TestAPIUserIDExtraction(t *testing.T) {
 		{"no-uid-cookie", ""},
 	}
 	for _, tc := range tests {
-		a := NewAPI(tc.cookies, nil, nil)
+		a := NewAPI(tc.cookies, nil)
 		if a.userID != tc.wantUID {
 			t.Errorf("cookies=%q: userID=%q; want %q", tc.cookies, a.userID, tc.wantUID)
 		}

@@ -50,10 +50,11 @@ func (s *Stats) Summary() string {
 		s.APICalls, s.CacheHits, s.CacheMiss, elapsed)
 }
 
-// Setup creates a logger with console + JSON file handlers.
+// Setup creates a logger with console + JSON file handlers and sets it as the
+// global default via slog.SetDefault.
 // Console: prints only msg to stderr (Info default, Debug if verbose).
 // File: JSON with time/level/msg/layer/run_id to ~/.cache/cloud115/logs.
-func Setup(verbose bool) (*slog.Logger, *Stats) {
+func Setup(verbose bool) *Stats {
 	stats := &Stats{StartTime: time.Now()}
 
 	consoleLevel := slog.LevelInfo
@@ -76,11 +77,14 @@ func Setup(verbose bool) (*slog.Logger, *Stats) {
 		handler = &multiHandler{console: console, file: file, fileRef: f}
 	}
 
-	return slog.New(handler), stats
+	logger := slog.New(handler)
+	slog.SetDefault(logger)
+	return stats
 }
 
-// Log emits a structured log message.
-func Log(logger *slog.Logger, level slog.Level, msg string, layer string) {
+// Log emits a structured log message using the global slog.Default() logger.
+func Log(level slog.Level, msg string, layer string) {
+	logger := slog.Default()
 	if !logger.Enabled(context.Background(), level) {
 		return
 	}

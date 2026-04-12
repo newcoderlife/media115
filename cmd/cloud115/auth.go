@@ -27,7 +27,7 @@ var authCmd = &cobra.Command{
 	Short: "115 网盘登录认证",
 	Long:  "通过二维码登录 115 网盘并保存 cookies。",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger, _ := logging.Setup(verbose)
+		logging.Setup(verbose)
 
 		if authCheck {
 			cfg, err := config.Load()
@@ -38,7 +38,7 @@ var authCmd = &cobra.Command{
 				fmt.Println("未登录（无 cookies）。请先运行: cloud115 auth")
 				return nil
 			}
-			client, err := cloud115.NewClient(cfg.Auth.Cookies, cloud115.WithLogger(logger))
+			client, err := cloud115.NewClient(cfg.Auth.Cookies)
 			if err != nil {
 				return err
 			}
@@ -59,7 +59,7 @@ var authCmd = &cobra.Command{
 			if cfg.Auth.Cookies == "" {
 				return fmt.Errorf("无已有 cookies，请先运行 cloud115 auth 登录")
 			}
-			client, err := cloud115.NewClient(cfg.Auth.Cookies, cloud115.WithLogger(logger))
+			client, err := cloud115.NewClient(cfg.Auth.Cookies)
 			if err != nil {
 				return err
 			}
@@ -77,7 +77,7 @@ var authCmd = &cobra.Command{
 
 		// --get-qr: generate QR token, print URL, save session, exit.
 		if authGetQR {
-			tmpClient, err := cloud115.NewClient("", cloud115.WithLogger(logger))
+			tmpClient, err := cloud115.NewClient("")
 			if err != nil {
 				return fmt.Errorf("初始化 client: %w", err)
 			}
@@ -109,7 +109,7 @@ var authCmd = &cobra.Command{
 			if err := json.Unmarshal(data, &sess); err != nil {
 				return fmt.Errorf("解析 QR session 失败: %w", err)
 			}
-			tmpClient, err := cloud115.NewClient("", cloud115.WithLogger(logger))
+			tmpClient, err := cloud115.NewClient("")
 			if err != nil {
 				return fmt.Errorf("初始化 client: %w", err)
 			}
@@ -134,7 +134,7 @@ var authCmd = &cobra.Command{
 		if !authForce {
 			cfg, err := config.Load()
 			if err == nil && cfg.Auth.Cookies != "" {
-				existingClient, cerr := cloud115.NewClient(cfg.Auth.Cookies, cloud115.WithLogger(logger))
+				existingClient, cerr := cloud115.NewClient(cfg.Auth.Cookies)
 				if cerr == nil {
 					defer existingClient.Close()
 					if existingClient.CheckLogin() {
@@ -146,7 +146,7 @@ var authCmd = &cobra.Command{
 		}
 
 		// Do QR login
-		tmpClient, err := cloud115.NewClient("", cloud115.WithLogger(logger))
+		tmpClient, err := cloud115.NewClient("")
 		if err != nil {
 			return fmt.Errorf("初始化 client: %w", err)
 		}

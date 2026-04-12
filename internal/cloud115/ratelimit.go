@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/newcoderlife/media115/internal/logging"
 )
 
 // RateLimiter enforces QPS and QPM limits, persisting state to SQLite via Cache.
@@ -19,10 +21,10 @@ type RateLimiter struct {
 }
 
 // NewRateLimiter creates a RateLimiter.
-// name   – key used in the rate_limit table (e.g. "api", "download").
-// qps    – target queries per second (e.g. 0.5 means one request every 2 s).
-// qpm    – maximum requests per rolling 60-second window.
-// cache  – pass nil to disable persistence (no blocking beyond mutex).
+// name  – key used in the rate_limit table (e.g. "api", "download").
+// qps   – target queries per second (e.g. 0.5 means one request every 2 s).
+// qpm   – maximum requests per rolling 60-second window.
+// cache – pass nil to disable persistence (no blocking beyond mutex).
 func NewRateLimiter(name string, qps float64, qpm int, cache *Cache) *RateLimiter {
 	return &RateLimiter{
 		name:  name,
@@ -54,7 +56,7 @@ func (r *RateLimiter) SetCooldown(seconds float64) {
 	}
 	until := float64(time.Now().Unix()) + seconds
 	r.cache.SetRateLimit(r.name, RateLimitState{CooldownUntil: until})
-	slog.Warn("COOLDOWN", "limiter", r.name, "seconds", int(seconds), "until", until)
+	logging.Log(slog.LevelWarn, fmt.Sprintf("COOLDOWN limiter=%s seconds=%d until=%.0f", r.name, int(seconds), until), "api")
 }
 
 // waitForSlot loops until a slot is available or a cooldown error is returned.
@@ -101,21 +103,12 @@ func (r *RateLimiter) waitForSlot() error {
 			if waitDuration < 0 {
 				waitDuration = 0.1
 			}
-			slog.Debug("THROTTLE QPM",
-				"limiter", r.name,
-				"qpm", r.qpm,
-				"count", state.MinuteCount,
-				"wait_s", fmt.Sprintf("%.1f", waitDuration),
-			)
+			logging.Log(slog.LevelDebug, fmt.Sprintf("THROTTLE QPM limiter=%s qpm=%d count=%d wait_s=%.1f", r.name, r.qpm, state.MinuteCount, waitDuration), "api")
 		} else {
 			// QPS too fast?
 			waitDuration = minInterval - (now - state.LastRequest)
 			if waitDuration > 0 {
-				slog.Debug("THROTTLE QPS",
-					"limiter", r.name,
-					"qps", r.qps,
-					"wait_s", fmt.Sprintf("%.1f", waitDuration),
-				)
+				logging.Log(slog.LevelDebug, fmt.Sprintf("THROTTLE QPS limiter=%s qps=%.2f wait_s=%.1f", r.name, r.qps, waitDuration), "api")
 			} else {
 				// Edge case: slot not obtained yet but no obvious reason — brief pause.
 				waitDuration = 0.05
