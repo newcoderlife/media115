@@ -34,14 +34,14 @@ go install github.com/newcoderlife/media115/cmd/media115@latest
 Install skills for your AI coding agent:
 
 ```bash
-# Install for all agents (Claude Code + Cursor/Codex/OpenCode)
-curl -fsSL https://raw.githubusercontent.com/newcoderlife/media115/master/install-skills.sh | sh
+# Claude Code (~/.claude/skills/)
+curl -fsSL https://raw.githubusercontent.com/newcoderlife/media115/master/install.sh | sh -s -- --skill --agent claude
 
-# Claude Code only (~/.claude/skills/)
-curl -fsSL https://raw.githubusercontent.com/newcoderlife/media115/master/install-skills.sh | sh -s -- -a claude
+# Cursor / Codex / OpenCode (~/.agents/skills/)
+curl -fsSL https://raw.githubusercontent.com/newcoderlife/media115/master/install.sh | sh -s -- --skill --agent agents
 
-# Cursor/Codex/OpenCode only (~/.agents/skills/)
-curl -fsSL https://raw.githubusercontent.com/newcoderlife/media115/master/install-skills.sh | sh -s -- -a agents
+# All agents
+curl -fsSL https://raw.githubusercontent.com/newcoderlife/media115/master/install.sh | sh -s -- --skill --agent all
 ```
 
 ## Quick Start
