@@ -9,10 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/newcoderlife/media115/internal/cloud115"
 	"github.com/newcoderlife/media115/internal/config"
 	"github.com/newcoderlife/media115/internal/organizer"
-	"github.com/spf13/cobra"
 )
 
 var organizeCmd = &cobra.Command{

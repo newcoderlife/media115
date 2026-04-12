@@ -6,9 +6,10 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"github.com/newcoderlife/media115/internal/cloud115"
 	"github.com/newcoderlife/media115/internal/scraper"
-	"github.com/spf13/cobra"
 )
 
 // loadCases tries to load scrape_cases.json from the media115 cache dir.

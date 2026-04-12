@@ -7,9 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/newcoderlife/media115/internal/provider/tmdb"
 	"github.com/newcoderlife/media115/internal/scraper"
-	"github.com/spf13/cobra"
 )
 
 var scrapeFixCmd = &cobra.Command{
@@ -226,7 +227,6 @@ Examples:
 		return nil
 	},
 }
-
 
 func init() {
 	scrapeFixCmd.Flags().Int("tmdb-id", 0, "指定 TMDB ID")

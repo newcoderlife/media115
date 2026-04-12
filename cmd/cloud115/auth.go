@@ -6,20 +6,21 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/spf13/cobra"
+
 	"github.com/newcoderlife/media115/internal/cloud115"
 	"github.com/newcoderlife/media115/internal/config"
 	"github.com/newcoderlife/media115/internal/logging"
-	"github.com/spf13/cobra"
 )
 
 var (
-	authCheck   bool
-	authRenew   bool
-	authQR      bool
-	authForce   bool
-	authApp     string
-	authGetQR   bool
-	authWaitQR  bool
+	authCheck  bool
+	authRenew  bool
+	authQR     bool
+	authForce  bool
+	authApp    string
+	authGetQR  bool
+	authWaitQR bool
 )
 
 var authCmd = &cobra.Command{

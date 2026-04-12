@@ -64,10 +64,10 @@ func TestSceneDetail(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(graphqlResponse(map[string]any{
 			"findScene": map[string]any{
-				"id":      "scene-xyz",
-				"title":   "Detailed Scene",
-				"date":    "2023-11-01",
-				"details": "Full scene description",
+				"id":       "scene-xyz",
+				"title":    "Detailed Scene",
+				"date":     "2023-11-01",
+				"details":  "Full scene description",
 				"duration": float64(2700), // 45 minutes in seconds
 				"studio":   map[string]any{"name": "Premium Studio"},
 				"performers": []any{

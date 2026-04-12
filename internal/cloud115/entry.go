@@ -3,12 +3,12 @@ package cloud115
 // Entry represents a single file or directory returned by the cloud API.
 type Entry struct {
 	Name     string `json:"name"`
-	Type     string `json:"type"`               // "dir" or "file"
+	Type     string `json:"type"` // "dir" or "file"
 	NodeID   string `json:"node_id"`
 	Size     int64  `json:"size,omitempty"`
 	PickCode string `json:"pick_code,omitempty"`
-	CID      string `json:"cid,omitempty"`  // convenience: same as NodeID for dirs
-	FID      string `json:"fid,omitempty"`  // convenience: same as NodeID for files
+	CID      string `json:"cid,omitempty"` // convenience: same as NodeID for dirs
+	FID      string `json:"fid,omitempty"` // convenience: same as NodeID for files
 }
 
 // TreeEntry represents a single node in the cloud file tree snapshot.

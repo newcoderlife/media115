@@ -8,8 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/newcoderlife/media115/internal/config"
 	_ "modernc.org/sqlite" // register "sqlite" driver
+
+	"github.com/newcoderlife/media115/internal/config"
 )
 
 const schemaVersion = 3
@@ -470,6 +471,9 @@ func (c *Cache) GetTreeEntries(category string) []TreeEntry {
 		e.IsNFO = isNFO != 0
 		out = append(out, e)
 	}
+	if err := rows.Err(); err != nil {
+		return nil
+	}
 	if out == nil {
 		out = []TreeEntry{}
 	}
@@ -498,6 +502,7 @@ func (c *Cache) GetSnapshotMeta() SnapshotMeta {
 			kv[k] = v
 		}
 	}
+	_ = rows.Err()
 	return SnapshotMeta{
 		RootPath:   kv["root_path"],
 		ExportedAt: kv["exported_at"],
@@ -564,6 +569,7 @@ func (c *Cache) Stats() CacheStats {
 				s.RateLimit[name] = state
 			}
 		}
+		_ = rows.Err()
 	}
 	if s.RateLimit == nil {
 		s.RateLimit = make(map[string]RateLimitState)
@@ -630,6 +636,7 @@ func scanEntries(rows *sql.Rows) []Entry {
 		}
 		out = append(out, e)
 	}
+	_ = rows.Err()
 	if out == nil {
 		out = []Entry{}
 	}

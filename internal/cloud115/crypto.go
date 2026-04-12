@@ -84,8 +84,8 @@ func rsaEncryptSlice(segment []byte) []byte {
 		pad[i] = b[0]
 	}
 	pad[padSize-1] = 0x00
-	padded := append(pad, segment...)
-	msg := new(big.Int).SetBytes(padded)
+	pad = append(pad, segment...)
+	msg := new(big.Int).SetBytes(pad)
 	ct := new(big.Int).Exp(msg, rsaE, rsaN)
 	out := make([]byte, rsaKeyLen)
 	ct.FillBytes(out)

@@ -66,7 +66,7 @@ func Setup(verbose bool) *Stats {
 
 	// File handler
 	logPath := logFilePath()
-	os.MkdirAll(filepath.Dir(logPath), 0o755)
+	_ = os.MkdirAll(filepath.Dir(logPath), 0o755)
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 
 	var handler slog.Handler
@@ -91,7 +91,7 @@ func Log(level slog.Level, msg string, layer string) {
 	r := slog.NewRecord(time.Now(), level, msg, 0)
 	r.Add("layer", layer)
 	r.Add("run_id", runID)
-	logger.Handler().Handle(context.Background(), r)
+	_ = logger.Handler().Handle(context.Background(), r)
 }
 
 func logFilePath() string {
@@ -116,12 +116,12 @@ func (h *consoleHandler) Enabled(_ context.Context, level slog.Level) bool {
 
 func (h *consoleHandler) Handle(_ context.Context, r slog.Record) error {
 	if r.Level == slog.LevelDebug {
-		fmt.Fprintf(h.w, "  %s\n", r.Message)
+		_, _ = fmt.Fprintf(h.w, "  %s\n", r.Message)
 	} else if r.Level >= slog.LevelWarn {
-		fmt.Fprintf(h.w, "[%s] %s\n", r.Level.String(), r.Message)
+		_, _ = fmt.Fprintf(h.w, "[%s] %s\n", r.Level.String(), r.Message)
 	} else {
 		// Info — clean output
-		fmt.Fprintf(h.w, "%s\n", r.Message)
+		_, _ = fmt.Fprintf(h.w, "%s\n", r.Message)
 	}
 	return nil
 }
@@ -170,7 +170,7 @@ func (h *jsonFileHandler) Handle(_ context.Context, r slog.Record) error {
 		layer,
 		rid,
 	)
-	fmt.Fprintln(h.w, line)
+	_, _ = fmt.Fprintln(h.w, line)
 
 	if h.f != nil {
 		_ = h.f.Sync()
@@ -190,7 +190,7 @@ type multiHandler struct {
 }
 
 func (m *multiHandler) Enabled(_ context.Context, level slog.Level) bool {
-	return m.console.Enabled(nil, level) || m.file.Enabled(nil, level)
+	return m.console.Enabled(context.Background(), level) || m.file.Enabled(context.Background(), level)
 }
 
 func (m *multiHandler) Handle(ctx context.Context, r slog.Record) error {
