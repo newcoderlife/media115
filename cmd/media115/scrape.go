@@ -102,8 +102,7 @@ Use --limit N to scrape only the first N files.`,
 			return fmt.Errorf("创建输出目录失败: %w", err)
 		}
 
-		logging.Log(slog.LevelInfo, fmt.Sprintf("scrape start: %d files in %s", len(videos), category), "scraper")
-		fmt.Printf("刮削 %d 个文件 '%s' → %s\n", len(videos), category, outDir)
+		logging.Log(slog.LevelInfo, fmt.Sprintf("scrape start: %d files in %s → %s", len(videos), category, outDir), "scraper")
 
 		type result struct {
 			File      string `json:"file"`
@@ -130,8 +129,7 @@ Use --limit N to scrape only the first N files.`,
 				continue
 			}
 
-			pct := 100 * (i + 1) / len(videos)
-			fmt.Printf("  [%d/%d %d%%] %s ...", i+1, len(videos), pct, trunc(name, 60))
+			logging.Log(slog.LevelDebug, fmt.Sprintf("[%d/%d] %s analyzing...", i+1, len(videos), trunc(name, 60)), "scraper")
 
 			season := analysis.Season
 			if (analysis.MediaType == "tv" || analysis.MediaType == "anime") && season == 0 {
@@ -152,7 +150,7 @@ Use --limit N to scrape only the first N files.`,
 			case "movie", "unknown":
 				mediaType = "movie"
 			default:
-				fmt.Printf(" skipped (%s)\n", analysis.MediaType)
+				logging.Log(slog.LevelDebug, fmt.Sprintf("[%d/%d] %s skipped (%s)", i+1, len(videos), trunc(name, 40), analysis.MediaType), "scraper")
 				results = append(results, result{File: name, Status: "skip"})
 				skipCount++
 				continue
@@ -167,7 +165,7 @@ Use --limit N to scrape only the first N files.`,
 			// Check not_found cache (skip re-scraping recently failed titles).
 			if !force && scrapeIsNotFound(cacheSource, stemName) {
 				r.Status = "not_found"
-				fmt.Printf(" not_found (cached)\n")
+				logging.Log(slog.LevelDebug, fmt.Sprintf("[%d/%d] %s not_found (cached)", i+1, len(videos), trunc(name, 40)), "scraper")
 				failCount++
 				results = append(results, r)
 				continue
@@ -197,7 +195,7 @@ Use --limit N to scrape only the first N files.`,
 						if r.SourceID == "" {
 							r.SourceID = fakeSR.IDs["number"]
 						}
-						fmt.Printf(" → %s (%s) (cached)\n", r.Match, r.SourceID)
+						logging.Log(slog.LevelDebug, fmt.Sprintf("[%d/%d] %s → %s (%s) (cached)", i+1, len(videos), trunc(name, 40), r.Match, r.SourceID), "scraper")
 						okCount++
 						// Rebuild file_map from cached data.
 						saveFileMap(stemName, mediaType, analysis.Title, fakeSR)
@@ -217,7 +215,6 @@ Use --limit N to scrape only the first N files.`,
 					r.SourceID = sr.IDs["number"]
 				}
 				logging.Log(slog.LevelInfo, fmt.Sprintf("[%d/%d] %s → %s (%s)", i+1, len(videos), trunc(name, 40), sr.Match, r.SourceID), "scraper")
-				fmt.Printf(" → %s (%s)\n", sr.Match, r.SourceID)
 				okCount++
 
 				// Save file_map cache entry
@@ -238,7 +235,6 @@ Use --limit N to scrape only the first N files.`,
 			} else if sr.Status == "not_found" {
 				r.Status = "not_found"
 				logging.Log(slog.LevelWarn, fmt.Sprintf("[%d/%d] %s not_found", i+1, len(videos), trunc(name, 40)), "scraper")
-				fmt.Printf(" not_found\n")
 				failCount++
 				// Cache the not_found result.
 				scrapePut(cacheSource, stemName, map[string]any{
@@ -249,14 +245,12 @@ Use --limit N to scrape only the first N files.`,
 				r.Status = "error"
 				r.Error = sr.Error
 				logging.Log(slog.LevelError, fmt.Sprintf("[%d/%d] %s error: %s", i+1, len(videos), trunc(name, 40), sr.Error), "scraper")
-				fmt.Printf(" error: %s\n", sr.Error)
 				failCount++
 			}
 			results = append(results, r)
 		}
 
 		logging.Log(slog.LevelInfo, fmt.Sprintf("scrape done: %d ok, %d fail, %d skip", okCount, failCount, skipCount), "scraper")
-		fmt.Printf("\n完成: %d 个刮削, %d 个失败, %d 个跳过\n", okCount, failCount, skipCount)
 
 		// Print review table
 		if len(results) > 0 {

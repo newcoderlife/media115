@@ -15,6 +15,7 @@ var rootCmd = &cobra.Command{
 	Use:   "media115",
 	Short: "Media management CLI for 115 cloud drive",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		logging.SetAppName("media115")
 		logging.Setup(verbose)
 	},
 }
