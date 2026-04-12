@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	cloud115 "github.com/newcoderlife/media115/internal/cloud115"
 	"github.com/newcoderlife/media115/internal/config"
 	"github.com/newcoderlife/media115/internal/scraper"
 	"github.com/spf13/cobra"
@@ -38,13 +39,21 @@ Use --limit N to scrape only the first N files.`,
 		}
 		registerProviders(cfg)
 
-		entries, err := getTreeEntries(category)
+		allEntries, err := getTreeEntries("")
 		if err != nil {
 			return fmt.Errorf("读取树缓存失败: %w", err)
 		}
-		if len(entries) == 0 {
+		if len(allEntries) == 0 {
 			fmt.Println("无树缓存。请先运行: cloud115 sync /影音")
 			return nil
+		}
+
+		// Filter by category (path contains /category/)
+		var entries []cloud115.TreeEntry
+		for _, e := range allEntries {
+			if strings.Contains("/"+e.Path+"/", "/"+category+"/") {
+				entries = append(entries, e)
+			}
 		}
 
 		// Filter to videos in the requested category.
