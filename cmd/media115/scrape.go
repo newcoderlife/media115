@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	cloud115 "github.com/newcoderlife/media115/internal/cloud115"
-	"github.com/newcoderlife/media115/internal/config"
+	"github.com/newcoderlife/media115/internal/logging"
 	"github.com/newcoderlife/media115/internal/scraper"
 )
 
@@ -101,6 +102,7 @@ Use --limit N to scrape only the first N files.`,
 			return fmt.Errorf("创建输出目录失败: %w", err)
 		}
 
+		logging.Log(slog.LevelInfo, fmt.Sprintf("scrape start: %d files in %s", len(videos), category), "scraper")
 		fmt.Printf("刮削 %d 个文件 '%s' → %s\n", len(videos), category, outDir)
 
 		type result struct {
@@ -214,6 +216,7 @@ Use --limit N to scrape only the first N files.`,
 				if r.SourceID == "" {
 					r.SourceID = sr.IDs["number"]
 				}
+				logging.Log(slog.LevelInfo, fmt.Sprintf("[%d/%d] %s → %s (%s)", i+1, len(videos), trunc(name, 40), sr.Match, r.SourceID), "scraper")
 				fmt.Printf(" → %s (%s)\n", sr.Match, r.SourceID)
 				okCount++
 
@@ -234,6 +237,7 @@ Use --limit N to scrape only the first N files.`,
 				scrapePut(cacheSource, stemName, cacheEntry)
 			} else if sr.Status == "not_found" {
 				r.Status = "not_found"
+				logging.Log(slog.LevelWarn, fmt.Sprintf("[%d/%d] %s not_found", i+1, len(videos), trunc(name, 40)), "scraper")
 				fmt.Printf(" not_found\n")
 				failCount++
 				// Cache the not_found result.
@@ -244,12 +248,14 @@ Use --limit N to scrape only the first N files.`,
 			} else {
 				r.Status = "error"
 				r.Error = sr.Error
+				logging.Log(slog.LevelError, fmt.Sprintf("[%d/%d] %s error: %s", i+1, len(videos), trunc(name, 40), sr.Error), "scraper")
 				fmt.Printf(" error: %s\n", sr.Error)
 				failCount++
 			}
 			results = append(results, r)
 		}
 
+		logging.Log(slog.LevelInfo, fmt.Sprintf("scrape done: %d ok, %d fail, %d skip", okCount, failCount, skipCount), "scraper")
 		fmt.Printf("\n完成: %d 个刮削, %d 个失败, %d 个跳过\n", okCount, failCount, skipCount)
 
 		// Print review table
@@ -393,59 +399,14 @@ func saveFileMap(filename, mediaType, query string, sr *scraper.ScrapeResult) {
 	}
 }
 
-// mediaCacheDir returns the media115 cache directory path.
-func mediaCacheDir() string {
-	return strings.Replace(config.CacheDir(), "cloud115", "media115", 1)
-}
-
-// ── Scrape result cache ───────────────────────────────────────────────────────
-
 const scrapeCacheTTLDays = 7
 
-// scrapeCachePath returns the path for a scrape cache entry.
-func scrapeCachePath(source, key string) string {
-	return filepath.Join(mediaCacheDir(), "scrape", source, key+".json")
-}
-
-// scrapeGet reads a cached scrape result. Returns nil if absent or unreadable.
-func scrapeGet(source, key string) map[string]any {
-	data, err := os.ReadFile(scrapeCachePath(source, key))
-	if err != nil {
-		return nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil
-	}
-	return m
-}
-
-// scrapePut writes a scrape result to cache.
-func scrapePut(source, key string, data map[string]any) {
-	p := scrapeCachePath(source, key)
-	_ = os.MkdirAll(filepath.Dir(p), 0o755)
-	if b, err := json.MarshalIndent(data, "", "  "); err == nil {
-		_ = os.WriteFile(p, b, 0o644)
-	}
-}
-
-// scrapeIsNotFound returns true if the cache entry exists with _not_found=true
-// and was stored within the last scrapeCacheTTLDays days.
+func mediaCacheDir() string                             { return scraper.CacheDir() }
+func scrapeCachePath(source, key string) string         { return scraper.CachePath(source, key) }
+func scrapeGet(source, key string) map[string]any       { return scraper.CacheGet(source, key) }
+func scrapePut(source, key string, data map[string]any) { scraper.CachePut(source, key, data) }
 func scrapeIsNotFound(source, key string) bool {
-	m := scrapeGet(source, key)
-	if m == nil {
-		return false
-	}
-	nf, _ := m["_not_found"].(bool)
-	if !nf {
-		return false
-	}
-	cachedAt, _ := m["_cached_at"].(float64)
-	if cachedAt == 0 {
-		return true // no timestamp, treat as expired? conservatively return true
-	}
-	age := time.Now().Unix() - int64(cachedAt)
-	return age < int64(scrapeCacheTTLDays*24*3600)
+	return scraper.CacheIsNotFound(source, key, scrapeCacheTTLDays)
 }
 
 func init() {
