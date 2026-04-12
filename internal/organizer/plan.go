@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/bytedance/gg/gconv"
 	"github.com/newcoderlife/media115/internal/cloud115"
 	"github.com/newcoderlife/media115/internal/config"
 )
@@ -326,18 +327,14 @@ func BuildPlan(category string, treeEntries []cloud115.TreeEntry, cacheGet func(
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func toInt(v any) int {
-	switch x := v.(type) {
-	case float64:
-		return int(x)
-	case int:
-		return x
-	case int64:
-		return int(x)
-	case json.Number:
-		n, _ := x.Int64()
-		return int(n)
+	// Handle date strings like "2023-01-15" by truncating to the year part.
+	if s, ok := v.(string); ok {
+		if len(s) > 4 && (s[4] == '-' || s[4] == '/') {
+			s = s[:4]
+		}
+		return gconv.To[int, string](s)
 	}
-	return 0
+	return gconv.To[int, any](v)
 }
 
 func itoa(n int) string {
@@ -349,13 +346,5 @@ func fmtSE(season, episode int) string {
 }
 
 func formatID(v any) string {
-	switch x := v.(type) {
-	case float64:
-		return fmt.Sprintf("%.0f", x)
-	case int:
-		return fmt.Sprintf("%d", x)
-	case string:
-		return x
-	}
-	return ""
+	return gconv.To[string, any](v)
 }

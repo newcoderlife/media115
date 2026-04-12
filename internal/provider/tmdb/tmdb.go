@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bytedance/gg/gconv"
 	"github.com/newcoderlife/media115/internal/scraper"
 )
 
@@ -593,20 +594,10 @@ func stringVal(m map[string]any, keys ...string) string {
 
 func intVal(m map[string]any, keys ...string) int {
 	for _, k := range keys {
-		v, ok := m[k]
-		if !ok {
-			continue
-		}
-		switch n := v.(type) {
-		case int:
-			return n
-		case int64:
-			return int(n)
-		case float64:
-			return int(n)
-		case json.Number:
-			i, _ := n.Int64()
-			return int(i)
+		if v, ok := m[k]; ok {
+			if n := gconv.To[int, any](v); n != 0 {
+				return n
+			}
 		}
 	}
 	return 0
@@ -614,16 +605,10 @@ func intVal(m map[string]any, keys ...string) int {
 
 func floatVal(m map[string]any, keys ...string) float64 {
 	for _, k := range keys {
-		v, ok := m[k]
-		if !ok {
-			continue
-		}
-		switch n := v.(type) {
-		case float64:
-			return n
-		case json.Number:
-			f, _ := n.Float64()
-			return f
+		if v, ok := m[k]; ok {
+			if f := gconv.To[float64, any](v); f != 0 {
+				return f
+			}
 		}
 	}
 	return 0

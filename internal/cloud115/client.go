@@ -134,13 +134,7 @@ func normalizeItem(raw map[string]any) Entry {
 	}
 
 	if _, isFile := raw["fid"]; isFile {
-		var nodeID string
-		switch v := raw["fid"].(type) {
-		case string:
-			nodeID = v
-		default:
-			nodeID = formatNum(v)
-		}
+		nodeID := formatNum(raw["fid"])
 		size := int64(0)
 		switch v := raw["s"].(type) {
 		case float64:
