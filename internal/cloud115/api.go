@@ -24,6 +24,7 @@ import (
 	"time"
 	"unicode/utf16"
 
+	"github.com/bytedance/gg/gconv"
 	"github.com/newcoderlife/media115/internal/logging"
 )
 
@@ -396,18 +397,10 @@ func (a *API) RenewCookies(app string) bool {
 // fmt.Sprintf("%v", float64(1775973641)) produces "1.775973641e+09" (scientific
 // notation). This helper avoids that by casting through int64 first.
 func formatNum(v any) string {
-	switch n := v.(type) {
-	case float64:
-		return strconv.FormatInt(int64(n), 10)
-	case int:
-		return strconv.Itoa(n)
-	case int64:
+	if n := gconv.To[int64, any](v); n != 0 {
 		return strconv.FormatInt(n, 10)
-	case string:
-		return n
-	default:
-		return fmt.Sprintf("%v", v)
 	}
+	return gconv.To[string, any](v)
 }
 
 // QRLogin performs an interactive QR-code login and updates the client cookies.

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bytedance/gg/gconv"
 	"github.com/newcoderlife/media115/internal/scraper"
 )
 
@@ -96,7 +97,7 @@ func (p *Provider) Scrape(query, filename, outDir string, opts scraper.ScrapeOpt
 	}
 
 	best := subjects[0]
-	bgmID := int(floatFromAny(best["id"]))
+	bgmID := gconv.To[int, any](best["id"])
 	if bgmID == 0 {
 		return &scraper.ScrapeResult{Status: "not_found"}, nil
 	}
@@ -290,8 +291,8 @@ func buildMetadata(subject map[string]any, season, episode int) *scraper.Metadat
 		UniqueIDs:     map[string]string{},
 	}
 
-	if id := floatFromAny(subject["id"]); id != 0 {
-		m.UniqueIDs["bangumi"] = strconv.Itoa(int(id))
+	if id := gconv.To[int, any](subject["id"]); id != 0 {
+		m.UniqueIDs["bangumi"] = strconv.Itoa(id)
 	}
 
 	// Air date / year
@@ -305,8 +306,8 @@ func buildMetadata(subject map[string]any, season, episode int) *scraper.Metadat
 
 	// Rating
 	if rating, ok := subject["rating"].(map[string]any); ok {
-		m.Rating = floatFromAny(rating["score"])
-		m.Votes = int(floatFromAny(rating["total"]))
+		m.Rating = gconv.To[float64, any](rating["score"])
+		m.Votes = gconv.To[int, any](rating["total"])
 	}
 
 	// Poster
@@ -337,19 +338,6 @@ func stringVal(m map[string]any, keys ...string) string {
 		}
 	}
 	return ""
-}
-
-func floatFromAny(v any) float64 {
-	switch n := v.(type) {
-	case float64:
-		return n
-	case int:
-		return float64(n)
-	case json.Number:
-		f, _ := n.Float64()
-		return f
-	}
-	return 0
 }
 
 func asSlice(v any) []any {

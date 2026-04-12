@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bytedance/gg/gconv"
 	"github.com/newcoderlife/media115/internal/scraper"
 )
 
@@ -236,7 +237,7 @@ func buildMetadata(scene map[string]any) *scraper.Metadata {
 	}
 
 	// Runtime (duration in seconds → minutes)
-	if dur := floatFromAny(scene["duration"]); dur > 0 {
+	if dur := gconv.To[float64, any](scene["duration"]); dur > 0 {
 		m.Runtime = int(dur / 60)
 	}
 
@@ -310,19 +311,6 @@ func yearFromDate(date string) int {
 	n := 0
 	fmt.Sscanf(date[:4], "%d", &n)
 	return n
-}
-
-func floatFromAny(v any) float64 {
-	switch n := v.(type) {
-	case float64:
-		return n
-	case json.Number:
-		f, _ := n.Float64()
-		return f
-	case int:
-		return float64(n)
-	}
-	return 0
 }
 
 func asSlice(v any) []any {
