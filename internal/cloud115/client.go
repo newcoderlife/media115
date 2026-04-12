@@ -110,7 +110,7 @@ func (c *Client) Close() error {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-// normalize ensures path starts with "/", strips trailing "/", empty → "/".
+// normalize ensures path starts with "/", strips trailing "/", empty "/".
 func normalize(path string) string {
 	path = strings.TrimSpace(path)
 	if path == "" || path == "/" {
@@ -187,7 +187,7 @@ func (c *Client) ResolvePath(path string) (string, error) {
 	if cid, ts, ok := c.cache.GetPath(path); ok {
 		age := time.Now().Unix() - ts
 		if age < int64(c.pathTTL.Seconds()) {
-			logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("resolve %s → cid=%s age=%ds", path, cid, age), "cache")
+			logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("resolve %s cid=%s age=%ds", path, cid, age), "cache")
 			if c.stats != nil {
 				c.stats.Incr("cache_hit")
 			}
@@ -204,7 +204,7 @@ func (c *Client) ResolvePath(path string) (string, error) {
 		return "", fmt.Errorf("path not found on 115: %s", path)
 	}
 	c.cache.SetPath(path, cid)
-	logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("resolve %s → api cid=%s", path, cid), "cache")
+	logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("resolve %s api cid=%s", path, cid), "cache")
 	if c.stats != nil {
 		c.stats.Incr("cache_miss")
 	}
@@ -244,7 +244,7 @@ func (c *Client) listDirByCID(cid, label string) ([]Entry, error) {
 		entries = append(entries, normalizeItem(item))
 	}
 	c.cache.SetDirListing(cid, entries)
-	logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("list_dir %s cid=%s → %d items", label, cid, len(entries)), "cache")
+	logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("list_dir %s cid=%s %d items", label, cid, len(entries)), "cache")
 	if c.stats != nil {
 		c.stats.Incr("cache_miss")
 	}
@@ -316,7 +316,7 @@ func (c *Client) DownloadURL(pickCode, userAgent string) (string, error) {
 	return c.api.DownloadURL(pickCode, userAgent)
 }
 
-// StreamURL resolves path → pick code → download URL in one step.
+// StreamURL resolves path pick code download URL in one step.
 func (c *Client) StreamURL(path, userAgent string) (string, error) {
 	entry, err := c.FindFile(path)
 	if err != nil {
@@ -429,7 +429,7 @@ func (c *Client) Mkdir(path string, parents bool) (string, error) {
 	if newCID == "" || newCID == "0" {
 		newCID = formatNum(result["aid"])
 	}
-	logging.Log(c.logger, slog.LevelInfo, fmt.Sprintf("mkdir %s parent_cid=%s → new_cid=%s", path, parentCID, newCID), "client")
+	logging.Log(c.logger, slog.LevelInfo, fmt.Sprintf("mkdir %s parent_cid=%s new_cid=%s", path, parentCID, newCID), "client")
 	if c.stats != nil {
 		c.stats.Incr("api")
 	}
@@ -481,7 +481,7 @@ func (c *Client) mkdirParents(path string) (string, error) {
 			CID:    newCID,
 		})
 		c.cache.SetPath(currentPath, newCID)
-		logging.Log(c.logger, slog.LevelInfo, fmt.Sprintf("mkdir %s parent_cid=%s → new_cid=%s", currentPath, currentCID, newCID), "client")
+		logging.Log(c.logger, slog.LevelInfo, fmt.Sprintf("mkdir %s parent_cid=%s new_cid=%s", currentPath, currentCID, newCID), "client")
 		if c.stats != nil {
 			c.stats.Incr("api")
 		}
@@ -520,7 +520,7 @@ func (c *Client) Rename(path, newName string) error {
 	if _, err := c.api.Rename(e.NodeID, newName); err != nil {
 		return fmt.Errorf("rename %s: %w", path, err)
 	}
-	logging.Log(c.logger, slog.LevelInfo, fmt.Sprintf("rename %s node=%s → %s", path, e.NodeID, newName), "client")
+	logging.Log(c.logger, slog.LevelInfo, fmt.Sprintf("rename %s node=%s %s", path, e.NodeID, newName), "client")
 	if c.stats != nil {
 		c.stats.Incr("api")
 	}
@@ -532,7 +532,7 @@ func (c *Client) Rename(path, newName string) error {
 		newPath := strings.TrimRight(parentPath, "/") + "/" + newName
 		c.cache.SetPath(newPath, e.NodeID)
 	}
-	logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("write rename cid=%s node=%s → %s", parentCID, e.NodeID, newName), "cache")
+	logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("write rename cid=%s node=%s %s", parentCID, e.NodeID, newName), "cache")
 	return nil
 }
 
@@ -676,7 +676,7 @@ func (c *Client) Move(srcPaths []string, destPath string) error {
 	if _, err := c.api.Move(fids, destCID); err != nil {
 		return fmt.Errorf("move: %w", err)
 	}
-	logging.Log(c.logger, slog.LevelInfo, fmt.Sprintf("move %d items → %s", len(fids), destPath), "client")
+	logging.Log(c.logger, slog.LevelInfo, fmt.Sprintf("move %d items %s", len(fids), destPath), "client")
 	if c.stats != nil {
 		c.stats.Incr("api")
 	}
@@ -748,7 +748,7 @@ func (c *Client) BatchRename(renames []BatchRenameItem) error {
 
 	for _, inf := range infos {
 		c.cache.RenameEntry(inf.parentCID, inf.nodeID, inf.newName)
-		logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("write rename cid=%s node=%s → %s", inf.parentCID, inf.nodeID, inf.newName), "cache")
+		logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("write rename cid=%s node=%s %s", inf.parentCID, inf.nodeID, inf.newName), "cache")
 	}
 	return nil
 }
@@ -769,7 +769,7 @@ func (c *Client) Upload(localPath, remoteDir, filename string) (map[string]any, 
 	if err != nil {
 		return nil, fmt.Errorf("upload: %w", err)
 	}
-	logging.Log(c.logger, slog.LevelInfo, fmt.Sprintf("upload %s → %s", filename, remoteDir), "client")
+	logging.Log(c.logger, slog.LevelInfo, fmt.Sprintf("upload %s %s", filename, remoteDir), "client")
 	if c.stats != nil {
 		c.stats.Incr("api")
 	}
@@ -872,7 +872,7 @@ func (c *Client) RapidUpload(localPath, remoteDir string) (*RapidResult, error) 
 	}
 	pickCode, _ := result["pickcode"].(string)
 
-	logging.Log(c.logger, slog.LevelInfo, fmt.Sprintf("upload %s → %s (rapid status=%d)", filename, remoteDir, status), "client")
+	logging.Log(c.logger, slog.LevelInfo, fmt.Sprintf("upload %s %s (rapid status=%d)", filename, remoteDir, status), "client")
 	if c.stats != nil {
 		c.stats.Incr("api")
 	}
@@ -945,7 +945,7 @@ func (c *Client) RefreshDir(path string) ([]Entry, error) {
 		entries = append(entries, normalizeItem(item))
 	}
 	c.cache.SetDirListing(cid, entries)
-	logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("list_dir %s cid=%s → %d items (refresh)", path, cid, len(entries)), "client")
+	logging.Log(c.logger, slog.LevelDebug, fmt.Sprintf("list_dir %s cid=%s %d items (refresh)", path, cid, len(entries)), "client")
 	return entries, nil
 }
 
