@@ -1,7 +1,7 @@
 ---
 name: scrape-fix
 description: Fix a wrong scrape result using the CLI command
-version: 4.0
+version: 5.0
 ---
 
 修正一个错误的刮削结果。
@@ -69,5 +69,5 @@ media115 organize $CATEGORY --execute
 3. 如果确实找不到，告诉用户需要手动处理
 
 如果修正后 organize 仍然显示 "0 to rename":
-1. 运行 `media115 scan-tree $CATEGORY` 检查文件状态
-2. 可能需要 `batch-scrape --force` 重新生成 NFO
+1. 运行 `media115 scan $CATEGORY` 检查文件状态
+2. 可能需要 `media115 scrape --force` 重新生成 NFO
