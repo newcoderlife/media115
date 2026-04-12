@@ -1,23 +1,23 @@
 ---
 name: dedup
 description: Clean duplicate files (same-name copies created by 115's upload behavior)
-version: 1.0
+version: 2.0
 ---
 
 Clean duplicate files in a 115 directory. Groups files by filename and keeps one copy, deletes the rest.
 
 ## When to use
 
-- `scan-tree` shows "Duplicate NFO" anomalies
+- `scan` shows "Duplicate NFO" anomalies
 - 115 web upload created same-name copies (e.g., `SONE-001.nfo` and `SONE-001(1).nfo` in the same dir)
 - After bulk organize or upload operations that may have created duplicates
 
 ## Step 1: Dry-run (always do this first)
 
 ```bash
-media115 dedup "/影音/电影"
-media115 dedup "/影音/剧目"
-media115 dedup "/影音/AV"
+cloud115 dedup "/影音/电影"
+cloud115 dedup "/影音/剧目"
+cloud115 dedup "/影音/AV"
 ```
 
 Expected output shows which subdirectories have duplicate files and how many would be deleted.
@@ -27,7 +27,7 @@ If output says "No duplicates found" — nothing to do.
 ## Step 2: Execute
 
 ```bash
-media115 dedup "/影音/剧目" --execute
+cloud115 dedup "/影音/剧目" --execute
 ```
 
 This:
@@ -39,7 +39,7 @@ This:
 ## Step 3: Verify
 
 ```bash
-media115 scan-tree $CATEGORY
+media115 scan $CATEGORY
 ```
 
 The "Duplicate NFO" anomalies should be gone.
@@ -48,5 +48,5 @@ The "Duplicate NFO" anomalies should be gone.
 
 If dedup reports an error deleting a specific fid:
 - The file may have already been deleted by another operation
-- Check with `media115 ls /影音/.../目录名/` to confirm current state
+- Check with `cloud115 ls /影音/.../目录名/` to confirm current state
 - Re-run dry-run to see if duplicates still exist

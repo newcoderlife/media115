@@ -1,14 +1,14 @@
 ---
 name: scrape
 description: Scrape metadata for media files — agent drives matching, code only provides tools
-version: 6.0
+version: 7.0
 ---
 
 刮削媒体文件的元数据（NFO + 海报）。**你（agent）负责判断文件是什么，代码只负责搜索和生成。**
 
 ## 核心原则
 
-1. **你来判断，代码只是工具。** `batch-scrape` 只处理高置信度匹配（标题+年份完全吻合）。所有不确定的，由你来判断。
+1. **你来判断，代码只是工具。** `media115 scrape` 只处理高置信度匹配（标题+年份完全吻合）。所有不确定的，由你来判断。
 2. **没刮到就是没刮到。** 不要强行匹配。宁可标记为待确认，也不要用错误的元数据。
 3. **文件名是最重要的线索。** 从文件名推测标题、年份、季/集、类型。文件名里有中文就用中文搜。
 
@@ -24,21 +24,21 @@ $ARGUMENTS — category: `电影`, `AV`, or `剧目`. Ask the user if not provid
 ## Step 1: 扫描待处理文件
 
 ```bash
-media115 scan-tree $CATEGORY
+media115 scan $CATEGORY
 ```
 
-看 scan-tree 的输出表格。关注 `Action` 列：
+看 scan 的输出表格。关注 `Action` 列：
 - `scrape` — 需要刮削
 - `skip` — 已有 NFO，跳过
 - `unrecognized` — 文件名无法解析，需要手动处理
 
-## Step 2: 先跑 batch-scrape 处理简单 case
+## Step 2: 先跑 scrape 处理简单 case
 
 ```bash
-media115 batch-scrape $CATEGORY
+media115 scrape $CATEGORY
 ```
 
-batch-scrape 自动处理文件名清晰、数据源精确匹配的文件。
+scrape 自动处理文件名清晰、数据源精确匹配的文件。
 
 输出里注意：
 - `→ 标题 (ID)` — 自动匹配成功
@@ -47,7 +47,7 @@ batch-scrape 自动处理文件名清晰、数据源精确匹配的文件。
 
 数据源按类型自动选择：
 - `电影`/`剧目` → TMDB
-- `AV` (日本) → JavBus / JAV321
+- `AV` (日本) → jav321 / javfree
 - `AV` (欧美, `av_west`) → ThePornDB / StashDB
 - `anime` → TMDB / Bangumi
 
@@ -72,7 +72,7 @@ batch-scrape 自动处理文件名清晰、数据源精确匹配的文件。
 ```bash
 media115 scrape "猜测的名字"
 media115 scrape "猜测的名字" --source bangumi   # 动漫用这个
-media115 scrape "SONE-001" --source javbus      # 日本AV
+media115 scrape "SONE-001" --source jav321      # 日本AV
 ```
 
 4. 如果搜到多个结果，用年份、类型、集数等信息交叉验证

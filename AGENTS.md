@@ -4,29 +4,18 @@ You are operating **media115**, a media library management tool for 115 cloud dr
 
 ## Setup
 
-```bash
-media115 init
-```
-
-If `media115` is not found:
+Check credentials and environment first. Do NOT ask the user to configure keys that already have values.
 
 ```bash
-pip install media115
-media115 init
+cloud115 doctor
 ```
 
-**Always check credentials first.** Do NOT ask the user to configure keys that already have values.
-
-```bash
-media115 doctor
-```
-
-This shows Python version, .env location, which credentials are configured, and cache status. If anything is missing, tell the user. Do NOT proceed until credentials are present.
+This shows which credentials are configured and cache status. If anything is missing, tell the user. Do NOT proceed until credentials are present.
 
 If all keys are present, verify 115 login:
 
 ```bash
-media115 auth --check
+cloud115 auth --check
 ```
 
 ## Pipeline
@@ -45,11 +34,11 @@ The standard workflow for a category (`电影`, `AV`, or `剧目`):
 
 ### When to use `--force`
 
-`/scan` detects anomalies. If it shows **"Non-standard name"** — meaning a file has NFO on 115 but its directory name is wrong — you MUST use `batch-scrape --force`. Without `--force`, batch-scrape skips files that already have NFOs, so organize can never fix them.
+`/scan` detects anomalies. If it shows **"Non-standard name"** — meaning a file has NFO on 115 but its directory name is wrong — you MUST use `media115 scrape --force`. Without `--force`, scrape skips files that already have NFOs, so organize can never fix them.
 
 ```
-/scan shows anomalies? → batch-scrape --force → organize --execute
-/scan shows no anomalies? → batch-scrape (no --force) → organize --execute
+/scan shows anomalies? → media115 scrape --force → media115 organize --execute
+/scan shows no anomalies? → media115 scrape (no --force) → media115 organize --execute
 ```
 
 ### After organize
@@ -66,57 +55,61 @@ organize changes 115 state. The verify phase at the end of organize refreshes th
 | `/scrape` | Batch scrape metadata + agent handles failures | Main scraping workflow |
 | `/organize` | Rename + move + upload NFO + cleanup old dirs | After scraping |
 | `/scrape-fix` | Correct a wrong scrape result | User says "that's wrong", or you spot a bad match |
-| `/dedup` | Clean duplicate files (same-name copies) | scan-tree shows "Duplicate NFO" anomalies |
+| `/dedup` | Clean duplicate files (same-name copies) | scan shows "Duplicate NFO" anomalies |
 | `/doctor` | Check environment, credentials, cache status | When something is broken |
 
 ## CLI Reference
 
 ```bash
-# Init
-media115 init                                # 初始化配置和 skills
-
 # Doctor
-media115 doctor                              # Check environment + credentials + cache
+cloud115 doctor                              # Check environment + credentials + cache
 
 # Auth
-media115 auth --check                        # Check login status
-media115 auth --get-qr                       # Generate QR URL (non-blocking)
-media115 auth --wait-qr                      # Wait for scan, save cookies
-media115 auth --renew                        # Auto-renew cookies
+cloud115 auth                                # QR login (scan with 115 app)
+cloud115 auth --check                        # Check login status
+cloud115 auth --get-qr                       # Generate QR URL (non-blocking)
+cloud115 auth --wait-qr                      # Wait for scan, save cookies
+cloud115 auth --renew                        # Auto-renew cookies
 
 # File system
-media115 ls /影音                             # 列目录
-media115 ls -l /影音/电影                     # 详细格式（大小+类型）
-media115 ls -R --depth 3 /影音               # 递归（默认深度 2）
-media115 stat /影音/电影/满江红.mkv           # 文件元信息（JSON）
-media115 find "满江红" /影音                   # 按关键字搜索
-media115 mkdir -p /影音/电影/新目录           # 创建目录（-p 递归）
-media115 mv /影音/a.mkv /影音/电影/           # 移动文件或目录
-media115 rename /影音/old.mkv new.mkv        # 原地重命名
-media115 rm /影音/垃圾.txt                   # 删除文件
-media115 rm -r /影音/空目录                  # 递归删除目录
-media115 put ./local.nfo /影音/电影/         # 上传（自动尝试秒传）
-media115 rapid ./large.mkv /影音/电影/       # 秒传（按 SHA1 匹配，瞬间完成）
-media115 get /影音/电影/a.mkv ./             # 下载
+cloud115 ls /影音                             # 列目录
+cloud115 ls -l /影音/电影                     # 详细格式（大小+类型）
+cloud115 ls -R --depth 3 /影音               # 递归（默认深度 2）
+cloud115 stat /影音/电影/满江红.mkv           # 文件元信息（JSON）
+cloud115 find "满江红" /影音                   # 按关键字搜索
+cloud115 mkdir -p /影音/电影/新目录           # 创建目录（-p 递归）
+cloud115 mv /影音/a.mkv /影音/电影/           # 移动文件或目录
+cloud115 rename /影音/old.mkv new.mkv        # 原地重命名
+cloud115 rm /影音/垃圾.txt                   # 删除文件
+cloud115 rm -r /影音/空目录                  # 递归删除目录
+cloud115 put ./local.nfo /影音/电影/         # 上传（自动尝试秒传）
+cloud115 rapid ./large.mkv /影音/电影/       # 秒传（按 SHA1 匹配，瞬间完成）
+cloud115 get /影音/电影/a.mkv ./             # 下载
 
 # Cache and sync
-media115 sync /影音                          # Refresh SQLite cache (2-3 API calls)
-media115 sync /影音 --deep --depth 2         # Also pre-warm dir listing cache
-media115 cache status                        # Show cache stats
-media115 cache clear                         # Clear path/dir cache only
-media115 cache clear --tree                  # Also clear tree_cache.txt
-media115 cache clear --scrape               # Also clear scrape cache + scrape_output
-media115 cache clear --all                  # Clear everything
+cloud115 sync /影音                          # Refresh SQLite cache (2-3 API calls)
+cloud115 sync /影音 --deep --depth 2         # Also pre-warm dir listing cache
+cloud115 cache status                        # Show cache stats
+cloud115 cache clear                         # Clear path/dir cache only
+cloud115 cache clear --tree                  # Also clear tree_cache.txt
+cloud115 cache clear --scrape               # Also clear scrape cache + scrape_output
+cloud115 cache clear --all                  # Clear everything
 
-# Scan and scrape (depend on SQLite cache)
-media115 scan-tree 电影                      # Analyze cache, show scraping plan + anomalies
-media115 scan-tree AV
-media115 scan-tree 剧目
-media115 batch-scrape 电影                   # Scrape files without NFO
-media115 batch-scrape 电影 --force           # Re-scrape all files (including those with NFO)
+# Dedup
+cloud115 dedup "/影音/电影"                   # Dry-run: show duplicate files
+cloud115 dedup "/影音/电影" --execute         # Delete duplicates (keeps first copy)
+
+# Scan (reads SQLite cache — zero API calls)
+media115 scan 电影                           # Analyze cache, show scraping plan + anomalies
+media115 scan AV
+media115 scan 剧目
+
+# Scrape
+media115 scrape 电影                         # Scrape files without NFO
+media115 scrape 电影 --force                 # Re-scrape all files (including those with NFO)
 media115 scrape "满江红"                      # Search TMDB
 media115 scrape "满江红" --source bangumi    # Search Bangumi
-media115 scrape "SONE-001" --source javbus   # Search JavBus
+media115 scrape "SONE-001" --source jav321   # Search jav321
 
 # Scrape fix
 media115 scrape-fix "Restart.2026.mkv" --tmdb-id 1664596
@@ -127,14 +120,6 @@ media115 scrape-fix "T-3800040.mkv" --number "T28-003"
 media115 organize 电影                        # Dry-run: show plan
 media115 organize 电影 --execute              # Execute: move + rename + upload NFO
 media115 organize 电影 --execute --cleanup    # Also delete unrelated empty dirs
-
-# Dedup
-media115 dedup "/影音/电影"                   # Dry-run: show duplicate files
-media115 dedup "/影音/电影" --execute         # Delete duplicates (keeps first copy)
-
-# Strm proxy (requires: pip install media115[proxy])
-media115 strm /影音/电影 --output ./strm/    # Generate .strm files for Jellyfin
-media115 serve --port 9000                    # Start strm-proxy server
 ```
 
 ## Naming Conventions
@@ -157,9 +142,9 @@ Suffixes are preserved on rename: `-C` (cut), `.A`/`.B` (multi-disc), `.Part1`/`
 | `movie` | 电影 | TMDB |
 | `tv` | 剧目 | TMDB |
 | `anime` | 剧目 | TMDB / Bangumi |
-| `av` | AV | JavBus / JAV321 |
+| `av` | AV | jav321 / javfree |
 | `av_west` | AV | ThePornDB / StashDB |
-| `gravure` | 写真 | — |
+| `gravure` | 写真 | jav321 / javfree |
 
 ## What organize does (6 phases)
 
@@ -172,11 +157,11 @@ Suffixes are preserved on rename: `-C` (cut), `.A`/`.B` (multi-disc), `.Part1`/`
 
 The NFO filename always matches the video: `满江红 (2023).nfo` for `满江红 (2023).mkv`.
 
-At the end of organize --execute, you will see: `✓ N 个文件验证通过`
+At the end of `organize --execute`, you will see: `✓ N 个文件验证通过`
 
 ## Cache Architecture
 
-The cache is an SQLite database at `~/.cache/cloud115/cache.db`. `media115 cache status` shows all relevant counts.
+The cache is an SQLite database at `~/.cache/cloud115/cache.db`. `cloud115 cache status` shows all relevant counts.
 
 | Cache component | What it stores | Lifetime |
 |----------------|---------------|----------|
@@ -187,7 +172,7 @@ The cache is an SQLite database at `~/.cache/cloud115/cache.db`. `media115 cache
 | Scrape results | NFO + poster files | Permanent |
 | Scrape output | `~/.cache/media115/scrape_output/` | Permanent |
 
-`tree_entry` is the source of truth for `scan-tree`, `batch-scrape`, and `organize`. It is populated by `sync` and refreshed by organize's verify phase.
+`tree_entry` is the source of truth for `scan`, `scrape`, and `organize`. It is populated by `cloud115 sync` and refreshed by organize's verify phase.
 
 ## Rate Limiting
 
@@ -200,18 +185,31 @@ The cache is an SQLite database at `~/.cache/cloud115/cache.db`. `media115 cache
 
 Never bypass the CLI to call 115 APIs directly.
 
+## Configuration
+
+Config file: `~/.config/media115/config.toml`
+
+Key fields:
+
+- `auth.cookies` — 115 session cookies (set by `cloud115 auth`)
+- `auth.tmdb.token` — TMDB read access token (required for movie/tv scraping)
+- `auth.bangumi.token` — Bangumi Bearer token (optional, for anime)
+- `auth.theporndb.token` — ThePornDB token (optional, for av_west)
+- `auth.stashdb.api_key` — StashDB API key (optional, for av_west)
+- `cloud.root` — 115 root path (default `/影音`)
+- `cloud.qps` / `cloud.qpm` — rate limit settings
+
 ## Rules
 
 ### You are an OPERATOR, not a developer
 
 **DO NOT:**
-- Modify any `.py` file under `src/` or `tests/`
-- Call 115/TMDB/Bangumi/ThePornDB APIs directly (via `curl`, `httpx`, etc.)
-- Run `pip install` for new packages
+- Modify any `.go` file under `cmd/`, `internal/`, or `packages/`
+- Call 115/TMDB/Bangumi/ThePornDB/StashDB APIs directly (via `curl`, `httpx`, etc.)
+- Run `go get` or modify `go.mod`
 
 **DO:**
 - Run CLI commands as documented above
 - Read files to understand structure
-- Run `pytest` to verify regression tests
 
 If you think the code has a bug, tell the user. Do not fix it yourself.

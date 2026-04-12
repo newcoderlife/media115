@@ -1,10 +1,10 @@
 ---
 name: sync
 description: Refresh local SQLite cache from 115 cloud. Required before scan/scrape.
-version: 3.0
+version: 4.0
 ---
 
-Refresh the local cache from 115 cloud. This populates the SQLite `tree_entry` table, which is the source of truth for `scan-tree`, `batch-scrape`, and `organize`.
+Refresh the local cache from 115 cloud. This populates the SQLite `tree_entry` table, which is the source of truth for `scan`, `scrape`, and `organize`.
 
 ## Preconditions
 
@@ -13,7 +13,7 @@ Refresh the local cache from 115 cloud. This populates the SQLite `tree_entry` t
 ## Step 1: Export tree + populate SQLite cache
 
 ```bash
-media115 sync /影音
+cloud115 sync /影音
 ```
 
 This does:
@@ -30,7 +30,7 @@ Parsed 2158 entries into SQLite (1452 video, 706 NFO)
 ## Step 2: Verify
 
 ```bash
-media115 cache status
+cloud115 cache status
 ```
 
 Check that `tree_entry` shows a reasonable number of entries (e.g., `✓ 2158 条目 (1452 视频, 706 NFO)`).
@@ -40,7 +40,7 @@ Check that `tree_entry` shows a reasonable number of entries (e.g., `✓ 2158 �
 Only needed before `organize` on large libraries to avoid API calls during execution.
 
 ```bash
-media115 sync /影音 --deep --depth 2
+cloud115 sync /影音 --deep --depth 2
 ```
 
 Pre-fetches directory listings into SQLite. Each directory = 2 API calls. Shows progress. `--depth 2` means 2 levels below the path you specified.
@@ -49,6 +49,6 @@ Pre-fetches directory listings into SQLite. Each directory = 2 API calls. Shows 
 
 - Before starting work on any category
 - If the user has manually moved/renamed files on 115 outside of this tool
-- If `scan-tree` shows stale or unexpected results
+- If `scan` shows stale or unexpected results
 
 You do NOT need to re-run sync after `organize --execute`. Organize's verify phase refreshes the tree cache automatically.
