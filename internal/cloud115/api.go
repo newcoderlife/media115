@@ -25,6 +25,7 @@ import (
 	"unicode/utf16"
 
 	"github.com/bytedance/gg/gconv"
+
 	"github.com/newcoderlife/media115/internal/logging"
 )
 
@@ -517,11 +518,11 @@ func (a *API) QRLogin(app string) error {
 
 // QRSession holds the state needed for a two-phase QR login.
 type QRSession struct {
-	UID    string `json:"uid"`
-	Time   string `json:"time"`
-	Sign   string `json:"sign"`
-	App    string `json:"app"`
-	QRURL  string `json:"qr_url"`
+	UID   string `json:"uid"`
+	Time  string `json:"time"`
+	Sign  string `json:"sign"`
+	App   string `json:"app"`
+	QRURL string `json:"qr_url"`
 }
 
 // QRGetToken fetches a QR login token and returns the session (phase 1).
@@ -1287,8 +1288,8 @@ func (a *API) RapidUpload(dirID, filename string, fileSize int64, fileSHA1 strin
 				parts := strings.SplitN(signRange, "-", 2)
 				if len(parts) == 2 {
 					var start, end int
-					fmt.Sscanf(parts[0], "%d", &start)
-					fmt.Sscanf(parts[1], "%d", &end)
+					_, _ = fmt.Sscanf(parts[0], "%d", &start)
+					_, _ = fmt.Sscanf(parts[1], "%d", &end)
 					_, _ = fileStream.Seek(int64(start), io.SeekStart)
 					chunk, _ := io.ReadAll(io.LimitReader(fileStream, int64(end-start+1)))
 					signValBytes := sha1.Sum(chunk)

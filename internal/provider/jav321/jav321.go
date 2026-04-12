@@ -11,8 +11,9 @@ import (
 	"unicode"
 
 	"github.com/antchfx/htmlquery"
-	"github.com/newcoderlife/media115/internal/scraper"
 	"golang.org/x/net/html"
+
+	"github.com/newcoderlife/media115/internal/scraper"
 )
 
 const (
@@ -323,4 +324,4 @@ type noCookieJar struct{}
 func newNoCookieJar() http.CookieJar { return noCookieJar{} }
 
 func (noCookieJar) SetCookies(*url.URL, []*http.Cookie) {}
-func (noCookieJar) Cookies(*url.URL) []*http.Cookie      { return nil }
+func (noCookieJar) Cookies(*url.URL) []*http.Cookie     { return nil }

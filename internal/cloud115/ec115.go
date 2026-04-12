@@ -47,7 +47,7 @@ func NewEC115Cipher() (*EC115Cipher, error) {
 	curve := elliptic.P224()
 
 	// Unmarshal server public key (SEC1 uncompressed).
-	srvX, srvY := elliptic.Unmarshal(curve, serverPubKey)
+	srvX, srvY := elliptic.Unmarshal(curve, serverPubKey) //nolint:staticcheck // P-224 not in crypto/ecdh
 
 	// Generate client key pair.
 	clientPriv, err := ecdsa.GenerateKey(curve, rand.Reader)
@@ -56,7 +56,7 @@ func NewEC115Cipher() (*EC115Cipher, error) {
 	}
 
 	// ECDH: shared point = serverPub * clientPriv.D
-	sharedX, _ := curve.ScalarMult(srvX, srvY, clientPriv.D.Bytes())
+	sharedX, _ := curve.ScalarMult(srvX, srvY, clientPriv.D.Bytes()) //nolint:staticcheck // P-224 not in crypto/ecdh
 
 	// Shared secret = sharedX padded to 28 bytes (P-224 field size).
 	sharedSecret := make([]byte, 28)
@@ -70,7 +70,7 @@ func NewEC115Cipher() (*EC115Cipher, error) {
 	copy(aesIV, sharedSecret[12:28])
 
 	// pubKey = 0x1d + MarshalCompressed(clientPub) — total 30 bytes.
-	compressed := elliptic.MarshalCompressed(curve, clientPriv.PublicKey.X, clientPriv.PublicKey.Y)
+	compressed := elliptic.MarshalCompressed(curve, clientPriv.PublicKey.X, clientPriv.PublicKey.Y) //nolint:staticcheck // P-224 not in crypto/ecdh
 	pubKey := append([]byte{0x1d}, compressed...)
 
 	return &EC115Cipher{

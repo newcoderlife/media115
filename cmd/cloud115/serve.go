@@ -10,9 +10,10 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"github.com/newcoderlife/media115/internal/cloud115"
 	"github.com/newcoderlife/media115/internal/config"
-	"github.com/spf13/cobra"
 )
 
 var (
@@ -74,11 +75,9 @@ var excludedHeaders = map[string]bool{
 func buildProxyMux(client *cloud115.Client, jellyfinURL string) http.Handler {
 	jellyfinTarget, _ := url.Parse(jellyfinURL)
 	proxy := httputil.NewSingleHostReverseProxy(jellyfinTarget)
-	// Preserve original director but fix Host header
-	origDirector := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		origDirector(req)
-		req.Host = jellyfinTarget.Host
+	proxy.Rewrite = func(pr *httputil.ProxyRequest) {
+		pr.SetURL(jellyfinTarget)
+		pr.Out.Host = jellyfinTarget.Host
 	}
 
 	mux := http.NewServeMux()
