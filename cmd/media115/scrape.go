@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	cloud115 "github.com/newcoderlife/media115/internal/cloud115"
+	"github.com/newcoderlife/media115/internal/logging"
 	"github.com/newcoderlife/media115/internal/scraper"
 )
 
@@ -100,6 +102,7 @@ Use --limit N to scrape only the first N files.`,
 			return fmt.Errorf("创建输出目录失败: %w", err)
 		}
 
+		logging.Log(slog.LevelInfo, fmt.Sprintf("scrape start: %d files in %s", len(videos), category), "scraper")
 		fmt.Printf("刮削 %d 个文件 '%s' → %s\n", len(videos), category, outDir)
 
 		type result struct {
@@ -213,6 +216,7 @@ Use --limit N to scrape only the first N files.`,
 				if r.SourceID == "" {
 					r.SourceID = sr.IDs["number"]
 				}
+				logging.Log(slog.LevelInfo, fmt.Sprintf("[%d/%d] %s → %s (%s)", i+1, len(videos), trunc(name, 40), sr.Match, r.SourceID), "scraper")
 				fmt.Printf(" → %s (%s)\n", sr.Match, r.SourceID)
 				okCount++
 
@@ -233,6 +237,7 @@ Use --limit N to scrape only the first N files.`,
 				scrapePut(cacheSource, stemName, cacheEntry)
 			} else if sr.Status == "not_found" {
 				r.Status = "not_found"
+				logging.Log(slog.LevelWarn, fmt.Sprintf("[%d/%d] %s not_found", i+1, len(videos), trunc(name, 40)), "scraper")
 				fmt.Printf(" not_found\n")
 				failCount++
 				// Cache the not_found result.
@@ -243,12 +248,14 @@ Use --limit N to scrape only the first N files.`,
 			} else {
 				r.Status = "error"
 				r.Error = sr.Error
+				logging.Log(slog.LevelError, fmt.Sprintf("[%d/%d] %s error: %s", i+1, len(videos), trunc(name, 40), sr.Error), "scraper")
 				fmt.Printf(" error: %s\n", sr.Error)
 				failCount++
 			}
 			results = append(results, r)
 		}
 
+		logging.Log(slog.LevelInfo, fmt.Sprintf("scrape done: %d ok, %d fail, %d skip", okCount, failCount, skipCount), "scraper")
 		fmt.Printf("\n完成: %d 个刮削, %d 个失败, %d 个跳过\n", okCount, failCount, skipCount)
 
 		// Print review table

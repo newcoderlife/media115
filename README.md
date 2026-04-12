@@ -18,30 +18,15 @@ Two binaries:
 ## Installation
 
 ```bash
-# One-line install (Linux / macOS)
+# Install CLI binaries (Linux / macOS)
 curl -fsSL https://raw.githubusercontent.com/newcoderlife/media115/master/install.sh | sh
 
-# Or specify version / install path
-VERSION=v0.1.0 INSTALL=~/.local/bin curl -fsSL https://raw.githubusercontent.com/newcoderlife/media115/master/install.sh | sh
+# Install agent skills (Claude Code / Cursor / Codex / OpenCode)
+curl -fsSL https://raw.githubusercontent.com/newcoderlife/media115/master/install.sh | sh -s -- --skill --agent all
 
 # From source (requires Go 1.25+)
 go install github.com/newcoderlife/media115/cmd/cloud115@latest
 go install github.com/newcoderlife/media115/cmd/media115@latest
-```
-
-### Agent Skills (optional)
-
-Install skills for your AI coding agent:
-
-```bash
-# Claude Code (~/.claude/skills/)
-curl -fsSL https://raw.githubusercontent.com/newcoderlife/media115/master/install.sh | sh -s -- --skill --agent claude
-
-# Cursor / Codex / OpenCode (~/.agents/skills/)
-curl -fsSL https://raw.githubusercontent.com/newcoderlife/media115/master/install.sh | sh -s -- --skill --agent agents
-
-# All agents
-curl -fsSL https://raw.githubusercontent.com/newcoderlife/media115/master/install.sh | sh -s -- --skill --agent all
 ```
 
 ## Quick Start
