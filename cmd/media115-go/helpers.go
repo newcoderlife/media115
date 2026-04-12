@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/newcoderlife/media115/internal/cloud115"
@@ -14,7 +15,10 @@ import (
 	"github.com/newcoderlife/media115/internal/provider/theporndb"
 	"github.com/newcoderlife/media115/internal/provider/tmdb"
 	"github.com/newcoderlife/media115/internal/scraper"
+	"github.com/spf13/cobra"
 )
+
+var stats *logging.Stats
 
 func getClient() (*cloud115.Client, error) {
 	cfg, err := config.Load()
@@ -24,13 +28,23 @@ func getClient() (*cloud115.Client, error) {
 	if cfg.Auth.Cookies == "" {
 		return nil, fmt.Errorf("未登录。请先运行: cloud115 auth")
 	}
-	logger := logging.Setup(verbose)
+	logger, s := logging.Setup(verbose)
+	stats = s
 	return cloud115.NewClient(
 		cfg.Auth.Cookies,
 		cloud115.WithListingTTL(time.Duration(cfg.Cache.ListingTTL)*time.Second),
 		cloud115.WithPathTTL(time.Duration(cfg.Cache.PathTTL)*time.Second),
 		cloud115.WithLogger(logger),
+		cloud115.WithStats(stats),
 	)
+}
+
+func init() {
+	rootCmd.PersistentPostRun = func(cmd *cobra.Command, args []string) {
+		if stats != nil && verbose {
+			fmt.Fprintf(os.Stderr, "\n%s\n", stats.Summary())
+		}
+	}
 }
 
 func getConfig() (*config.Config, error) {
