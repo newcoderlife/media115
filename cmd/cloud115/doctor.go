@@ -29,31 +29,43 @@ var doctorCmd = &cobra.Command{
 		}
 		fmt.Println()
 
-		// Auth
+		// Auth + Login check — create one client and reuse it.
 		fmt.Println("认证:")
 		if cfg.Auth.Cookies == "" {
 			fmt.Println("  115 Cookies:   ✗ 未配置")
-		} else {
-			fmt.Printf("  115 Cookies:   ✓ 已配置 (%d 字节)\n", len(cfg.Auth.Cookies))
-		}
-		if cfg.Auth.TMDB.Token != "" {
-			fmt.Println("  TMDB Token:    ✓ 已配置")
-		} else {
-			fmt.Println("  TMDB Token:    ✗ 未配置")
-		}
-		fmt.Println()
-
-		// Login check
-		fmt.Println("登录状态:")
-		if cfg.Auth.Cookies == "" {
+			if cfg.Auth.TMDB.Token != "" {
+				fmt.Println("  TMDB Token:    ✓ 已配置")
+			} else {
+				fmt.Println("  TMDB Token:    ✗ 未配置")
+			}
+			fmt.Println()
+			fmt.Println("登录状态:")
 			fmt.Println("  115 登录:      ✗ 未配置 cookies（请运行 cloud115 auth）")
 		} else {
-			client, err := getClient()
-			if err != nil {
-				fmt.Printf("  115 登录:      ✗ 初始化失败 (%v)\n", err)
+			client, clientErr := getClient()
+			if clientErr != nil {
+				fmt.Println("  115 Cookies:   ✗ 配置但无法创建客户端")
+				if cfg.Auth.TMDB.Token != "" {
+					fmt.Println("  TMDB Token:    ✓ 已配置")
+				} else {
+					fmt.Println("  TMDB Token:    ✗ 未配置")
+				}
 			} else {
 				defer client.Close()
-				if client.CheckLogin() {
+				loggedIn := client.CheckLogin()
+				if loggedIn {
+					fmt.Println("  115 Cookies:   ✓ 已登录")
+				} else {
+					fmt.Println("  115 Cookies:   ✗ Cookie 过期")
+				}
+				if cfg.Auth.TMDB.Token != "" {
+					fmt.Println("  TMDB Token:    ✓ 已配置")
+				} else {
+					fmt.Println("  TMDB Token:    ✗ 未配置")
+				}
+				fmt.Println()
+				fmt.Println("登录状态:")
+				if loggedIn {
 					fmt.Println("  115 登录:      ✓ 有效")
 				} else {
 					fmt.Println("  115 登录:      ✗ cookie 已过期（请运行 cloud115 auth）")
@@ -63,18 +75,18 @@ var doctorCmd = &cobra.Command{
 				fmt.Println()
 				fmt.Println("缓存:")
 				fmt.Printf("  缓存目录:      %s\n", config.CacheDir())
-				stats, err := client.CacheStatus()
+				cstats, err := client.CacheStatus()
 				if err != nil {
 					fmt.Printf("  缓存状态:      ✗ 获取失败 (%v)\n", err)
 				} else {
-					fmt.Printf("  路径映射:      %d 条目\n", stats.PathCount)
-					fmt.Printf("  目录缓存:      %d 个目录, %d 条目\n", stats.DirCount, stats.EntryCount)
-					fmt.Printf("  目录树:        %d 条目\n", stats.TreeEntries)
-					fmt.Printf("  数据库大小:    %s\n", formatSize(stats.DBSizeBytes))
+					fmt.Printf("  路径映射:      %d 条目\n", cstats.PathCount)
+					fmt.Printf("  目录缓存:      %d 个目录, %d 条目\n", cstats.DirCount, cstats.EntryCount)
+					fmt.Printf("  目录树:        %d 条目\n", cstats.TreeEntries)
+					fmt.Printf("  数据库大小:    %s\n", formatSize(cstats.DBSizeBytes))
 
 					// Rate limit
 					now := float64(time.Now().Unix())
-					for name, state := range stats.RateLimit {
+					for name, state := range cstats.RateLimit {
 						if now < state.CooldownUntil {
 							remaining := int(state.CooldownUntil - now)
 							fmt.Printf("  限流 (%s):    ⚠ cooldown 中 (剩余 %ds)\n", name, remaining)

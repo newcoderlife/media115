@@ -199,7 +199,8 @@ func (c *Client) ResolvePath(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve %s: %w", path, err)
 	}
-	if cid == "" {
+	// 115 returns id="0" or empty string for non-existent paths.
+	if cid == "" || cid == "0" {
 		return "", fmt.Errorf("path not found on 115: %s", path)
 	}
 	c.cache.SetPath(path, cid)
@@ -466,9 +467,12 @@ func (c *Client) mkdirParents(path string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("mkdirParents %s: %w", currentPath, err)
 		}
-		newCID := fmt.Sprintf("%v", result["cid"])
-		if newCID == "<nil>" || newCID == "" {
-			newCID = fmt.Sprintf("%v", result["aid"])
+		newCID := formatNum(result["cid"])
+		if newCID == "" || newCID == "0" {
+			newCID = formatNum(result["aid"])
+		}
+		if newCID == "" || newCID == "0" {
+			return "", fmt.Errorf("mkdirParents %s: no valid cid returned", currentPath)
 		}
 		c.cache.AddEntry(currentCID, Entry{
 			Name:   part,
@@ -594,6 +598,10 @@ func (c *Client) Delete(paths []string) error {
 	for _, r := range rslv {
 		c.cache.RemoveEntry(r.parentCID, r.name)
 		c.cache.DeletePathPrefix(r.path)
+		// If this was a directory, also clear its children from the cache.
+		if r.isDir && r.nodeID != "" {
+			c.cache.InvalidateDir(r.nodeID)
+		}
 		c.logger.Debug("WRITE-THRU remove_entry", "cid", r.parentCID, "name", r.name)
 	}
 	return nil
