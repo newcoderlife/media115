@@ -70,7 +70,7 @@ func NewEC115Cipher() (*EC115Cipher, error) {
 	copy(aesIV, sharedSecret[12:28])
 
 	// pubKey = 0x1d + MarshalCompressed(clientPub) — total 30 bytes.
-	compressed := elliptic.MarshalCompressed(curve, clientPriv.PublicKey.X, clientPriv.PublicKey.Y) //nolint:staticcheck // P-224 not in crypto/ecdh
+	compressed := elliptic.MarshalCompressed(curve, clientPriv.PublicKey.X, clientPriv.PublicKey.Y)
 	pubKey := append([]byte{0x1d}, compressed...)
 
 	return &EC115Cipher{
