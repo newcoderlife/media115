@@ -2,7 +2,7 @@
 
 build:
 	go build -o bin/cloud115 ./cmd/cloud115
-	go build -o bin/media115 ./cmd/media115-go
+	go build -o bin/media115 ./cmd/media115
 
 test:
 	go test ./... -timeout 30s -count=1
@@ -12,4 +12,4 @@ clean:
 
 install:
 	go install ./cmd/cloud115
-	go install ./cmd/media115-go
+	go install ./cmd/media115
