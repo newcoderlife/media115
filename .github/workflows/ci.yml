@@ -2,27 +2,55 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [master, main]
   pull_request:
-    branches: [master]
-  workflow_dispatch:
+    branches: [master, main]
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-go@v5
         with:
-          python-version: "3.9"
-      - run: pip install -e ".[dev]"
-      - name: Lint
-        run: ruff check src/ tests/
-      - name: Test (offline)
-        run: pytest -m "not live" -o "addopts=" --cov=media115 --cov-report=xml -q
-      - name: Upload coverage
-        if: github.ref == 'refs/heads/master'
-        uses: codecov/codecov-action@v4
+          go-version: "1.22"
+      - run: go test ./... -timeout 30s -count=1 -race
+
+  build:
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
-          files: coverage.xml
-          fail_ci_if_error: false
+          go-version: "1.22"
+      - name: Build cloud115
+        run: GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o cloud115-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/cloud115
+      - name: Build media115
+        run: GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o media115-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/media115
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            cloud115-*
+            media115-*
