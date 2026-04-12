@@ -27,7 +27,7 @@ var authCmd = &cobra.Command{
 	Short: "115 网盘登录认证",
 	Long:  "通过二维码登录 115 网盘并保存 cookies。",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger := logging.Setup(verbose)
+		logger, _ := logging.Setup(verbose)
 
 		if authCheck {
 			cfg, err := config.Load()
