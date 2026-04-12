@@ -3,9 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
-	"github.com/newcoderlife/media115/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -38,41 +36,7 @@ var syncCmd = &cobra.Command{
 			return fmt.Errorf("导出失败: %s", path)
 		}
 
-		// Write to tree_cache.txt
-		treePath := filepath.Join(config.CacheDir(), "tree_cache.txt")
-		if err := os.MkdirAll(filepath.Dir(treePath), 0o755); err != nil {
-			return fmt.Errorf("创建缓存目录失败: %w", err)
-		}
-
-		// Guard: don't overwrite full tree with smaller subtree
-		existingLines := 0
-		if data, err := os.ReadFile(treePath); err == nil {
-			for _, b := range data {
-				if b == '\n' {
-					existingLines++
-				}
-			}
-		}
-		newLines := 0
-		for _, b := range []byte(text) {
-			if b == '\n' {
-				newLines++
-			}
-		}
-
-		if existingLines > 0 && newLines < existingLines/2 {
-			fmt.Fprintf(os.Stderr, "警告: 当前 tree_cache 有 %d 行，新导出只有 %d 行\n", existingLines, newLines)
-			fmt.Fprintf(os.Stderr, "  这通常意味着你导出了子目录而非根目录。已跳过写入。\n")
-		} else {
-			if err := os.WriteFile(treePath, []byte(text), 0o644); err != nil {
-				return fmt.Errorf("写入 tree_cache.txt 失败: %w", err)
-			}
-
-			videoCount := countVideoLines(text)
-			fmt.Printf("已保存 tree_cache.txt：%d 行，%d 个视频文件\n", newLines, videoCount)
-		}
-
-		// Save to SQLite
+		// Save to SQLite (tree_entry table — no more tree_cache.txt)
 		count, err := client.SaveTree(text, videoExts, path)
 		if err != nil {
 			return fmt.Errorf("保存到 SQLite 失败: %w", err)
@@ -106,48 +70,6 @@ var syncCmd = &cobra.Command{
 	},
 }
 
-func countVideoLines(text string) int {
-	count := 0
-	extSet := map[string]bool{}
-	for _, e := range videoExts {
-		extSet[e] = true
-	}
-	for _, line := range splitLines(text) {
-		lower := lowerStr(line)
-		for ext := range extSet {
-			if len(lower) > len(ext) && lower[len(lower)-len(ext):] == ext {
-				count++
-				break
-			}
-		}
-	}
-	return count
-}
-
-func splitLines(s string) []string {
-	var lines []string
-	start := 0
-	for i, b := range s {
-		if b == '\n' {
-			lines = append(lines, s[start:i])
-			start = i + 1
-		}
-	}
-	if start < len(s) {
-		lines = append(lines, s[start:])
-	}
-	return lines
-}
-
-func lowerStr(s string) string {
-	b := []byte(s)
-	for i, c := range b {
-		if c >= 'A' && c <= 'Z' {
-			b[i] = c + 32
-		}
-	}
-	return string(b)
-}
 
 func init() {
 	syncCmd.Flags().BoolVar(&syncDeep, "deep", false, "递归预热目录 listing 缓存")
