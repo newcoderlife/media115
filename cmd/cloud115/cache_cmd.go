@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/newcoderlife/media115/internal/cloud115"
 	"github.com/spf13/cobra"
 )
 
@@ -58,15 +59,13 @@ var cacheClearCmd = &cobra.Command{
 	Use:   "clear",
 	Short: "清除缓存（路径和目录 listing）",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := getClient()
+		// Use direct Cache access — no login credentials required.
+		cache, err := cloud115.NewCache("")
 		if err != nil {
-			return err
+			return fmt.Errorf("打开缓存失败: %w", err)
 		}
-		defer client.Close()
-
-		if err := client.CacheClear(); err != nil {
-			return fmt.Errorf("清除缓存失败: %w", err)
-		}
+		defer cache.Close()
+		cache.ClearMetadata()
 		fmt.Println("缓存已清除（路径映射 + 目录 listing）")
 		return nil
 	},

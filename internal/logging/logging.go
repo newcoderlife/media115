@@ -104,6 +104,7 @@ func (h *consoleHandler) WithGroup(name string) slog.Handler {
 type multiHandler struct {
 	console slog.Handler
 	file    slog.Handler
+	f       *os.File // kept to sync after each write
 }
 
 func (m multiHandler) Enabled(_ context.Context, level slog.Level) bool {
@@ -111,17 +112,26 @@ func (m multiHandler) Enabled(_ context.Context, level slog.Level) bool {
 }
 
 func (m multiHandler) Handle(ctx context.Context, r slog.Record) error {
-	_ = m.console.Handle(ctx, r)
-	_ = m.file.Handle(ctx, r)
+	if m.console.Enabled(ctx, r.Level) {
+		_ = m.console.Handle(ctx, r)
+	}
+	if m.file != nil && m.file.Enabled(ctx, r.Level) {
+		_ = m.file.Handle(ctx, r)
+		// Flush after every write so records are visible even if the
+		// slog.JSONHandler buffers internally.
+		if m.f != nil {
+			_ = m.f.Sync()
+		}
+	}
 	return nil
 }
 
 func (m multiHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return multiHandler{m.console.WithAttrs(attrs), m.file.WithAttrs(attrs)}
+	return multiHandler{m.console.WithAttrs(attrs), m.file.WithAttrs(attrs), m.f}
 }
 
 func (m multiHandler) WithGroup(name string) slog.Handler {
-	return multiHandler{m.console.WithGroup(name), m.file.WithGroup(name)}
+	return multiHandler{m.console.WithGroup(name), m.file.WithGroup(name), m.f}
 }
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
@@ -149,7 +159,7 @@ func Setup(verbose bool) (*slog.Logger, *Stats) {
 	}
 
 	fileHandler := slog.NewJSONHandler(f, &slog.HandlerOptions{Level: slog.LevelDebug})
-	handler := multiHandler{console: console, file: fileHandler}
+	handler := multiHandler{console: console, file: fileHandler, f: f}
 	return slog.New(handler), stats
 }
 

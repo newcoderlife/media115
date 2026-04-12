@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"mime/multipart"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -739,18 +740,25 @@ func (a *API) ListFilesAll(dirID string) ([]map[string]any, error) {
 }
 
 // GetDirID resolves an absolute path string to a directory ID.
+// Returns "" when the path does not exist (including when the API returns id=0).
 func (a *API) GetDirID(path string) (string, error) {
 	result, err := a.cookieRequest("GET", WebAPI+"/files/getid", url.Values{"path": {path}}, nil, nil, "")
 	if err != nil {
 		return "", err
 	}
-	if state, _ := result["state"].(bool); state {
-		cid := fmt.Sprintf("%v", result["id"])
-		a.logger.Debug("get_dir_id", "path", path, "cid", cid)
-		return cid, nil
+	state, _ := result["state"].(bool)
+	if !state {
+		a.logger.Debug("get_dir_id not found (state=false)", "path", path)
+		return "", nil
 	}
-	a.logger.Debug("get_dir_id not found", "path", path)
-	return "", nil
+	cid := formatNum(result["id"])
+	// 115 returns id="0" for non-existent paths even when state=true.
+	if cid == "" || cid == "0" {
+		a.logger.Debug("get_dir_id not found (id=0)", "path", path)
+		return "", nil
+	}
+	a.logger.Debug("get_dir_id", "path", path, "cid", cid)
+	return cid, nil
 }
 
 // Search returns entries matching keyword in dirID.
@@ -939,12 +947,28 @@ func (a *API) ExportTree(dirID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Cookie", cookieHdr)
 	req.Header.Set("User-Agent", defaultUA)
+
+	// Parse cookies into a jar so they are sent on every request in the
+	// redirect chain, matching Python httpx's cookies=dict behaviour.
+	jar, _ := cookiejar.New(nil)
+	var parsedCookies []*http.Cookie
+	for _, part := range strings.Split(cookieHdr, ";") {
+		part = strings.TrimSpace(part)
+		if i := strings.Index(part, "="); i > 0 {
+			parsedCookies = append(parsedCookies, &http.Cookie{
+				Name:  part[:i],
+				Value: part[i+1:],
+			})
+		}
+	}
+	jarURL, _ := url.Parse("https://115.com/")
+	jar.SetCookies(jarURL, parsedCookies)
 	dlClient := &http.Client{
 		Timeout: 30 * time.Second,
+		Jar:     jar,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			req.Header.Set("Cookie", cookieHdr)
+			req.Header.Set("User-Agent", defaultUA)
 			if len(via) > 10 {
 				return fmt.Errorf("too many redirects")
 			}
