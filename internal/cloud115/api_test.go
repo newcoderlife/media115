@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -339,6 +340,20 @@ func TestAPIListFilesAll(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Errorf("expected 1 HTTP call, got %d", calls)
+	}
+}
+
+// ── TestFormatNumFloat64 ──────────────────────────────────────────────────────
+
+func TestFormatNumFloat64(t *testing.T) {
+	// Simulate JSON-decoded timestamp: json.Unmarshal into map[string]any gives float64.
+	result := formatNum(float64(1775973641))
+	if result != "1775973641" {
+		t.Fatalf("got %q, want 1775973641", result)
+	}
+	// Must NOT be scientific notation.
+	if strings.Contains(result, "e") || strings.Contains(result, "E") {
+		t.Fatalf("got scientific notation: %q", result)
 	}
 }
 

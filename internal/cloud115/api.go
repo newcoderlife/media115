@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf16"
@@ -387,6 +388,25 @@ func (a *API) RenewCookies(app string) bool {
 	return true
 }
 
+// formatNum converts a JSON number (float64) to a clean integer string.
+// When JSON decodes into map[string]any, numbers become float64, so
+// fmt.Sprintf("%v", float64(1775973641)) produces "1.775973641e+09" (scientific
+// notation). This helper avoids that by casting through int64 first.
+func formatNum(v any) string {
+	switch n := v.(type) {
+	case float64:
+		return strconv.FormatInt(int64(n), 10)
+	case int:
+		return strconv.Itoa(n)
+	case int64:
+		return strconv.FormatInt(n, 10)
+	case string:
+		return n
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
 // QRLogin performs an interactive QR-code login and updates the client cookies.
 func (a *API) QRLogin(app string) error {
 	if app == "" {
@@ -409,7 +429,7 @@ func (a *API) QRLogin(app string) error {
 		return fmt.Errorf("QRLogin: no token data")
 	}
 	uid, _ := tokenData["uid"].(string)
-	qrTime := fmt.Sprintf("%v", tokenData["time"])
+	qrTime := formatNum(tokenData["time"])
 	sign, _ := tokenData["sign"].(string)
 	a.logger.Debug("QRLogin: token obtained", "uid", uid)
 
@@ -417,8 +437,9 @@ func (a *API) QRLogin(app string) error {
 	fmt.Printf("Scan QR: %s\n", qrImageURL)
 	fmt.Println("Waiting for scan...")
 
-	statusLoop:
-	for {
+	maxPolls := 180 // 3 minutes
+	loginConfirmed := false
+	for i := 0; i < maxPolls; i++ {
 		params := url.Values{
 			"uid":  {uid},
 			"time": {qrTime},
@@ -429,7 +450,7 @@ func (a *API) QRLogin(app string) error {
 		u.RawQuery = params.Encode()
 		statusResp, err := client.Get(u.String())
 		if err != nil {
-			a.logger.Debug("QRLogin: status poll error", "err", err)
+			a.logger.Debug("QR poll error", "attempt", i, "err", err)
 			time.Sleep(time.Second)
 			continue
 		}
@@ -449,7 +470,7 @@ func (a *API) QRLogin(app string) error {
 		if s, ok := statusData["status"].(float64); ok {
 			status = int(s)
 		}
-		a.logger.Debug("QRLogin: poll status", "status", status)
+		a.logger.Debug("QR poll", "attempt", i, "status", status)
 		switch status {
 		case 0:
 			time.Sleep(2 * time.Second)
@@ -458,7 +479,7 @@ func (a *API) QRLogin(app string) error {
 			time.Sleep(time.Second)
 		case 2:
 			fmt.Println("Login confirmed!")
-			break statusLoop
+			loginConfirmed = true
 		case -1:
 			return fmt.Errorf("QR code expired")
 		case -2:
@@ -466,6 +487,12 @@ func (a *API) QRLogin(app string) error {
 		default:
 			time.Sleep(time.Second)
 		}
+		if loginConfirmed {
+			break
+		}
+	}
+	if !loginConfirmed {
+		return fmt.Errorf("QR login timed out after %d seconds", maxPolls)
 	}
 
 	formData := url.Values{"account": {uid}, "app": {app}}
@@ -527,7 +554,7 @@ func (a *API) QRGetToken(app string) (*QRSession, error) {
 		return nil, fmt.Errorf("QRGetToken: no token data")
 	}
 	uid, _ := tokenData["uid"].(string)
-	qrTime := fmt.Sprintf("%v", tokenData["time"])
+	qrTime := formatNum(tokenData["time"])
 	sign, _ := tokenData["sign"].(string)
 	qrURL := fmt.Sprintf("%s/api/1.0/web/1.0/qrcode?qrfrom=1&client=0d&uid=%s", QRAPI, uid)
 
@@ -546,8 +573,9 @@ func (a *API) QRWaitAndLogin(sess *QRSession) error {
 	a.logger.Debug("QRWaitAndLogin: starting poll", "uid", sess.UID, "app", sess.App)
 	client := &http.Client{Timeout: 35 * time.Second}
 
-statusLoop:
-	for {
+	maxPolls := 180 // 3 minutes
+	loginConfirmed := false
+	for i := 0; i < maxPolls; i++ {
 		params := url.Values{
 			"uid":  {sess.UID},
 			"time": {sess.Time},
@@ -558,7 +586,7 @@ statusLoop:
 		u.RawQuery = params.Encode()
 		statusResp, err := client.Get(u.String())
 		if err != nil {
-			a.logger.Debug("QRWaitAndLogin: status poll error", "err", err)
+			a.logger.Debug("QR poll error", "attempt", i, "err", err)
 			time.Sleep(time.Second)
 			continue
 		}
@@ -578,7 +606,7 @@ statusLoop:
 		if s, ok := statusData["status"].(float64); ok {
 			status = int(s)
 		}
-		a.logger.Debug("QRWaitAndLogin: poll status", "status", status)
+		a.logger.Debug("QR poll", "attempt", i, "status", status)
 		switch status {
 		case 0:
 			time.Sleep(2 * time.Second)
@@ -587,7 +615,7 @@ statusLoop:
 			time.Sleep(time.Second)
 		case 2:
 			fmt.Println("Login confirmed!")
-			break statusLoop
+			loginConfirmed = true
 		case -1:
 			return fmt.Errorf("QR code expired")
 		case -2:
@@ -595,6 +623,12 @@ statusLoop:
 		default:
 			time.Sleep(time.Second)
 		}
+		if loginConfirmed {
+			break
+		}
+	}
+	if !loginConfirmed {
+		return fmt.Errorf("QR login timed out after %d seconds", maxPolls)
 	}
 
 	formData := url.Values{"account": {sess.UID}, "app": {sess.App}}
@@ -621,7 +655,16 @@ statusLoop:
 	for k, v := range cookies {
 		parts = append(parts, fmt.Sprintf("%s=%v", k, v))
 	}
-	a.cookies = strings.Join(parts, "; ")
+	cookieStr := strings.Join(parts, "; ")
+	a.cookies = cookieStr
+	// Extract userID from cookies (same as constructor).
+	for _, part := range strings.Split(cookieStr, ";") {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, "UID=") {
+			a.userID = strings.SplitN(part[4:], "_", 2)[0]
+			break
+		}
+	}
 	fmt.Printf("Login success! Cookie length: %d\n", len(a.cookies))
 	return nil
 }
