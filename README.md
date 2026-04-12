@@ -1,7 +1,9 @@
 # media115
 
 [![CI](https://github.com/newcoderlife/media115/actions/workflows/ci.yml/badge.svg)](https://github.com/newcoderlife/media115/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/newcoderlife/media115)](go.mod)
+[![License](https://img.shields.io/github/license/newcoderlife/media115)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/newcoderlife/media115)](https://github.com/newcoderlife/media115/releases)
 
 Media library management tool for 115 cloud drive. Scrapes metadata from TMDB, Bangumi, jav321, javfree, ThePornDB, and StashDB; organizes files into standard naming; uploads NFO and posters.
 
