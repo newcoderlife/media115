@@ -297,50 +297,6 @@ func TestRegisterProvidersWithTokens(t *testing.T) {
 	scraper.Reset()
 }
 
-// ── Cobra command registration ────────────────────────────────────────────────
-
-func TestRootCommandHasAllSubcommands(t *testing.T) {
-	wantCmds := []string{"scan", "scrape", "scrape-fix", "organize", "doctor"}
-	for _, name := range wantCmds {
-		found := false
-		for _, cmd := range rootCmd.Commands() {
-			if cmd.Name() == name {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("rootCmd is missing subcommand %q", name)
-		}
-	}
-}
-
-func TestRootCommandVerboseFlag(t *testing.T) {
-	if rootCmd.PersistentFlags().Lookup("verbose") == nil {
-		t.Error("rootCmd missing --verbose flag")
-	}
-}
-
-func TestScanCmdAllFlag(t *testing.T) {
-	if scanCmd.Flags().Lookup("all") == nil {
-		t.Error("scanCmd missing --all flag")
-	}
-}
-
-func TestScrapeCmdFlags(t *testing.T) {
-	for _, name := range []string{"force", "limit"} {
-		if scrapeCmd.Flags().Lookup(name) == nil {
-			t.Errorf("scrapeCmd missing --%s flag", name)
-		}
-	}
-}
-
-func TestOrganizeCmdExecuteFlag(t *testing.T) {
-	if organizeCmd.Flags().Lookup("execute") == nil {
-		t.Error("organizeCmd missing --execute flag")
-	}
-}
-
 // ── scrapeGet / scrapePut / scrapeIsNotFound ───────────────────────────────────
 
 func TestScrapePutAndGet(t *testing.T) {

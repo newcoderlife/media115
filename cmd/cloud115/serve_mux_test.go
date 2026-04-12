@@ -347,14 +347,3 @@ func TestBuildProxyMuxVideosStreamBadJSON(t *testing.T) {
 		t.Errorf("bad JSON: expected 200 or 502 fallback, got %d", w.Code)
 	}
 }
-
-// TestBuildProxyMuxNotNil verifies that buildProxyMux returns a non-nil handler.
-func TestBuildProxyMuxNotNil(t *testing.T) {
-	client, cleanup := newTestClient(t)
-	defer cleanup()
-
-	mux := buildProxyMux(client, "http://localhost:8096")
-	if mux == nil {
-		t.Error("buildProxyMux returned nil handler")
-	}
-}

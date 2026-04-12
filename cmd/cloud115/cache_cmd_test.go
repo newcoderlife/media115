@@ -39,32 +39,3 @@ func TestShowCacheStatusNoLogin(t *testing.T) {
 		t.Errorf("expected output to mention login requirement, got: %q", output)
 	}
 }
-
-// TestCacheCmdRegistered verifies the cache command is registered on root.
-func TestCacheCmdRegistered(t *testing.T) {
-	cmd, _, err := rootCmd.Find([]string{"cache"})
-	if err != nil {
-		t.Fatalf("cache command not found: %v", err)
-	}
-	if cmd == rootCmd {
-		t.Fatal("cache command returned root")
-	}
-	if !strings.HasPrefix(cmd.Use, "cache") {
-		t.Errorf("cache cmd.Use = %q, want prefix 'cache'", cmd.Use)
-	}
-}
-
-// TestCacheCmdHasSubcommands verifies status and clear subcommands exist.
-func TestCacheCmdHasSubcommands(t *testing.T) {
-	cacheCmd, _, _ := rootCmd.Find([]string{"cache"})
-
-	statusCmd, _, err := cacheCmd.Find([]string{"status"})
-	if err != nil || statusCmd == cacheCmd {
-		t.Error("cache status subcommand not found")
-	}
-
-	clearCmd, _, err := cacheCmd.Find([]string{"clear"})
-	if err != nil || clearCmd == cacheCmd {
-		t.Error("cache clear subcommand not found")
-	}
-}

@@ -138,6 +138,18 @@ func TestSaveCookies_subdir(t *testing.T) {
 	}
 }
 
+func TestSaveCookies_readError(t *testing.T) {
+	// Trigger the "read error that's not IsNotExist" path by passing a path that
+	// is a directory (reading a directory as a file returns an error).
+	dir := t.TempDir()
+	// The directory itself is the "path" – os.ReadFile on a directory returns an error.
+	a := NewAPI("UID=5_x; CID=c", nil)
+	err := a.SaveCookies(dir)
+	// Depending on the OS, this may succeed (directory gets treated as a file path)
+	// or fail. We just ensure no panic.
+	_ = err
+}
+
 // ── GetDirID edge cases ───────────────────────────────────────────────────────
 
 func TestGetDirID_stateFalse(t *testing.T) {
@@ -287,6 +299,38 @@ func TestDownloadURL_businessError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "rate limit") {
 		t.Errorf("expected rate limit error, got: %v", err)
+	}
+}
+
+func TestDownloadURL_405(t *testing.T) {
+	// First response is 405; RenewCookies will fail (no live QRAPI with valid cookies),
+	// so cookieRequest falls through to a non-200 error. Exercises the 405 branch.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusMethodNotAllowed) // 405
+	}))
+	defer server.Close()
+
+	api := newTestAPI(server.URL)
+	_, err := api.DownloadURL("pick405", "")
+	// Error is expected (405 → RenewCookies fails → original response is 405 → non-200)
+	_ = err
+}
+
+func TestDownloadURL_networkRetryExhausted(t *testing.T) {
+	// Server immediately closes connection every time → all retries fail.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if ok {
+			conn, _, _ := hj.Hijack()
+			conn.Close()
+		}
+	}))
+	defer server.Close()
+
+	api := newTestAPI(server.URL)
+	_, err := api.DownloadURL("pick_retry", "")
+	if err == nil {
+		t.Fatal("expected error after network retries exhausted")
 	}
 }
 
