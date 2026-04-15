@@ -21,6 +21,8 @@ jobs:
           version: latest
           args: ./...
           verify: false
+      - name: Check formatting
+        run: golangci-lint fmt --diff ./...
 
   test:
     runs-on: ubuntu-latest
