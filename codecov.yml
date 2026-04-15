@@ -3,6 +3,8 @@ coverage:
     project:
       default:
         target: auto
+        if_not_found: failure
     patch:
       default:
         target: 80%
+        if_not_found: failure

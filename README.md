@@ -7,6 +7,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/newcoderlife/media115)](https://goreportcard.com/report/github.com/newcoderlife/media115)
 [![codecov](https://codecov.io/gh/newcoderlife/media115/graph/badge.svg)](https://codecov.io/gh/newcoderlife/media115)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/newcoderlife/media115/badge)](https://securityscorecards.dev/viewer/?uri=github.com/newcoderlife/media115)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12553/badge)](https://www.bestpractices.dev/projects/12553)
 
 Media library management tool for 115 cloud drive. Scrapes metadata from TMDB, Bangumi, jav321, javfree, ThePornDB, and StashDB; organizes files into standard naming; uploads NFO and posters.
 
