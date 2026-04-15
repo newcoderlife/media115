@@ -120,3 +120,4 @@ $RECYCLE.BIN/
 # End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,macos,windows,linux,go
 
 config.toml
+bin/*
