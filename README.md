@@ -104,6 +104,12 @@ port = 9000
 jellyfin_url = "http://localhost:8096"
 ```
 
+Cache layout:
+
+- `cloud115` SQLite cache: `~/.cache/cloud115/cache.db`
+- `media115` scrape cache + outputs: `~/.cache/media115/`
+- `proxy.*` is used by `cloud115 serve` and `cloud115 strm`
+
 ## Supported Media Types
 
 | Type | Category folder | Data source |
@@ -125,7 +131,10 @@ cloud115 auth                        # QR login (scan with 115 app)
 cloud115 auth --check                # Check login status
 cloud115 auth --get-qr               # Print QR URL and exit
 cloud115 auth --wait-qr              # Block until QR scanned, save cookies
+cloud115 auth --qr                   # Generate QR code URL (non-blocking)
 cloud115 auth --renew                # Auto-renew cookies
+cloud115 auth --force                # Force re-login even if cookies still work
+cloud115 auth --app tv               # Device type: tv / qandroid / web
 
 # File system
 cloud115 ls /影音                    # List directory
@@ -135,26 +144,29 @@ cloud115 stat /影音/电影/满江红.mkv  # File metadata (JSON)
 cloud115 find "满江红" /影音         # Search by keyword
 cloud115 mkdir -p /影音/电影/新目录  # Create directory (recursive)
 cloud115 mv /影音/a.mkv /影音/电影/  # Move file or directory
-cloud115 rename /影音/old.mkv new    # Rename in place
+cloud115 rename /影音/old.mkv new.mkv # Rename in place
+cloud115 rename --batch < pairs.json # Batch rename (JSON stdin: [[path, new_name], ...])
 cloud115 rm /影音/垃圾.txt           # Delete file
 cloud115 rm -r /影音/空目录          # Delete directory recursively
 cloud115 put ./local.nfo /影音/电影/ # Upload (tries rapid upload first)
+cloud115 put ./local.nfo /影音/电影/ --no-rapid # Skip rapid upload
 cloud115 rapid ./large.mkv /影音/电影/ # Rapid upload (SHA1 match, instant)
 cloud115 get /影音/电影/a.mkv ./     # Download
 
 # Cache and sync
 cloud115 sync /影音                  # Refresh SQLite cache (2-3 API calls)
-cloud115 sync /影音 --deep --depth 2 # Also pre-warm dir listing cache
+cloud115 sync /影音 --deep --depth 3 # Also pre-warm dir listing cache (default depth 3)
 cloud115 cache status                # Show cache stats
-cloud115 cache clear                 # Clear path/dir cache
-cloud115 cache clear --tree          # Also clear tree_cache.txt
-cloud115 cache clear --scrape        # Also clear scrape cache + scrape_output
-cloud115 cache clear --all           # Clear everything
+cloud115 cache clear                 # Clear local metadata cache (path/listing/tree; keeps rate-limit state)
 
 # Utilities
 cloud115 dedup "/影音/电影"          # Dry-run: show duplicate files
 cloud115 dedup "/影音/电影" --execute # Delete duplicates (keeps first copy)
 cloud115 doctor                      # Check environment, credentials, cache
+cloud115 serve                       # Start strm-proxy for Jellyfin
+cloud115 serve --host 0.0.0.0 --port 8080 # Custom host/port
+cloud115 strm /影音/电影 -o ./strm   # Generate .strm files from tree cache
+cloud115 strm /影音/电影 -o ./strm --host 0.0.0.0 --port 8080 # Custom proxy URL in .strm
 ```
 
 ### media115
@@ -164,23 +176,22 @@ cloud115 doctor                      # Check environment, credentials, cache
 media115 scan 电影                   # Analyze cache, show scraping plan + anomalies
 media115 scan AV
 media115 scan 剧目
+media115 scan 电影 --all            # Show files that would otherwise be skipped
 
 # Scrape
 media115 scrape 电影                 # Scrape files without NFO
 media115 scrape 电影 --force         # Re-scrape all files (including those with NFO)
-media115 scrape "满江红"             # Search TMDB for a single title
-media115 scrape "满江红" --source bangumi   # Search Bangumi
-media115 scrape "SONE-001" --source jav321  # Search jav321
+media115 scrape 电影 --limit 20      # Scrape only the first 20 files
 
 # Scrape fix
 media115 scrape-fix "Restart.2026.mkv" --tmdb-id 1664596
 media115 scrape-fix "Restart.2026.mkv" --search "守护游戏"
 media115 scrape-fix "T-3800040.mkv" --number "T28-003"
+media115 scrape-fix "Naruto.S01E01.mkv" --category 剧目 --season 1 --episode 1
 
 # Organize
 media115 organize 电影               # Dry-run: show plan
-media115 organize 电影 --execute     # Execute: move + rename + upload NFO
-media115 organize 电影 --execute --cleanup  # Also delete unrelated empty dirs
+media115 organize 电影 --execute     # Execute: move + rename + upload NFO; also cleans up touched old dirs
 
 # Doctor
 media115 doctor                      # Check environment, credentials, cache
@@ -188,4 +199,4 @@ media115 doctor                      # Check environment, credentials, cache
 
 ## License
 
-<!-- TODO: add license -->
+MIT. See [LICENSE](LICENSE).
