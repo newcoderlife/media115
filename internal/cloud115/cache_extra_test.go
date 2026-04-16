@@ -6,6 +6,7 @@ package cloud115
 // Stats (populated), ClearMetadata, Clear, and helper paths.
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -509,5 +510,201 @@ func TestIncrementMinuteCountMultipleNames(t *testing.T) {
 	}
 	if rlB.MinuteCount != 1 {
 		t.Errorf("b minute_count = %d; want 1", rlB.MinuteCount)
+	}
+}
+
+// ---- NewCache: old version triggers migration (v1 → v3) --------------------
+
+func TestNewCacheOldVersionMigration(t *testing.T) {
+	dbFile := filepath.Join(t.TempDir(), "old_v1.db")
+
+	// Create a DB with an old user_version to trigger migration.
+	db, err := sql.Open("sqlite", dbFile)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	// Set version to 1 (old).
+	_, _ = db.Exec("PRAGMA user_version = 1")
+	// Create a table that should be dropped during migration.
+	_, _ = db.Exec("CREATE TABLE path_index (path TEXT PRIMARY KEY, cid TEXT, ts INTEGER)")
+	_, _ = db.Exec("INSERT INTO path_index VALUES ('/old', 'cid_old', 0)")
+	_ = db.Close()
+
+	// Reopen with NewCache — triggers migration from v1 to v3.
+	c, err := NewCache(dbFile)
+	if err != nil {
+		t.Fatalf("NewCache migration: %v", err)
+	}
+	defer func() { _ = c.Close() }()
+
+	// Old data should be gone.
+	if _, _, ok := c.GetPath("/old"); ok {
+		t.Error("old data should be cleared after migration")
+	}
+
+	// New schema should work.
+	c.SetPath("/new", "cid_new")
+	if _, _, ok := c.GetPath("/new"); !ok {
+		t.Error("new data should be storable after migration")
+	}
+
+	// Confirm schema version.
+	var ver int
+	_ = c.db.QueryRow("PRAGMA user_version").Scan(&ver)
+	if ver != schemaVersion {
+		t.Errorf("user_version = %d; want %d after migration", ver, schemaVersion)
+	}
+}
+
+// ---- TryAcquireSlot: cooldown blocks acquisition ----------------------------
+
+func TestTryAcquireSlotCooldownBlock(t *testing.T) {
+	c := newTestCache(t)
+	now := float64(time.Now().Unix())
+
+	// Set a cooldown in the future.
+	c.SetRateLimit("cd_test", RateLimitState{CooldownUntil: now + 3600})
+
+	if c.TryAcquireSlot("cd_test", now, 0.0, 100) {
+		t.Error("TryAcquireSlot should fail during cooldown")
+	}
+}
+
+// ---- TryAcquireSlot: QPM exceeded blocks acquisition ------------------------
+
+func TestTryAcquireSlotQPMExceeded(t *testing.T) {
+	c := newTestCache(t)
+	now := float64(time.Now().Unix())
+
+	// Set minute_count at the QPM limit with a recent minute_start.
+	c.SetRateLimit("qpm_block", RateLimitState{
+		LastRequest: now - 5, // 5 seconds ago (QPS ok)
+		MinuteCount: 10,      // at QPM limit
+		MinuteStart: now - 5, // window started recently
+	})
+
+	if c.TryAcquireSlot("qpm_block", now, 0.0, 10) {
+		t.Error("TryAcquireSlot should fail when QPM is exceeded")
+	}
+}
+
+// ---- TryAcquireSlot: QPS too fast blocks acquisition ------------------------
+
+func TestTryAcquireSlotQPSTooFast(t *testing.T) {
+	c := newTestCache(t)
+	now := float64(time.Now().Unix())
+
+	// last_request is very recent, minInterval is large.
+	c.SetRateLimit("qps_block", RateLimitState{
+		LastRequest: now - 0.1, // 100ms ago
+		MinuteCount: 1,
+		MinuteStart: now,
+	})
+
+	// minInterval = 2.0 (QPS = 0.5) — need to wait 1.9s more.
+	if c.TryAcquireSlot("qps_block", now, 2.0, 100) {
+		t.Error("TryAcquireSlot should fail when QPS is too fast")
+	}
+}
+
+// ---- GetPath: non-existent path returns ok=false ----------------------------
+
+func TestGetPathNotFound(t *testing.T) {
+	c := newTestCache(t)
+	_, _, ok := c.GetPath("/nonexistent")
+	if ok {
+		t.Error("GetPath for nonexistent path should return ok=false")
+	}
+}
+
+// ---- GetDirTS: non-existent cid returns ok=false ----------------------------
+
+func TestGetDirTSNotFound(t *testing.T) {
+	c := newTestCache(t)
+	_, ok := c.GetDirTS("nonexistent_cid")
+	if ok {
+		t.Error("GetDirTS for nonexistent cid should return ok=false")
+	}
+}
+
+// ---- GetDirTS: existing cid returns ts and ok=true --------------------------
+
+func TestGetDirTSFound(t *testing.T) {
+	c := newTestCache(t)
+	c.SetDirListing("ts_cid", []Entry{fileEntry("f.mkv", "n1")})
+	ts, ok := c.GetDirTS("ts_cid")
+	if !ok {
+		t.Fatal("GetDirTS should return ok=true for existing cid")
+	}
+	if ts == 0 {
+		t.Error("ts should not be 0")
+	}
+}
+
+// ---- InvalidateDir: removes both meta and entries ---------------------------
+
+func TestInvalidateDirRemovesBoth(t *testing.T) {
+	c := newTestCache(t)
+	c.SetDirListing("inv_cid", []Entry{fileEntry("f.mkv", "n1")})
+
+	// Verify data exists.
+	if _, ok := c.GetDirTS("inv_cid"); !ok {
+		t.Fatal("dir_meta should exist before invalidation")
+	}
+
+	c.InvalidateDir("inv_cid")
+
+	if _, ok := c.GetDirTS("inv_cid"); ok {
+		t.Error("dir_meta should be gone after InvalidateDir")
+	}
+	if entries := c.GetDirEntries("inv_cid"); len(entries) != 0 {
+		t.Errorf("entries should be empty after InvalidateDir, got %d", len(entries))
+	}
+}
+
+// ---- DeletePathPrefix: removes exact and children ---------------------------
+
+func TestDeletePathPrefixRemovesChildren(t *testing.T) {
+	c := newTestCache(t)
+	c.SetPath("/a", "1")
+	c.SetPath("/a/b", "2")
+	c.SetPath("/a/b/c", "3")
+	c.SetPath("/x", "4")
+
+	c.DeletePathPrefix("/a")
+
+	if _, _, ok := c.GetPath("/a"); ok {
+		t.Error("/a should be deleted")
+	}
+	if _, _, ok := c.GetPath("/a/b"); ok {
+		t.Error("/a/b should be deleted")
+	}
+	if _, _, ok := c.GetPath("/a/b/c"); ok {
+		t.Error("/a/b/c should be deleted")
+	}
+	if _, _, ok := c.GetPath("/x"); !ok {
+		t.Error("/x should still exist")
+	}
+}
+
+// ---- TreeStats: counts with mixed entries -----------------------------------
+
+func TestTreeStatsMixed(t *testing.T) {
+	c := newTestCache(t)
+	c.SetTree([]TreeEntry{
+		{Path: "a/b.mkv", Name: "b.mkv", Parent: "a", IsVideo: true},
+		{Path: "a/b.nfo", Name: "b.nfo", Parent: "a", IsNFO: true},
+		{Path: "a", Name: "a", Parent: ""},
+	}, "")
+
+	total, videos, nfos := c.TreeStats()
+	if total != 3 {
+		t.Errorf("total = %d; want 3", total)
+	}
+	if videos != 1 {
+		t.Errorf("videos = %d; want 1", videos)
+	}
+	if nfos != 1 {
+		t.Errorf("nfos = %d; want 1", nfos)
 	}
 }

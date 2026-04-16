@@ -214,3 +214,258 @@ func TestAPIKeyHeader(t *testing.T) {
 		t.Errorf("ApiKey header = %q, want my-api-key", gotKey)
 	}
 }
+
+func TestSceneDetailNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(graphqlResponse(map[string]any{
+			"findScene": nil, // scene not found
+		}))
+	}))
+	defer server.Close()
+
+	p := stashdb.NewWithEndpoint("key", server.URL)
+	_, err := p.Detail("non-existent")
+	if err == nil {
+		t.Error("expected error for not found scene")
+	}
+}
+
+func TestQueryHTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	p := stashdb.NewWithEndpoint("key", server.URL)
+	_, err := p.Search("test", scraper.SearchOpts{})
+	if err == nil {
+		t.Error("expected error for HTTP 500")
+	}
+}
+
+func TestQueryHTTP502(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer server.Close()
+
+	p := stashdb.NewWithEndpoint("key", server.URL)
+	_, err := p.Search("test", scraper.SearchOpts{})
+	if err == nil {
+		t.Error("expected error for HTTP 502")
+	}
+}
+
+func TestQueryInvalidJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("not json {{{"))
+	}))
+	defer server.Close()
+
+	p := stashdb.NewWithEndpoint("key", server.URL)
+	_, err := p.Search("test", scraper.SearchOpts{})
+	if err == nil {
+		t.Error("expected error for invalid JSON")
+	}
+}
+
+func TestQueryNullDataResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Respond with data: null (no errors)
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": nil,
+		})
+	}))
+	defer server.Close()
+
+	p := stashdb.NewWithEndpoint("key", server.URL)
+	results, err := p.Search("test", scraper.SearchOpts{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// null data → empty searchScene → empty results
+	if len(results) != 0 {
+		t.Errorf("expected empty results, got %d", len(results))
+	}
+}
+
+func TestBuildMetadataNoStudio(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(graphqlResponse(map[string]any{
+			"findScene": map[string]any{
+				"id":         "s1",
+				"title":      "No Studio Scene",
+				"date":       "2024-01-01",
+				"studio":     nil,
+				"performers": []any{},
+				"tags":       []any{},
+				"images":     []any{},
+			},
+		}))
+	}))
+	defer server.Close()
+
+	p := stashdb.NewWithEndpoint("key", server.URL)
+	meta, err := p.Detail("s1")
+	if err != nil {
+		t.Fatalf("Detail: %v", err)
+	}
+	if len(meta.Studios) != 0 {
+		t.Errorf("Studios = %v; want empty for nil studio", meta.Studios)
+	}
+}
+
+func TestBuildMetadataNoPerformers(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(graphqlResponse(map[string]any{
+			"findScene": map[string]any{
+				"id":    "s2",
+				"title": "No Performers",
+				"date":  "2024-01-01",
+				"performers": []any{
+					"invalid performer type", // not a map → should be skipped
+				},
+				"tags":   []any{},
+				"images": []any{},
+			},
+		}))
+	}))
+	defer server.Close()
+
+	p := stashdb.NewWithEndpoint("key", server.URL)
+	meta, err := p.Detail("s2")
+	if err != nil {
+		t.Fatalf("Detail: %v", err)
+	}
+	if len(meta.Actors) != 0 {
+		t.Errorf("Actors = %v; want empty for invalid performer", meta.Actors)
+	}
+}
+
+func TestBuildMetadataPerformerNoInnerPerformer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(graphqlResponse(map[string]any{
+			"findScene": map[string]any{
+				"id":    "s3",
+				"title": "Missing Inner Performer",
+				"date":  "2024-01-01",
+				"performers": []any{
+					map[string]any{
+						"as_role":   "Lead",
+						"performer": "not-a-map", // invalid type
+					},
+				},
+				"tags":   []any{},
+				"images": []any{},
+			},
+		}))
+	}))
+	defer server.Close()
+
+	p := stashdb.NewWithEndpoint("key", server.URL)
+	meta, err := p.Detail("s3")
+	if err != nil {
+		t.Fatalf("Detail: %v", err)
+	}
+	if len(meta.Actors) != 0 {
+		t.Errorf("Actors = %v; want empty for invalid inner performer", meta.Actors)
+	}
+}
+
+func TestBuildMetadataZeroDuration(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(graphqlResponse(map[string]any{
+			"findScene": map[string]any{
+				"id":         "s4",
+				"title":      "Zero Duration",
+				"date":       "2024-01-01",
+				"duration":   float64(0),
+				"performers": []any{},
+				"tags":       []any{},
+				"images":     []any{},
+			},
+		}))
+	}))
+	defer server.Close()
+
+	p := stashdb.NewWithEndpoint("key", server.URL)
+	meta, err := p.Detail("s4")
+	if err != nil {
+		t.Fatalf("Detail: %v", err)
+	}
+	if meta.Runtime != 0 {
+		t.Errorf("Runtime = %d; want 0 for zero duration", meta.Runtime)
+	}
+}
+
+func TestFirstImageURLStringType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(graphqlResponse(map[string]any{
+			"searchScene": []any{
+				map[string]any{
+					"id":         "img-str",
+					"title":      "String Image",
+					"date":       "2024-01-01",
+					"images":     []any{"https://example.com/direct-string.jpg"},
+					"performers": []any{},
+					"tags":       []any{},
+				},
+			},
+		}))
+	}))
+	defer server.Close()
+
+	outDir := t.TempDir()
+	p := stashdb.NewWithEndpoint("key", server.URL)
+	// The scrape should succeed and attempt to download the poster
+	result, err := p.Scrape("String Image", "test.mp4", outDir, scraper.ScrapeOpts{})
+	if err != nil {
+		t.Fatalf("Scrape: %v", err)
+	}
+	if result.Status != "ok" {
+		t.Errorf("Status = %q", result.Status)
+	}
+}
+
+func TestYearFromDateShortString(t *testing.T) {
+	// Indirectly test yearFromDate with a short date string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(graphqlResponse(map[string]any{
+			"findScene": map[string]any{
+				"id":         "s5",
+				"title":      "Short Date",
+				"date":       "24", // < 4 chars
+				"performers": []any{},
+				"tags":       []any{},
+				"images":     []any{},
+			},
+		}))
+	}))
+	defer server.Close()
+
+	p := stashdb.NewWithEndpoint("key", server.URL)
+	meta, err := p.Detail("s5")
+	if err != nil {
+		t.Fatalf("Detail: %v", err)
+	}
+	if meta.Year != 0 {
+		t.Errorf("Year = %d; want 0 for short date", meta.Year)
+	}
+}
+
+func TestScrapeErrorPropagation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	p := stashdb.NewWithEndpoint("key", server.URL)
+	result, err := p.Scrape("test", "test.mp4", t.TempDir(), scraper.ScrapeOpts{})
+	if err == nil {
+		t.Error("expected error from Scrape")
+	}
+	if result.Status != "error" {
+		t.Errorf("Status = %q; want error", result.Status)
+	}
+}

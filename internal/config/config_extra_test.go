@@ -293,3 +293,94 @@ host = ""
 		t.Errorf("Proxy.Host = %q, want 127.0.0.1", cfg.Proxy.Host)
 	}
 }
+
+// TestLoadExplicitZerosFallback explicitly sets all numeric fields to zero in
+// TOML to trigger every fallback branch in Load().
+func TestLoadExplicitZerosFallback(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, "media115")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := `
+[cloud]
+root = "/custom"
+qps = 0.0
+qpm = 0
+cooldown_seconds = 0
+
+[cache]
+listing_ttl = 0
+path_ttl = 0
+
+[proxy]
+host = ""
+port = 0
+`
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load(): %v", err)
+	}
+	// Explicit-zero fields should be replaced with defaults.
+	if cfg.Cloud.QPS != 0.5 {
+		t.Errorf("Cloud.QPS = %v, want 0.5 (default fallback)", cfg.Cloud.QPS)
+	}
+	if cfg.Cloud.QPM != 20 {
+		t.Errorf("Cloud.QPM = %d, want 20 (default fallback)", cfg.Cloud.QPM)
+	}
+	if cfg.Cache.ListingTTL != 3600 {
+		t.Errorf("Cache.ListingTTL = %d, want 3600 (default fallback)", cfg.Cache.ListingTTL)
+	}
+	if cfg.Cache.PathTTL != 86400 {
+		t.Errorf("Cache.PathTTL = %d, want 86400 (default fallback)", cfg.Cache.PathTTL)
+	}
+	if cfg.Proxy.Port != 9000 {
+		t.Errorf("Proxy.Port = %d, want 9000 (default fallback)", cfg.Proxy.Port)
+	}
+	if cfg.Proxy.Host != "127.0.0.1" {
+		t.Errorf("Proxy.Host = %q, want 127.0.0.1 (default fallback)", cfg.Proxy.Host)
+	}
+	// Non-zero field should keep its value.
+	if cfg.Cloud.Root != "/custom" {
+		t.Errorf("Cloud.Root = %q, want /custom", cfg.Cloud.Root)
+	}
+}
+
+// TestSaveReadOnlyDir verifies Save returns an error when the config directory
+// is read-only.
+func TestSaveReadOnlyDir(t *testing.T) {
+	tmp := t.TempDir()
+	// Create a read-only directory
+	roDir := filepath.Join(tmp, "readonly")
+	if err := os.MkdirAll(roDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Create the media115 dir inside it, then make parent read-only
+	cfgDir := filepath.Join(roDir, "media115")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Make the config file non-writable
+	cfgFile := filepath.Join(cfgDir, "config.toml")
+	if err := os.WriteFile(cfgFile, []byte("old"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	// Make directory read-only to prevent creating new files
+	if err := os.Chmod(cfgDir, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(cfgDir, 0o755) })
+
+	t.Setenv("XDG_CONFIG_HOME", roDir)
+
+	cfg := Default()
+	err := cfg.Save()
+	if err == nil {
+		t.Error("expected error saving to read-only directory")
+	}
+}
