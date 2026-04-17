@@ -8,7 +8,7 @@
 - Run `make lint test` before committing
 - Follow [CONTRIBUTING.md](CONTRIBUTING.md) for commit messages, PR workflow, and code quality rules
 - Keep changes focused — one concern per commit
-- Ensure incremental test coverage reaches 90% before committing
+- Ensure incremental test coverage reaches 90% before committing; `make test` generates `coverage.html` for visual review
 
 ## Conventions
 
