@@ -83,9 +83,11 @@ var strmCmd = &cobra.Command{
 	},
 }
 
-var strmOutput string
-var strmHost string
-var strmPort int
+var (
+	strmOutput string
+	strmHost   string
+	strmPort   int
+)
 
 func init() {
 	strmCmd.Flags().StringVarP(&strmOutput, "output", "o", "", "Output directory for .strm files (required)")

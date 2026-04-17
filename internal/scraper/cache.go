@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/newcoderlife/media115/internal/config"
@@ -12,7 +11,7 @@ import (
 
 // CacheDir returns the media115 scrape cache root directory.
 func CacheDir() string {
-	return strings.Replace(config.CacheDir(), "cloud115", "media115", 1)
+	return config.CacheDir()
 }
 
 // CachePath returns the full path for a scrape cache entry.

@@ -121,3 +121,4 @@ $RECYCLE.BIN/
 
 config.toml
 bin/*
+coverage.html

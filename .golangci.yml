@@ -16,6 +16,10 @@ linters:
     - rowserrcheck
     - nolintlint
     - gosec
+    - copyloopvar
+    - durationcheck
+    - unconvert
+    - wastedassign
   exclusions:
     rules:
       - linters: [errcheck, gosec]
@@ -23,15 +27,16 @@ linters:
   settings:
     errcheck:
       exclude-functions:
-        - (io.Closer).Close
         - (io.ReadCloser).Close
         - (*os.File).Close
         - (*database/sql.Rows).Close
         - (*mime/multipart.Writer).Close
         - (*io.PipeWriter).Close
-        - (net.Conn).Close
         - (*github.com/newcoderlife/media115/internal/cloud115.Client).Close
         - (*github.com/newcoderlife/media115/internal/cloud115.Cache).Close
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
     gocritic:
       disabled-checks:
         - ifElseChain
@@ -48,8 +53,8 @@ linters:
         - G505  # blocklisted sha1 — 115 API protocol
         - G104  # errors unhandled — covered by errcheck
         - G202  # SQL concat — table names are hardcoded constants
-        - G703  # path traversal — internal paths, not user input
-        - G704  # SSRF — serve.go is a proxy by design
+        - G703  # path traversal via taint — internal paths, not user input
+        - G704  # SSRF via taint — serve.go is a proxy by design
     staticcheck:
       checks:
         - all
@@ -60,7 +65,7 @@ linters:
 
 formatters:
   enable:
-    - gofmt
+    - gofumpt
     - goimports
   settings:
     goimports:

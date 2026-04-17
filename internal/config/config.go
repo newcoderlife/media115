@@ -91,7 +91,7 @@ func CacheDir() string {
 		home, _ := os.UserHomeDir()
 		base = filepath.Join(home, ".cache")
 	}
-	return filepath.Join(base, "cloud115")
+	return filepath.Join(base, "media115")
 }
 
 func Load() (*Config, error) {
