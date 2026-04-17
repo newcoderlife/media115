@@ -230,12 +230,12 @@ func TestCacheDirWithoutXDG(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", "")
 	home, _ := os.UserHomeDir()
 	dir := CacheDir()
-	expected := filepath.Join(home, ".cache", "cloud115")
+	expected := filepath.Join(home, ".cache", "media115")
 	if dir != expected {
 		t.Errorf("CacheDir() = %q, want %q", dir, expected)
 	}
-	if !strings.HasSuffix(dir, "cloud115") {
-		t.Errorf("CacheDir() should end with cloud115, got %q", dir)
+	if !strings.HasSuffix(dir, "media115") {
+		t.Errorf("CacheDir() should end with media115, got %q", dir)
 	}
 }
 

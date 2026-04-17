@@ -133,7 +133,8 @@ func newTestClientWithDir(t *testing.T, tmpDir string) *cloud115.Client {
 func newSeededTestClient(t *testing.T, paths map[string]struct {
 	CID     string
 	Entries []cloud115.Entry
-}) *cloud115.Client {
+},
+) *cloud115.Client {
 	t.Helper()
 	tmpDir := t.TempDir()
 	cacheDir := filepath.Join(tmpDir, "cache")

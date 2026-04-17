@@ -276,8 +276,10 @@ func TestBuildPlanWithFullFileMap(t *testing.T) {
 func TestBuildPlanTVWithStringYear(t *testing.T) {
 	// Regression: Python file_map stores year as string "2021"
 	entries := []cloud115.TreeEntry{
-		{Path: "剧目/Show (2021)/Show S01E01.mkv", Name: "Show S01E01.mkv",
-			Parent: "剧目/Show (2021)", IsVideo: true},
+		{
+			Path: "剧目/Show (2021)/Show S01E01.mkv", Name: "Show S01E01.mkv",
+			Parent: "剧目/Show (2021)", IsVideo: true,
+		},
 	}
 	cacheGet := func(source, key string) map[string]any {
 		if key == "Show S01E01" {

@@ -274,15 +274,15 @@ func TestCacheDir(t *testing.T) {
 	// With XDG_CACHE_HOME set
 	t.Setenv("XDG_CACHE_HOME", "/tmp/custom-cache")
 	dir := CacheDir()
-	if dir != "/tmp/custom-cache/cloud115" {
-		t.Errorf("CacheDir() = %q; want /tmp/custom-cache/cloud115", dir)
+	if dir != "/tmp/custom-cache/media115" {
+		t.Errorf("CacheDir() = %q; want /tmp/custom-cache/media115", dir)
 	}
 
 	// Without XDG_CACHE_HOME (unset)
 	t.Setenv("XDG_CACHE_HOME", "")
 	home, _ := os.UserHomeDir()
 	dir = CacheDir()
-	expected := filepath.Join(home, ".cache", "cloud115")
+	expected := filepath.Join(home, ".cache", "media115")
 	if dir != expected {
 		t.Errorf("CacheDir() = %q; want %q", dir, expected)
 	}
