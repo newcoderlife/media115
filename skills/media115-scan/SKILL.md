@@ -2,7 +2,7 @@
 name: media115-scan
 description: Show what needs scraping and detect anomalies from SQLite cache (zero API calls)
 metadata:
-  version: "4.0"
+  version: "5.0"
 ---
 
 Analyze the SQLite tree cache. Reports what needs scraping AND detects anomalies. Zero API calls.
@@ -23,19 +23,18 @@ Run all three unless the user specified a category.
 
 ## Step 2: Read the output
 
-Each row in the table has an `Action` column:
+The table has 4 columns: `#`, `File`, `NFO`, `Action`.
 
 | Action | Meaning |
 |--------|---------|
 | `scrape` | No NFO found — needs scraping |
 | `skip` | Already has NFO — will be skipped by scrape |
-| `unrecognized` | Filename cannot be parsed — needs manual handling |
+
+**scan does NOT parse filenames.** It only checks NFO presence. The agent should analyze filenames and decide how to scrape each file.
 
 At the bottom:
 ```
-Summary: 184 files — 1 to scrape, 183 skip (has NFO), 0 unrecognized, 0 known cases
-
-No API calls were made (tree cache only).
+汇总: 184 个文件 — 1 个待刮削, 183 个跳过（有NFO）
 ```
 
 Report these numbers to the user.

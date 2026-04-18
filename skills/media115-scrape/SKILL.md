@@ -2,7 +2,7 @@
 name: media115-scrape
 description: Scrape metadata for media files — agent drives matching, code only provides tools
 metadata:
-  version: "8.0"
+  version: "9.0"
 ---
 
 刮削媒体文件的元数据（NFO + 海报）。**你（agent）负责判断文件是什么，代码只负责搜索和生成。**
@@ -29,9 +29,10 @@ media115 scan $CATEGORY
 ```
 
 看 scan 的输出表格。关注 `Action` 列：
-- `scrape` — 需要刮削
+- `scrape` — 没有 NFO，需要刮削
 - `skip` — 已有 NFO，跳过
-- `unrecognized` — 文件名无法解析，需要手动处理
+
+**scan 不解析文件名。** 你（agent）需要自己看文件名，判断类型（电影/剧集/AV）、提取标题和年份。这是你的核心工作。
 
 ## Step 2: 先跑 scrape 处理简单 case
 
@@ -65,7 +66,7 @@ scrape 自动处理文件名清晰、数据源精确匹配的文件。
 
 **如果发现可疑匹配，立即用 `/scrape-fix` 修正，优先使用 `--tmdb-id`（最精确）。**
 
-## Step 4: 处理 not_found 和 unrecognized
+## Step 4: 处理 not_found
 
 对每个失败文件，你来推理：
 

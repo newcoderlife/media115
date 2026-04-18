@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -107,3 +108,14 @@ func getTreeEntries(category string) ([]cloud115.TreeEntry, error) {
 }
 
 func dashes(n int) string { return strings.Repeat("-", n) }
+
+// loadCases tries to load scrape_cases.json from the media115 cache dir.
+// Returns nil if the file does not exist.
+func loadCases() []scraper.Case {
+	path := filepath.Join(mediaCacheDir(), "scrape_cases.json")
+	cases, err := scraper.LoadCases(path)
+	if err != nil {
+		return nil
+	}
+	return cases
+}

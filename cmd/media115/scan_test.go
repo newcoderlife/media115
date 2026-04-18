@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/newcoderlife/media115/internal/cloud115"
-	"github.com/newcoderlife/media115/internal/scraper"
 )
 
 func newTestScanOpts(buf *bytes.Buffer) *scanOpts {
@@ -18,7 +17,6 @@ func newTestScanOpts(buf *bytes.Buffer) *scanOpts {
 		GetTreeEntries: func(string) ([]cloud115.TreeEntry, error) {
 			return nil, nil
 		},
-		LoadCases: func() []scraper.Case { return nil },
 	}
 }
 
@@ -223,7 +221,7 @@ func TestScanRunAnomalyDupNFO(t *testing.T) {
 	}
 }
 
-func TestScanRunUnrecognized(t *testing.T) {
+func TestScanRunNoNFOIsScrape(t *testing.T) {
 	var buf bytes.Buffer
 	o := newTestScanOpts(&buf)
 	o.GetTreeEntries = func(string) ([]cloud115.TreeEntry, error) {
@@ -237,8 +235,8 @@ func TestScanRunUnrecognized(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "unrecognized") || !strings.Contains(out, "1 个未识别") {
-		t.Error("expected unrecognized count")
+	if !strings.Contains(out, "scrape") || !strings.Contains(out, "1 个待刮削") {
+		t.Error("expected scrape action for file without NFO")
 	}
 }
 

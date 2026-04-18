@@ -10,19 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/newcoderlife/media115/internal/cloud115"
-	"github.com/newcoderlife/media115/internal/scraper"
 )
-
-// loadCases tries to load scrape_cases.json from the media115 cache dir.
-// Returns nil if the file does not exist.
-func loadCases() []scraper.Case {
-	path := filepath.Join(mediaCacheDir(), "scrape_cases.json")
-	cases, err := scraper.LoadCases(path)
-	if err != nil {
-		return nil
-	}
-	return cases
-}
 
 var (
 	avFolderPattern    = regexp.MustCompile(`^[A-Za-z]+-\d+$`)
@@ -34,7 +22,6 @@ type scanOpts struct {
 	Category       string
 	ShowAll        bool
 	GetTreeEntries func(string) ([]cloud115.TreeEntry, error)
-	LoadCases      func() []scraper.Case
 }
 
 func newScanCmd() *cobra.Command {
@@ -58,7 +45,6 @@ CATEGORY: AV, 电影, 剧目, etc. (optional; default shows all)`,
 				Category:       category,
 				ShowAll:        showAll,
 				GetTreeEntries: getTreeEntries,
-				LoadCases:      loadCases,
 			})
 		},
 	}
@@ -98,13 +84,12 @@ func scanRun(o *scanOpts) error {
 	}
 
 	fmt.Fprintf(w, "找到 %d 个视频文件（来自缓存树）。\n\n", len(videos))
-	fmt.Fprintf(w, "| %3s | %-55s | %-5s | %-8s | %-30s | %-8s | %-12s |\n",
-		"#", "File", "NFO", "Type", "Title", "Source", "Action")
-	fmt.Fprintf(w, "|%s|%s|%s|%s|%s|%s|%s|\n",
-		dashes(5), dashes(57), dashes(7), dashes(10), dashes(32), dashes(10), dashes(14))
+	fmt.Fprintf(w, "| %3s | %-60s | %-5s | %-8s |\n",
+		"#", "File", "NFO", "Action")
+	fmt.Fprintf(w, "|%s|%s|%s|%s|\n",
+		dashes(5), dashes(62), dashes(7), dashes(10))
 
-	cases := o.LoadCases()
-	skipCount, scrapeCount, unrecognizedCount := 0, 0, 0
+	skipCount, scrapeCount := 0, 0
 
 	for i, item := range videos {
 		name := item.Name
@@ -115,35 +100,27 @@ func scanRun(o *scanOpts) error {
 			nfoMark = "✓"
 		}
 
-		result := scraper.AnalyzeWithCases(name, cases)
-
 		var action string
 		if hasNFO {
 			action = "skip"
 			skipCount++
-		} else if result.MediaType == "unknown" {
-			action = "unrecognized"
-			unrecognizedCount++
 		} else {
 			action = "scrape"
 			scrapeCount++
 		}
 
 		if o.ShowAll || action != "skip" {
-			fmt.Fprintf(w, "| %3d | %-55s | %-5s | %-8s | %-30s | %-8s | %-12s |\n",
+			fmt.Fprintf(w, "| %3d | %-60s | %-5s | %-8s |\n",
 				i+1,
-				trunc(name, 55),
+				trunc(name, 60),
 				nfoMark,
-				result.MediaType,
-				trunc(result.Title, 30),
-				result.Source,
 				action,
 			)
 		}
 	}
 
-	fmt.Fprintf(w, "\n汇总: %d 个文件 — %d 个待刮削, %d 个跳过（有NFO）, %d 个未识别\n",
-		len(videos), scrapeCount, skipCount, unrecognizedCount)
+	fmt.Fprintf(w, "\n汇总: %d 个文件 — %d 个待刮削, %d 个跳过（有NFO）\n",
+		len(videos), scrapeCount, skipCount)
 
 	// Anomaly detection
 	type anomaly struct {
