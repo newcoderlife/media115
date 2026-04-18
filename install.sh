@@ -5,31 +5,10 @@ REPO="newcoderlife/media115"
 BRANCH="master"
 RAW_BASE="https://raw.githubusercontent.com/$REPO/$BRANCH"
 INSTALL_DIR="/usr/local/bin"
-SKILLS="auth dedup doctor organize scan scrape scrape-fix sync"
+SKILLS="cloud115-auth cloud115-dedup cloud115-doctor cloud115-sync media115-organize media115-scan media115-scrape media115-scrape-fix media115-subscribe media115-wishlist"
 
 VERSION="${VERSION:-}"
 INSTALL="${INSTALL:-$INSTALL_DIR}"
-
-usage() {
-  echo "Install media115 CLI binaries and/or agent skills"
-  echo ""
-  echo "Usage: $0 [options]"
-  echo ""
-  echo "Options:"
-  echo "  --skill             Install agent skills (requires --agent)"
-  echo "  --agent AGENT       Target agent: claude, agents (Cursor/Codex/OpenCode), or all"
-  echo "  -h, --help          Show this help"
-  echo ""
-  echo "Examples:"
-  echo "  $0                              # Install CLI binaries only"
-  echo "  $0 --skill --agent claude       # Install skills for Claude Code"
-  echo "  $0 --skill --agent agents       # Install skills for Cursor/Codex/OpenCode"
-  echo "  $0 --skill --agent all          # Install skills for all agents"
-  echo ""
-  echo "Environment:"
-  echo "  VERSION=v0.1.0    Pin binary version (default: latest)"
-  echo "  INSTALL=~/.local/bin  Install path (default: /usr/local/bin)"
-}
 
 # ── Binary install ────────────────────────────────────────────────────────────
 
@@ -92,8 +71,6 @@ install_binaries() {
 install_skills() {
   dest=$1
   echo "Installing skills → $dest"
-  mkdir -p "$dest"
-  curl -fsSL "$RAW_BASE/skills/SKILL.md" -o "$dest/SKILL.md"
   for skill in $SKILLS; do
     mkdir -p "$dest/$skill"
     curl -fsSL "$RAW_BASE/skills/$skill/SKILL.md" -o "$dest/$skill/SKILL.md"
@@ -103,32 +80,12 @@ install_skills() {
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
-DO_SKILL=false
-AGENT=""
+install_binaries
 
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --skill)  DO_SKILL=true; shift ;;
-    --agent)  AGENT="$2"; shift 2 ;;
-    -h|--help) usage; exit 0 ;;
-    *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
-  esac
-done
-
-if $DO_SKILL; then
-  if [ -z "$AGENT" ]; then
-    echo "Error: --skill requires --agent (claude|agents|all)" >&2
-    exit 1
-  fi
-  case "$AGENT" in
-    claude) install_skills "$HOME/.claude/skills/media115" ;;
-    agents) install_skills "$HOME/.agents/skills/media115" ;;
-    all)
-      install_skills "$HOME/.claude/skills/media115"
-      install_skills "$HOME/.agents/skills/media115"
-      ;;
-    *) echo "Unknown agent: $AGENT (use claude|agents|all)" >&2; exit 1 ;;
-  esac
-else
-  install_binaries
+install_skills "$HOME/.agents/skills"
+if [ -d "$HOME/.claude" ]; then
+  install_skills "$HOME/.claude/skills"
+fi
+if [ -d "$HOME/.kiro" ]; then
+  install_skills "$HOME/.kiro/skills"
 fi

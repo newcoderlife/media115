@@ -1,7 +1,8 @@
 ---
-name: subscribe
+name: media115-subscribe
 description: M-Team torrent grabber — grab .torrent files matching a rule into a local watch folder
-version: 1.0
+metadata:
+  version: "1.0"
 ---
 
 搜索 M-Team 站内种子，匹配规则就把 `.torrent` 原子写入本地 watch 文件夹，交给外部 BT 客户端（qBittorrent / Transmission）自动加载。**不涉及 115 网盘。**

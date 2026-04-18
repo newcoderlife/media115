@@ -1,7 +1,8 @@
 ---
-name: organize
+name: media115-organize
 description: Rename, move, upload NFO, and cleanup — the main operation
-version: 5.0
+metadata:
+  version: "5.0"
 ---
 
 The single operation that does everything: move files to correct dirs, rename to standard format, upload NFO/poster, clean up old dirs, and verify.

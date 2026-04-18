@@ -1,7 +1,8 @@
 ---
-name: auth
+name: cloud115-auth
 description: Check 115 login status and complete QR login if needed
-version: 3.0
+metadata:
+  version: "3.0"
 ---
 
 ## Step 1: Check login status

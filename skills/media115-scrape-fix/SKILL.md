@@ -1,7 +1,8 @@
 ---
-name: scrape-fix
+name: media115-scrape-fix
 description: Fix a wrong scrape result using the CLI command
-version: 5.0
+metadata:
+  version: "5.0"
 ---
 
 修正一个错误的刮削结果。

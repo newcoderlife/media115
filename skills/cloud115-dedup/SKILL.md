@@ -1,7 +1,8 @@
 ---
-name: dedup
+name: cloud115-dedup
 description: Clean duplicate files (same-name copies created by 115's upload behavior)
-version: 2.0
+metadata:
+  version: "2.0"
 ---
 
 Clean duplicate files in a 115 directory. Groups files by filename and keeps one copy, deletes the rest.
