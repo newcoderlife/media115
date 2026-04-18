@@ -53,7 +53,7 @@ func (s *Stats) Summary() string {
 // Setup creates a logger with console + JSON file handlers and sets it as the
 // global default via slog.SetDefault.
 // Console: prints only msg to stderr (Info default, Debug if verbose).
-// File: JSON with time/level/msg/layer/run_id to ~/.cache/cloud115/logs.
+// File: JSON with time/level/msg/layer/run_id to ~/.cache/media115/log.
 func Setup(verbose bool) *Stats {
 	stats := &Stats{StartTime: time.Now()}
 

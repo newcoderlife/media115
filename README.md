@@ -107,7 +107,7 @@ jellyfin_url = "http://localhost:8096"
 
 Cache layout:
 
-- `cloud115` SQLite cache: `~/.cache/cloud115/cache.db`
+- `cloud115` SQLite cache: `~/.cache/media115/cache.db`
 - `media115` scrape cache + outputs: `~/.cache/media115/`
 - `proxy.*` is used by `cloud115 serve` and `cloud115 strm`
 
@@ -132,7 +132,6 @@ cloud115 auth                        # QR login (scan with 115 app)
 cloud115 auth --check                # Check login status
 cloud115 auth --get-qr               # Print QR URL and exit
 cloud115 auth --wait-qr              # Block until QR scanned, save cookies
-cloud115 auth --qr                   # Generate QR code URL (non-blocking)
 cloud115 auth --renew                # Auto-renew cookies
 cloud115 auth --force                # Force re-login even if cookies still work
 cloud115 auth --app tv               # Device type: tv / qandroid / web

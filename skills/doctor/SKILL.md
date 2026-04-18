@@ -27,7 +27,7 @@ Expected output (all green):
   Bangumi Token: ✓ 已配置
 
 缓存:
-  缓存根目录:    /Users/you/.cache/cloud115
+  缓存根目录:    /Users/you/.cache/media115
   path_index:    104 条目
   dir listings:  42 目录, 359 条目
   db 大小:       804.0K
