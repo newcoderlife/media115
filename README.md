@@ -17,12 +17,12 @@ Two binaries:
 
 ```bash
 # Linux / macOS
-curl -fsSL https://raw.githubusercontent.com/newcoderlife/media115/master/install.sh | sh -s -- --skill --agent <claude/agents/all>
+curl -fsSL https://raw.githubusercontent.com/newcoderlife/media115/master/install.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell, no admin required)
-$env:SKILL=1; $env:AGENT="<claude/agents/all>"; irm https://raw.githubusercontent.com/newcoderlife/media115/master/install.ps1 | iex
+irm https://raw.githubusercontent.com/newcoderlife/media115/master/install.ps1 | iex
 ```
 
 ## Quick Start

@@ -1,21 +1,21 @@
 <#
 .SYNOPSIS
-  Install media115 CLI binaries and/or agent skills on Windows.
+  Install media115 CLI binaries and agent skills on Windows.
 .EXAMPLE
-  # Install CLI binaries only
+  # Install binaries + skills for all agents
   .\install.ps1
 .EXAMPLE
-  # Install agent skills for all agents
-  .\install.ps1 -Skill -Agent all
+  # Install binaries + skills for Claude Code only
+  .\install.ps1 -Agent claude
 #>
 param(
-    [switch]$Skill,
     [ValidateSet("claude", "agents", "all")]
-    [string]$Agent,
+    [string]$Agent = "all",
     [string]$Version,
     [switch]$Help
 )
 
+Set-PSDebug -Trace 1
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
@@ -26,21 +26,19 @@ $Skills = @("auth", "dedup", "doctor", "organize", "scan", "scrape", "scrape-fix
 
 function Show-Usage {
     Write-Host @"
-Install media115 CLI binaries and/or agent skills
+Install media115 CLI binaries and agent skills
 
 Usage: .\install.ps1 [options]
 
 Options:
-  -Skill              Install agent skills (requires -Agent)
-  -Agent AGENT        Target agent: claude, agents (Cursor/Codex/OpenCode), or all
+  -Agent AGENT        Target agent: claude, agents (Cursor/Codex/OpenCode), or all (default: all)
   -Version VERSION    Pin binary version (default: latest)
   -Help               Show this help
 
 Examples:
-  .\install.ps1                          # Install CLI binaries only
-  .\install.ps1 -Skill -Agent claude     # Install skills for Claude Code
-  .\install.ps1 -Skill -Agent agents     # Install skills for Cursor/Codex/OpenCode
-  .\install.ps1 -Skill -Agent all        # Install skills for all agents
+  .\install.ps1                          # Install binaries + skills for all agents
+  .\install.ps1 -Agent claude            # Install binaries + skills for Claude Code
+  .\install.ps1 -Agent agents            # Install binaries + skills for Cursor/Codex/OpenCode
 "@
 }
 
@@ -85,22 +83,19 @@ function Install-Skills([string]$Dest) {
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 # Support env vars for piped execution (irm ... | iex)
-if (-not $Skill -and $env:SKILL) { $Skill = $true }
 if (-not $Agent -and $env:AGENT) { $Agent = $env:AGENT }
 if (-not $Version -and $env:VERSION) { $Version = $env:VERSION }
+if (-not $Agent) { $Agent = "all" }
 
 if ($Help) { Show-Usage; return }
 
-if ($Skill) {
-    if (-not $Agent) { throw "-Skill requires -Agent (claude|agents|all)" }
-    switch ($Agent) {
-        "claude" { Install-Skills "$env:USERPROFILE\.claude\skills\media115" }
-        "agents" { Install-Skills "$env:USERPROFILE\.agents\skills\media115" }
-        "all" {
-            Install-Skills "$env:USERPROFILE\.claude\skills\media115"
-            Install-Skills "$env:USERPROFILE\.agents\skills\media115"
-        }
+Install-Binaries
+
+switch ($Agent) {
+    "claude" { Install-Skills "$env:USERPROFILE\.claude\skills\media115" }
+    "agents" { Install-Skills "$env:USERPROFILE\.agents\skills\media115" }
+    "all" {
+        Install-Skills "$env:USERPROFILE\.claude\skills\media115"
+        Install-Skills "$env:USERPROFILE\.agents\skills\media115"
     }
-} else {
-    Install-Binaries
 }
