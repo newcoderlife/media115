@@ -1,7 +1,8 @@
 ---
-name: wishlist
+name: media115-wishlist
 description: Batch search M-Team for a movie wishlist, deduplicate against 115 library, and download best torrents
-version: 1.0
+metadata:
+  version: "1.0"
 ---
 
 根据用户提供的电影片单（如"豆瓣 Top 250"），与 115 影视库去重后，批量搜索 M-Team 免费高质量种子并下载。BT 客户端下载完成后逐个秒传到 115，可选后续刮削整理。

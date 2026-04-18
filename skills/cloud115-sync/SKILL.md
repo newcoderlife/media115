@@ -1,7 +1,8 @@
 ---
-name: sync
+name: cloud115-sync
 description: Refresh local SQLite cache from 115 cloud. Required before scan/scrape.
-version: 4.0
+metadata:
+  version: "4.0"
 ---
 
 Refresh the local cache from 115 cloud. This populates the SQLite `tree_entry` table, which is the source of truth for `scan`, `scrape`, and `organize`.

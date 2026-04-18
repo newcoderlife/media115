@@ -1,7 +1,8 @@
 ---
-name: doctor
+name: cloud115-doctor
 description: Check environment, credentials, and cache status
-version: 2.0
+metadata:
+  version: "2.0"
 ---
 
 Run this first when something doesn't work. Also run at the start of any session to confirm everything is configured.

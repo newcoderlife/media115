@@ -1,7 +1,8 @@
 ---
-name: scan
+name: media115-scan
 description: Show what needs scraping and detect anomalies from SQLite cache (zero API calls)
-version: 4.0
+metadata:
+  version: "4.0"
 ---
 
 Analyze the SQLite tree cache. Reports what needs scraping AND detects anomalies. Zero API calls.

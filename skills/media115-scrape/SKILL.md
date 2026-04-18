@@ -1,7 +1,8 @@
 ---
-name: scrape
+name: media115-scrape
 description: Scrape metadata for media files — agent drives matching, code only provides tools
-version: 7.0
+metadata:
+  version: "7.0"
 ---
 
 刮削媒体文件的元数据（NFO + 海报）。**你（agent）负责判断文件是什么，代码只负责搜索和生成。**
