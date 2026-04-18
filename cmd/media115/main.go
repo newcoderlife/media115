@@ -28,9 +28,9 @@ func main() {
 
 func init() {
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable debug logging")
-	rootCmd.AddCommand(scanCmd)
+	rootCmd.AddCommand(newScanCmd())
 	rootCmd.AddCommand(newScrapeCmd())
-	rootCmd.AddCommand(scrapeFixCmd)
+	rootCmd.AddCommand(newScrapeFixCmd())
 	rootCmd.AddCommand(newOrganizeCmd())
 	rootCmd.AddCommand(newDoctorCmd())
 	rootCmd.AddCommand(subCmd)

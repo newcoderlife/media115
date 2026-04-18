@@ -3,36 +3,60 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"os"
+	"io"
 
 	"github.com/spf13/cobra"
+
+	"github.com/newcoderlife/media115/internal/cloud115"
 )
 
-var statCmd = &cobra.Command{
-	Use:   "stat <path>",
-	Short: "显示文件或目录的元数据（JSON 格式）",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		path := args[0]
+type statClient interface {
+	Stat(path string) (*cloud115.Entry, error)
+	Close() error
+}
 
-		client, err := getClient()
-		if err != nil {
-			return err
-		}
-		defer client.Close()
+type statOpts struct {
+	Out       io.Writer
+	Path      string
+	GetClient func() (statClient, error)
+}
 
-		entry, err := client.Stat(path)
-		if err != nil {
-			return fmt.Errorf("路径不存在: %s", path)
-		}
+func newStatCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "stat <path>",
+		Short: "显示文件或目录的元数据（JSON 格式）",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return statRun(&statOpts{
+				Out:  cmd.OutOrStdout(),
+				Path: args[0],
+				GetClient: func() (statClient, error) {
+					return getClient()
+				},
+			})
+		},
+	}
+	return cmd
+}
 
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		enc.SetEscapeHTML(false)
-		return enc.Encode(entry)
-	},
+func statRun(o *statOpts) error {
+	client, err := o.GetClient()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = client.Close() }()
+
+	entry, err := client.Stat(o.Path)
+	if err != nil {
+		return fmt.Errorf("路径不存在: %s", o.Path)
+	}
+
+	enc := json.NewEncoder(o.Out)
+	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
+	return enc.Encode(entry)
 }
 
 func init() {
-	rootCmd.AddCommand(statCmd)
+	rootCmd.AddCommand(newStatCmd())
 }

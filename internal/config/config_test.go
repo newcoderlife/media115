@@ -262,9 +262,9 @@ func TestConfigDir(t *testing.T) {
 
 	// Without XDG_CONFIG_HOME (unset)
 	t.Setenv("XDG_CONFIG_HOME", "")
-	home, _ := os.UserHomeDir()
+	configBase, _ := os.UserConfigDir()
 	dir = ConfigDir()
-	expected := filepath.Join(home, ".config", "media115")
+	expected := filepath.Join(configBase, "media115")
 	if dir != expected {
 		t.Errorf("ConfigDir() = %q; want %q", dir, expected)
 	}
@@ -280,9 +280,9 @@ func TestCacheDir(t *testing.T) {
 
 	// Without XDG_CACHE_HOME (unset)
 	t.Setenv("XDG_CACHE_HOME", "")
-	home, _ := os.UserHomeDir()
+	cacheBase, _ := os.UserCacheDir()
 	dir = CacheDir()
-	expected := filepath.Join(home, ".cache", "media115")
+	expected := filepath.Join(cacheBase, "media115")
 	if dir != expected {
 		t.Errorf("CacheDir() = %q; want %q", dir, expected)
 	}

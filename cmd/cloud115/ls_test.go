@@ -2,41 +2,23 @@ package main
 
 import (
 	"bytes"
-	"io"
-	"os"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/newcoderlife/media115/internal/cloud115"
 )
 
-// capturePrint captures stdout during the execution of fn.
-func capturePrint(fn func()) string {
-	oldStdout := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		panic(err)
-	}
-	os.Stdout = w
-	fn()
-	w.Close()
-	os.Stdout = oldStdout
-	var buf bytes.Buffer
-	_, _ = io.Copy(&buf, r)
-	return buf.String()
-}
-
 func TestLsDirPrintShortMode(t *testing.T) {
 	items := []cloud115.Entry{
 		{Name: "folderA", Type: "dir"},
-		{Name: "movie.mkv", Type: "file", Size: 1024 * 1024 * 100}, // 100 MB
+		{Name: "movie.mkv", Type: "file", Size: 1024 * 1024 * 100},
 		{Name: "show.mp4", Type: "file", Size: 2048},
 	}
 
-	output := capturePrint(func() {
-		// nil client is safe when recursive=false
-		lsDirPrint(nil, items, "/", false, false, 0, 0)
-	})
+	var buf bytes.Buffer
+	lsDirPrint(&buf, nil, items, "/", false, false, 0, 0)
+	output := buf.String()
 
 	if !strings.Contains(output, "folderA/") {
 		t.Errorf("expected 'folderA/' in output, got: %q", output)
@@ -55,18 +37,16 @@ func TestLsDirPrintLongMode(t *testing.T) {
 		{Name: "readme.txt", Type: "file", Size: 512},
 	}
 
-	output := capturePrint(func() {
-		lsDirPrint(nil, items, "/", true, false, 0, 0)
-	})
+	var buf bytes.Buffer
+	lsDirPrint(&buf, nil, items, "/", true, false, 0, 0)
+	output := buf.String()
 
-	// Dirs show type "d", files show type "f" with size.
 	if !strings.Contains(output, "d") || !strings.Contains(output, "docs/") {
 		t.Errorf("long mode: expected 'd  ... docs/' in output, got: %q", output)
 	}
 	if !strings.Contains(output, "f") || !strings.Contains(output, "readme.txt") {
 		t.Errorf("long mode: expected 'f  ... readme.txt' in output, got: %q", output)
 	}
-	// Size should be formatted (512 bytes = 512B)
 	if !strings.Contains(output, "512B") {
 		t.Errorf("long mode: expected '512B' in output, got: %q", output)
 	}
@@ -77,14 +57,12 @@ func TestLsDirPrintIndent(t *testing.T) {
 		{Name: "sub", Type: "dir"},
 	}
 
-	output0 := capturePrint(func() {
-		lsDirPrint(nil, items, "/", false, false, 0, 0)
-	})
-	output2 := capturePrint(func() {
-		lsDirPrint(nil, items, "/", false, false, 0, 2)
-	})
+	var buf0, buf2 bytes.Buffer
+	lsDirPrint(&buf0, nil, items, "/", false, false, 0, 0)
+	lsDirPrint(&buf2, nil, items, "/", false, false, 0, 2)
+	output0 := buf0.String()
+	output2 := buf2.String()
 
-	// With indent=2, four spaces prefix (2 * "  ").
 	if strings.HasPrefix(output0, " ") {
 		t.Errorf("indent=0 should not have leading space, got: %q", output0)
 	}
@@ -94,11 +72,10 @@ func TestLsDirPrintIndent(t *testing.T) {
 }
 
 func TestLsDirPrintEmpty(t *testing.T) {
-	output := capturePrint(func() {
-		lsDirPrint(nil, []cloud115.Entry{}, "/", false, false, 0, 0)
-	})
-	if output != "" {
-		t.Errorf("empty items should produce no output, got: %q", output)
+	var buf bytes.Buffer
+	lsDirPrint(&buf, nil, []cloud115.Entry{}, "/", false, false, 0, 0)
+	if buf.String() != "" {
+		t.Errorf("empty items should produce no output, got: %q", buf.String())
 	}
 }
 
@@ -107,20 +84,17 @@ func TestLsDirPrintLongDirNoSize(t *testing.T) {
 		{Name: "mydir", Type: "dir"},
 	}
 
-	output := capturePrint(func() {
-		lsDirPrint(nil, items, "/", true, false, 0, 0)
-	})
+	var buf bytes.Buffer
+	lsDirPrint(&buf, nil, items, "/", true, false, 0, 0)
+	output := buf.String()
 
-	// Directories in long mode show size field as empty (8 spaces).
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	if len(lines) != 1 {
 		t.Fatalf("expected 1 line, got %d", len(lines))
 	}
-	// Should contain "d" type indicator.
 	if !strings.Contains(lines[0], "d") {
 		t.Errorf("expected 'd' type in long listing, got: %q", lines[0])
 	}
-	// Should end with "/".
 	if !strings.HasSuffix(strings.TrimSpace(lines[0]), "mydir/") {
 		t.Errorf("dir in long mode should end with '/', got: %q", lines[0])
 	}
@@ -133,12 +107,102 @@ func TestLsDirPrintMultipleFiles(t *testing.T) {
 		{Name: "c.txt", Type: "file", Size: 300},
 	}
 
-	output := capturePrint(func() {
-		lsDirPrint(nil, items, "/", false, false, 0, 0)
-	})
+	var buf bytes.Buffer
+	lsDirPrint(&buf, nil, items, "/", false, false, 0, 0)
+	output := buf.String()
 
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	if len(lines) != 3 {
 		t.Errorf("expected 3 lines, got %d: %q", len(lines), output)
+	}
+}
+
+type mockLsClient struct {
+	listDirFn func(path string) ([]cloud115.Entry, error)
+}
+
+func (m *mockLsClient) ListDir(path string) ([]cloud115.Entry, error) { return m.listDirFn(path) }
+func (m *mockLsClient) Close() error                                  { return nil }
+
+func TestLsRun(t *testing.T) {
+	tests := []struct {
+		name    string
+		opts    *lsOpts
+		wantErr string
+		wantOut string
+	}{
+		{
+			name: "client error",
+			opts: &lsOpts{
+				Path:      "/",
+				GetClient: func() (lsClient, error) { return nil, errors.New("no auth") },
+			},
+			wantErr: "no auth",
+		},
+		{
+			name: "list error",
+			opts: &lsOpts{
+				Path: "/missing",
+				GetClient: func() (lsClient, error) {
+					return &mockLsClient{
+						listDirFn: func(_ string) ([]cloud115.Entry, error) { return nil, errors.New("not found") },
+					}, nil
+				},
+			},
+			wantErr: "目录不存在",
+		},
+		{
+			name: "success",
+			opts: &lsOpts{
+				Path: "/",
+				GetClient: func() (lsClient, error) {
+					return &mockLsClient{
+						listDirFn: func(_ string) ([]cloud115.Entry, error) {
+							return []cloud115.Entry{{Name: "test.txt", Type: "file"}}, nil
+						},
+					}, nil
+				},
+			},
+			wantOut: "test.txt",
+		},
+		{
+			name: "recursive",
+			opts: &lsOpts{
+				Path:      "/",
+				Recursive: true,
+				Depth:     1,
+				GetClient: func() (lsClient, error) {
+					return &mockLsClient{
+						listDirFn: func(path string) ([]cloud115.Entry, error) {
+							if path == "/" {
+								return []cloud115.Entry{{Name: "sub", Type: "dir"}}, nil
+							}
+							return []cloud115.Entry{{Name: "child.txt", Type: "file"}}, nil
+						},
+					}, nil
+				},
+			},
+			wantOut: "child.txt",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			tt.opts.Out = &buf
+			err := lsRun(tt.opts)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("expected error containing %q, got: %v", tt.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.wantOut != "" && !strings.Contains(buf.String(), tt.wantOut) {
+				t.Errorf("expected output containing %q, got: %q", tt.wantOut, buf.String())
+			}
+		})
 	}
 }
