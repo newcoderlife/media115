@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/BurntSushi/toml"
+	"github.com/bytedance/gg/gptr"
 )
 
 type Config struct {
@@ -13,6 +14,14 @@ type Config struct {
 	Cache      CacheConfig               `toml:"cache"`
 	Categories map[string]CategoryConfig `toml:"categories"`
 	Proxy      ProxyConfig               `toml:"proxy"`
+	MTeam      MTeamConfig               `toml:"mteam"`
+}
+
+type MTeamConfig struct {
+	APIKey             string `toml:"api_key"`
+	BaseURL            string `toml:"base_url"`
+	MinIntervalSeconds *int   `toml:"min_interval_seconds"`
+	DefaultWatchDir    string `toml:"default_watch_dir"`
 }
 
 type AuthConfig struct {
@@ -71,6 +80,7 @@ func Default() *Config {
 			"写真": {Type: "gravure", Naming: "{number}", Sources: []string{"jav321", "javfree"}},
 		},
 		Proxy: ProxyConfig{Host: "127.0.0.1", Port: 9000, JellyfinURL: "http://localhost:8096"},
+		MTeam: MTeamConfig{BaseURL: "https://api.m-team.cc/api", MinIntervalSeconds: gptr.Of(30)},
 	}
 }
 
@@ -121,6 +131,12 @@ func Load() (*Config, error) {
 	}
 	if cfg.Proxy.Host == "" {
 		cfg.Proxy.Host = d.Proxy.Host
+	}
+	if cfg.MTeam.BaseURL == "" {
+		cfg.MTeam.BaseURL = d.MTeam.BaseURL
+	}
+	if cfg.MTeam.MinIntervalSeconds == nil {
+		cfg.MTeam.MinIntervalSeconds = d.MTeam.MinIntervalSeconds
 	}
 	return cfg, nil
 }

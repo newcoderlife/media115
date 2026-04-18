@@ -33,4 +33,5 @@ func init() {
 	rootCmd.AddCommand(scrapeFixCmd)
 	rootCmd.AddCommand(newOrganizeCmd())
 	rootCmd.AddCommand(newDoctorCmd())
+	rootCmd.AddCommand(subCmd)
 }

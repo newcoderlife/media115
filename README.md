@@ -196,6 +196,10 @@ media115 organize 电影 --execute     # Execute: move + rename + upload NFO; al
 
 # Doctor
 media115 doctor                      # Check environment, credentials, cache
+
+# Grab (M-Team → local watch folder, for external BT clients)
+media115 grab --keyword "4K" --require-free --watch-dir /path/to/watch --dry-run   # Preview
+media115 grab --keyword "4K" --require-free --watch-dir /path/to/watch             # Download
 ```
 
 ## License
