@@ -1,13 +1,10 @@
 # media115
 
 [![CI](https://github.com/newcoderlife/media115/actions/workflows/ci.yml/badge.svg)](https://github.com/newcoderlife/media115/actions/workflows/ci.yml)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/newcoderlife/media115)](go.mod)
-[![License](https://img.shields.io/github/license/newcoderlife/media115)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/newcoderlife/media115)](https://github.com/newcoderlife/media115/releases)
-[![Go Report Card](https://goreportcard.com/badge/github.com/newcoderlife/media115)](https://goreportcard.com/report/github.com/newcoderlife/media115)
 [![codecov](https://codecov.io/gh/newcoderlife/media115/graph/badge.svg)](https://codecov.io/gh/newcoderlife/media115)
+[![Go Report Card](https://goreportcard.com/badge/github.com/newcoderlife/media115)](https://goreportcard.com/report/github.com/newcoderlife/media115)
+[![License](https://img.shields.io/github/license/newcoderlife/media115)](LICENSE)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/newcoderlife/media115/badge)](https://securityscorecards.dev/viewer/?uri=github.com/newcoderlife/media115)
-[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12553/badge)](https://www.bestpractices.dev/projects/12553)
 
 Media library management tool for 115 cloud drive. Scrapes metadata from TMDB, Bangumi, jav321, javfree, ThePornDB, and StashDB; organizes files into standard naming; uploads NFO and posters.
 
@@ -19,15 +16,13 @@ Two binaries:
 ## Installation
 
 ```bash
-# Install CLI binaries (Linux / macOS)
-curl -fsSL https://raw.githubusercontent.com/newcoderlife/media115/master/install.sh | sh
+# Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/newcoderlife/media115/master/install.sh | sh -s -- --skill --agent <claude/agents/all>
+```
 
-# Install agent skills (Claude Code / Cursor / Codex / OpenCode)
-curl -fsSL https://raw.githubusercontent.com/newcoderlife/media115/master/install.sh | sh -s -- --skill --agent all
-
-# From source (requires Go 1.25+)
-go install github.com/newcoderlife/media115/cmd/cloud115@latest
-go install github.com/newcoderlife/media115/cmd/media115@latest
+```powershell
+# Windows (PowerShell, no admin required)
+$env:SKILL=1; $env:AGENT="<claude/agents/all>"; irm https://raw.githubusercontent.com/newcoderlife/media115/master/install.ps1 | iex
 ```
 
 ## Quick Start
