@@ -46,13 +46,14 @@ func saveTickFlags(t *testing.T) {
 		minRating       float64
 		tvComplete      bool
 		dryRun          bool
+		pickBest        bool
 		pages           int
 	}{
 		tickKeyword, tickMode, tickWatchDir, tickRequireFree,
 		tickRequire4K, tickRequireHQ, tickNoJunk, tickMaxFiles,
 		tickMinSize, tickMaxSize, tickMinSeeders, tickExcludeKeywords,
 		tickLabelsAllow, tickLabelsDeny, tickFreshHours, tickMinRating,
-		tickTVComplete, tickDryRun, tickPages,
+		tickTVComplete, tickDryRun, tickPickBest, tickPages,
 	}
 	t.Cleanup(func() {
 		tickKeyword = saved.keyword
@@ -73,6 +74,7 @@ func saveTickFlags(t *testing.T) {
 		tickMinRating = saved.minRating
 		tickTVComplete = saved.tvComplete
 		tickDryRun = saved.dryRun
+		tickPickBest = saved.pickBest
 		tickPages = saved.pages
 	})
 }
@@ -302,5 +304,46 @@ func TestPrintReport_TruncatesLongReason(t *testing.T) {
 	// trunc(reason, 40) should cut the 80-char reason.
 	if strings.Contains(output, longReason) {
 		t.Errorf("expected reason to be truncated, got full: %s", output)
+	}
+}
+
+func TestSub_PickBest_DryRun(t *testing.T) {
+	withTempConfig(t)
+	saveTickFlags(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{"total":"2","data":[
+			{"id":"1","name":"Low","size":"20","status":{"seeders":"5","discount":"FREE","timesCompleted":"3"},"createdDate":"2025-01-01 00:00:00"},
+			{"id":"2","name":"High","size":"30","status":{"seeders":"10","discount":"FREE","timesCompleted":"80"},"createdDate":"2024-01-01 00:00:00"}
+		]}}`))
+	}))
+	defer srv.Close()
+	writeMTeamConfig(t, "base_url = \""+srv.URL+"\"\nmin_interval_seconds = 0\n")
+
+	tickDryRun = true
+	tickPickBest = true
+	tickKeyword = "test"
+	tickRequireFree = true
+	tickWatchDir = t.TempDir()
+	tickPages = 1
+
+	old := os.Stdout
+	rd, w, _ := os.Pipe()
+	os.Stdout = w
+	defer func() { os.Stdout = old }()
+
+	if err := subCmd.RunE(subCmd, nil); err != nil {
+		os.Stdout = old
+		t.Fatalf("sub: %v", err)
+	}
+	w.Close()
+	out, _ := io.ReadAll(rd)
+	os.Stdout = old
+	output := string(out)
+
+	if !strings.Contains(output, "匹配=2") {
+		t.Errorf("expected 匹配=2 in output, got: %s", output)
+	}
+	if !strings.Contains(output, "下载=0") {
+		t.Errorf("expected 下载=0 in output, got: %s", output)
 	}
 }
