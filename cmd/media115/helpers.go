@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -104,3 +105,5 @@ func getTreeEntries(category string) ([]cloud115.TreeEntry, error) {
 	defer cache.Close()
 	return cache.GetTreeEntries(category), nil
 }
+
+func dashes(n int) string { return strings.Repeat("-", n) }

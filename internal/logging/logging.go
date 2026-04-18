@@ -97,8 +97,7 @@ func Log(level slog.Level, msg string, layer string) {
 func logFilePath() string {
 	base := os.Getenv("XDG_CACHE_HOME")
 	if base == "" {
-		home, _ := os.UserHomeDir()
-		base = filepath.Join(home, ".cache")
+		base, _ = os.UserCacheDir()
 	}
 	return filepath.Join(base, "media115", "log")
 }

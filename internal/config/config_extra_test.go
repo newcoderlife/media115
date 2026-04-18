@@ -228,9 +228,9 @@ func TestDefaultCategories(t *testing.T) {
 
 func TestCacheDirWithoutXDG(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", "")
-	home, _ := os.UserHomeDir()
+	cacheBase, _ := os.UserCacheDir()
 	dir := CacheDir()
-	expected := filepath.Join(home, ".cache", "media115")
+	expected := filepath.Join(cacheBase, "media115")
 	if dir != expected {
 		t.Errorf("CacheDir() = %q, want %q", dir, expected)
 	}
@@ -241,9 +241,9 @@ func TestCacheDirWithoutXDG(t *testing.T) {
 
 func TestConfigDirWithoutXDG(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
-	home, _ := os.UserHomeDir()
+	configBase, _ := os.UserConfigDir()
 	dir := ConfigDir()
-	expected := filepath.Join(home, ".config", "media115")
+	expected := filepath.Join(configBase, "media115")
 	if dir != expected {
 		t.Errorf("ConfigDir() = %q, want %q", dir, expected)
 	}

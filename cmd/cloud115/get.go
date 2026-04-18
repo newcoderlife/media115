@@ -8,46 +8,75 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+
+	"github.com/newcoderlife/media115/internal/cloud115"
 )
 
-var getCmd = &cobra.Command{
-	Use:   "get <remote_path> [local_dir]",
-	Short: "从 115 网盘下载文件到本地目录",
-	Args:  cobra.RangeArgs(1, 2),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		remotePath := args[0]
-		localDir := "."
-		if len(args) > 1 {
-			localDir = args[1]
-		}
+type getFileClient interface {
+	FindFile(path string) (*cloud115.Entry, error)
+	DownloadURL(pickCode, userAgent string) (string, error)
+	Close() error
+}
 
-		client, err := getClient()
-		if err != nil {
-			return err
-		}
-		defer client.Close()
+type getOpts struct {
+	Out        io.Writer
+	RemotePath string
+	LocalDir   string
+	GetClient  func() (getFileClient, error)
+	Downloader func(url, dest string) error
+}
 
-		entry, err := client.FindFile(remotePath)
-		if err != nil {
-			return fmt.Errorf("远程文件不存在: %s", remotePath)
-		}
+func newGetCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "get <remote_path> [local_dir]",
+		Short: "从 115 网盘下载文件到本地目录",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			localDir := "."
+			if len(args) > 1 {
+				localDir = args[1]
+			}
+			return getRun(&getOpts{
+				Out:        cmd.OutOrStdout(),
+				RemotePath: args[0],
+				LocalDir:   localDir,
+				GetClient: func() (getFileClient, error) {
+					return getClient()
+				},
+				Downloader: downloadToFile,
+			})
+		},
+	}
+	return cmd
+}
 
-		if entry.PickCode == "" {
-			return fmt.Errorf("文件缺少 pick_code: %s", remotePath)
-		}
+func getRun(o *getOpts) error {
+	cl, err := o.GetClient()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = cl.Close() }()
 
-		url, err := client.DownloadURL(entry.PickCode, "")
-		if err != nil {
-			return fmt.Errorf("获取下载链接失败: %w", err)
-		}
+	entry, err := cl.FindFile(o.RemotePath)
+	if err != nil {
+		return fmt.Errorf("远程文件不存在: %s", o.RemotePath)
+	}
 
-		dest := filepath.Join(localDir, entry.Name)
-		if err := downloadToFile(url, dest); err != nil {
-			return fmt.Errorf("下载失败: %w", err)
-		}
-		fmt.Printf("已下载: %s\n", dest)
-		return nil
-	},
+	if entry.PickCode == "" {
+		return fmt.Errorf("文件缺少 pick_code: %s", o.RemotePath)
+	}
+
+	url, err := cl.DownloadURL(entry.PickCode, "")
+	if err != nil {
+		return fmt.Errorf("获取下载链接失败: %w", err)
+	}
+
+	dest := filepath.Join(o.LocalDir, entry.Name)
+	if err := o.Downloader(url, dest); err != nil {
+		return fmt.Errorf("下载失败: %w", err)
+	}
+	fmt.Fprintf(o.Out, "已下载: %s\n", dest)
+	return nil
 }
 
 func downloadToFile(url, dest string) error {
@@ -71,5 +100,5 @@ func downloadToFile(url, dest string) error {
 }
 
 func init() {
-	rootCmd.AddCommand(getCmd)
+	rootCmd.AddCommand(newGetCmd())
 }

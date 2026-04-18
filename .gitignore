@@ -122,5 +122,5 @@ $RECYCLE.BIN/
 config.toml
 bin/*
 coverage.html
-cloud115
-media115
+/cloud115
+/media115

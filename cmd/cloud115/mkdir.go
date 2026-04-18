@@ -2,36 +2,60 @@ package main
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/spf13/cobra"
 )
 
-var mkdirParents bool
+type mkdirClient interface {
+	Mkdir(path string, parents bool) (string, error)
+	Close() error
+}
 
-var mkdirCmd = &cobra.Command{
-	Use:   "mkdir <path>",
-	Short: "在 115 网盘中创建目录",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		path := args[0]
+type mkdirOpts struct {
+	Out       io.Writer
+	Path      string
+	Parents   bool
+	GetClient func() (mkdirClient, error)
+}
 
-		client, err := getClient()
-		if err != nil {
-			return err
-		}
-		defer client.Close()
+func newMkdirCmd() *cobra.Command {
+	var parents bool
+	cmd := &cobra.Command{
+		Use:   "mkdir <path>",
+		Short: "在 115 网盘中创建目录",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return mkdirRun(&mkdirOpts{
+				Out:     cmd.OutOrStdout(),
+				Path:    args[0],
+				Parents: parents,
+				GetClient: func() (mkdirClient, error) {
+					return getClient()
+				},
+			})
+		},
+	}
+	cmd.Flags().BoolVarP(&parents, "parents", "p", false, "递归创建中间目录")
+	return cmd
+}
 
-		_, err = client.Mkdir(path, mkdirParents)
-		if err != nil {
-			return fmt.Errorf("创建目录失败: %w", err)
-		}
+func mkdirRun(o *mkdirOpts) error {
+	client, err := o.GetClient()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = client.Close() }()
 
-		fmt.Printf("已创建: %s\n", path)
-		return nil
-	},
+	_, err = client.Mkdir(o.Path, o.Parents)
+	if err != nil {
+		return fmt.Errorf("创建目录失败: %w", err)
+	}
+
+	fmt.Fprintf(o.Out, "已创建: %s\n", o.Path)
+	return nil
 }
 
 func init() {
-	mkdirCmd.Flags().BoolVarP(&mkdirParents, "parents", "p", false, "递归创建中间目录")
-	rootCmd.AddCommand(mkdirCmd)
+	rootCmd.AddCommand(newMkdirCmd())
 }

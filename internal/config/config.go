@@ -87,8 +87,7 @@ func Default() *Config {
 func ConfigDir() string {
 	base := os.Getenv("XDG_CONFIG_HOME")
 	if base == "" {
-		home, _ := os.UserHomeDir()
-		base = filepath.Join(home, ".config")
+		base, _ = os.UserConfigDir()
 	}
 	return filepath.Join(base, "media115")
 }
@@ -98,8 +97,7 @@ func ConfigPath() string { return filepath.Join(ConfigDir(), "config.toml") }
 func CacheDir() string {
 	base := os.Getenv("XDG_CACHE_HOME")
 	if base == "" {
-		home, _ := os.UserHomeDir()
-		base = filepath.Join(home, ".cache")
+		base, _ = os.UserCacheDir()
 	}
 	return filepath.Join(base, "media115")
 }
