@@ -16,7 +16,6 @@ import (
 var (
 	authCheck  bool
 	authRenew  bool
-	authQR     bool
 	authForce  bool
 	authApp    string
 	authGetQR  bool
@@ -131,7 +130,7 @@ var authCmd = &cobra.Command{
 			return nil
 		}
 
-		// Default: QR login (--qr flag or no flags)
+		// Default: QR login (no flags)
 		if !authForce {
 			cfg, err := config.Load()
 			if err == nil && cfg.Auth.Cookies != "" {
@@ -173,7 +172,6 @@ var authCmd = &cobra.Command{
 func init() {
 	authCmd.Flags().BoolVar(&authCheck, "check", false, "检查登录状态")
 	authCmd.Flags().BoolVar(&authRenew, "renew", false, "自动续期 cookies")
-	authCmd.Flags().BoolVar(&authQR, "qr", false, "生成二维码 URL（非阻塞）")
 	authCmd.Flags().BoolVar(&authForce, "force", false, "强制重新登录（即使已登录）")
 	authCmd.Flags().StringVar(&authApp, "app", "tv", "设备类型（tv/qandroid/web）")
 	authCmd.Flags().BoolVar(&authGetQR, "get-qr", false, "生成 QR URL 并退出（非阻塞，第一阶段）")

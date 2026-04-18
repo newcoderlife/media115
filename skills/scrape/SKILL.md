@@ -67,12 +67,12 @@ scrape 自动处理文件名清晰、数据源精确匹配的文件。
 
 1. 看文件名全称，提取所有线索（标题、年份、季集号、制作组标签）
 2. 猜测可能的中文名或英文名
-3. 搜索：
+3. 用 `scrape-fix` 指定正确的匹配：
 
 ```bash
-media115 scrape "猜测的名字"
-media115 scrape "猜测的名字" --source bangumi   # 动漫用这个
-media115 scrape "SONE-001" --source jav321      # 日本AV
+media115 scrape-fix "猜测的文件.mkv" --search "猜测的名字"
+media115 scrape-fix "猜测的文件.mkv" --search "猜测的名字" --category 剧目 # 动漫/剧目
+media115 scrape-fix "SONE-001.mkv" --number "SONE-001"                    # 日本AV
 ```
 
 4. 如果搜到多个结果，用年份、类型、集数等信息交叉验证

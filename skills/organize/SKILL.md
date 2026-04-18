@@ -65,13 +65,9 @@ If anomalies remain after organize, check:
 1. Was `media115 scrape --force` run if there were non-standard names?
 2. Did organize actually move/rename the files? Check the phase output.
 
-## Optional: Also delete empty dirs
+## Note: Automatic cleanup
 
-```bash
-media115 organize $CATEGORY --execute --cleanup
-```
-
-`--cleanup` deletes empty directories that are unrelated to the current category. Use with caution — confirm with user first.
+`--execute` automatically cleans up old source directories that no longer contain video files after the move. No separate `--cleanup` flag is needed.
 
 ## Note: No need to re-run sync after organize
 

@@ -14,14 +14,12 @@ version: 5.0
 
 ## Step 1: 确认正确的内容
 
-对于电影/剧目，先搜索确认 TMDB ID：
+对于电影/剧目，用 `scrape-fix --search` 搜索确认：
 
 ```bash
-media115 scrape "守护游戏"
-media115 scrape "守护游戏" --source bangumi
+media115 scrape-fix "文件名.mkv" --search "守护游戏"
+media115 scrape-fix "文件名.mkv" --search "守护游戏" --category 剧目  # 动漫用 category 指定
 ```
-
-从搜索结果中找到正确的 ID。
 
 ## Step 2: 执行修正
 
