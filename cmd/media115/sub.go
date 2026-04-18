@@ -32,6 +32,7 @@ var (
 	tickMinRating       float64
 	tickTVComplete      bool
 	tickDryRun          bool
+	tickPickBest        bool
 	tickPages           int
 )
 
@@ -109,6 +110,7 @@ var subCmd = &cobra.Command{
 			Rule:     rule,
 			WatchDir: watchDir,
 			DryRun:   tickDryRun,
+			PickBest: tickPickBest,
 			MaxPages: tickPages,
 		})
 		if err != nil {
@@ -180,5 +182,6 @@ func init() {
 	subCmd.Flags().Float64Var(&tickMinRating, "min-rating", 0, "评分下限 (IMDB/豆瓣取高者)")
 	subCmd.Flags().BoolVar(&tickTVComplete, "tv-complete", false, "仅要剧集合集")
 	subCmd.Flags().BoolVar(&tickDryRun, "dry-run", false, "只搜索不下载")
+	subCmd.Flags().BoolVar(&tickPickBest, "pick-best", false, "只下载最优的单个种子")
 	subCmd.Flags().IntVar(&tickPages, "max-pages", 3, "最多翻 N 页")
 }

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +37,8 @@ type RunOptions struct {
 	WatchDir string
 	// DryRun skips downloading; it still calls Search.
 	DryRun bool
+	// PickBest downloads only the single best candidate instead of all matches.
+	PickBest bool
 	// MaxPages caps pagination (default 3).
 	MaxPages int
 	// PageSize for Search (default 50).
@@ -67,6 +70,8 @@ func Run(ctx context.Context, client *Client, opts RunOptions) (*RunReport, erro
 	}
 	rr := &RunReport{Rejections: map[string]int{}}
 	now := opts.Now()
+
+	var candidates []*Torrent // used when PickBest=true
 
 	for page := 1; page <= opts.MaxPages; page++ {
 		if ctx.Err() != nil {
@@ -131,6 +136,10 @@ func Run(ctx context.Context, client *Client, opts RunOptions) (*RunReport, erro
 					}
 				}
 			}
+			if opts.PickBest {
+				candidates = append(candidates, t)
+				continue
+			}
 			if opts.DryRun {
 				size, _ := strconv.ParseInt(t.Size, 10, 64)
 				logging.Log(slog.LevelInfo, fmt.Sprintf("[dry-run] id=%s %s size=%s seeders=%s %s",
@@ -153,7 +162,67 @@ func Run(ctx context.Context, client *Client, opts RunOptions) (*RunReport, erro
 		}
 	}
 
+	// PickBest: select the single best candidate and download/dry-run it.
+	if opts.PickBest && len(candidates) > 0 {
+		best := pickBest(candidates)
+		// Count non-selected candidates as skipped.
+		if len(candidates) > 1 {
+			rr.Skipped += len(candidates) - 1
+			rr.Rejections["pick-best: not selected"] += len(candidates) - 1
+		}
+		if opts.DryRun {
+			size, _ := strconv.ParseInt(best.Size, 10, 64)
+			logging.Log(slog.LevelInfo, fmt.Sprintf("[dry-run] id=%s %s size=%s seeders=%s %s",
+				best.ID, best.Name, humanSize(size), best.Status.Seeders, best.Status.Discount), "mteam")
+		} else {
+			if err := download(ctx, client, opts.WatchDir, best); err != nil {
+				logging.Log(slog.LevelError, fmt.Sprintf("download id=%s: %v", best.ID, err), "mteam")
+				rr.Errors++
+			} else {
+				rr.Downloaded++
+				logging.Log(slog.LevelInfo, fmt.Sprintf("grabbed id=%s name=%s", best.ID, best.Name), "mteam")
+			}
+		}
+	}
+
 	return rr, nil
+}
+
+// pickBest selects the single best torrent from candidates.
+// Rule: torrents with TimesCompleted ≥ 20 come first (sorted by
+// TimesCompleted descending); torrents with < 20 completions
+// are sorted by CreatedDate descending (newest first).
+func pickBest(ts []*Torrent) *Torrent {
+	const completedThreshold = 20
+	sort.SliceStable(ts, func(i, j int) bool {
+		ci, _ := strconv.ParseInt(ts[i].Status.TimesCompleted, 10, 64)
+		cj, _ := strconv.ParseInt(ts[j].Status.TimesCompleted, 10, 64)
+		iAbove := ci >= completedThreshold
+		jAbove := cj >= completedThreshold
+		if iAbove != jAbove {
+			return iAbove // above-threshold sorts first
+		}
+		if iAbove {
+			if ci != cj {
+				return ci > cj // both ≥ 20: more completions wins
+			}
+			// equal completions: newest first, then ID as final tiebreaker
+			ti, oki := parseCreatedDate(ts[i].CreatedDate)
+			tj, okj := parseCreatedDate(ts[j].CreatedDate)
+			if oki && okj && !ti.Equal(tj) {
+				return ti.After(tj)
+			}
+			return ts[i].ID > ts[j].ID
+		}
+		// both < 20: newest first
+		ti, oki := parseCreatedDate(ts[i].CreatedDate)
+		tj, okj := parseCreatedDate(ts[j].CreatedDate)
+		if oki && okj && !ti.Equal(tj) {
+			return ti.After(tj)
+		}
+		return ts[i].ID > ts[j].ID
+	})
+	return ts[0]
 }
 
 func download(ctx context.Context, client *Client, watchDir string, t *Torrent) error {

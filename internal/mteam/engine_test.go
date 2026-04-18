@@ -164,3 +164,227 @@ func TestTorrentFilename_Sanitises(t *testing.T) {
 		t.Fatalf("empty ID should fall back: %s", fn5)
 	}
 }
+
+// ── pickBest ───────────────────────────────────────────────────────────────
+
+func TestPickBest_PrefersHighCompleted(t *testing.T) {
+	ts := []*Torrent{
+		{ID: "1", Name: "A", CreatedDate: "2025-12-01 00:00:00", Status: Status{TimesCompleted: "5"}},
+		{ID: "2", Name: "B", CreatedDate: "2025-01-01 00:00:00", Status: Status{TimesCompleted: "100"}},
+		{ID: "3", Name: "C", CreatedDate: "2025-06-01 00:00:00", Status: Status{TimesCompleted: "30"}},
+	}
+	got := pickBest(ts)
+	if got.ID != "2" {
+		t.Fatalf("expected id=2 (100 completed), got id=%s", got.ID)
+	}
+}
+
+func TestPickBest_BelowThreshold_NewestFirst(t *testing.T) {
+	ts := []*Torrent{
+		{ID: "1", Name: "Old", CreatedDate: "2025-01-01 00:00:00", Status: Status{TimesCompleted: "5"}},
+		{ID: "2", Name: "New", CreatedDate: "2025-12-01 00:00:00", Status: Status{TimesCompleted: "3"}},
+		{ID: "3", Name: "Mid", CreatedDate: "2025-06-01 00:00:00", Status: Status{TimesCompleted: "10"}},
+	}
+	got := pickBest(ts)
+	if got.ID != "2" {
+		t.Fatalf("expected id=2 (newest below threshold), got id=%s", got.ID)
+	}
+}
+
+func TestPickBest_MixedThreshold(t *testing.T) {
+	ts := []*Torrent{
+		{ID: "1", Name: "BelowButNew", CreatedDate: "2026-01-01 00:00:00", Status: Status{TimesCompleted: "15"}},
+		{ID: "2", Name: "AboveButOld", CreatedDate: "2020-01-01 00:00:00", Status: Status{TimesCompleted: "25"}},
+	}
+	got := pickBest(ts)
+	if got.ID != "2" {
+		t.Fatalf("expected id=2 (above threshold wins over below), got id=%s", got.ID)
+	}
+}
+
+func TestPickBest_SingleCandidate(t *testing.T) {
+	ts := []*Torrent{
+		{ID: "1", Name: "Only", Status: Status{TimesCompleted: "0"}},
+	}
+	got := pickBest(ts)
+	if got.ID != "1" {
+		t.Fatalf("expected id=1, got id=%s", got.ID)
+	}
+}
+
+// ── Run with PickBest ──────────────────────────────────────────────────────
+
+func TestRun_PickBest_DryRun(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{"total":"3","data":[
+			{"id":"1","name":"Small.1080p","size":"5000000000","status":{"seeders":"50","discount":"FREE","timesCompleted":"100"},"createdDate":"2025-01-01 00:00:00"},
+			{"id":"2","name":"Big.2160p","size":"50000000000","status":{"seeders":"10","discount":"FREE","timesCompleted":"200"},"createdDate":"2025-06-01 00:00:00"},
+			{"id":"3","name":"New.720p","size":"2000000000","status":{"seeders":"5","discount":"FREE","timesCompleted":"8"},"createdDate":"2026-04-01 00:00:00"}
+		]}}`))
+	}))
+	defer srv.Close()
+	c := NewClient("K", WithBaseURL(srv.URL), WithHTTPClient(srv.Client()))
+	report, err := Run(context.Background(), c, RunOptions{
+		Rule:     Rule{RequireFree: true},
+		WatchDir: t.TempDir(),
+		DryRun:   true,
+		PickBest: true,
+		MaxPages: 1,
+		PageSize: 50,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Matched != 3 {
+		t.Fatalf("expected 3 matched, got %d", report.Matched)
+	}
+	if report.Downloaded != 0 {
+		t.Fatalf("expected 0 downloaded in dry-run, got %d", report.Downloaded)
+	}
+	if report.Skipped != 2 {
+		t.Fatalf("expected 2 skipped (non-selected), got %d", report.Skipped)
+	}
+	if report.Rejections["pick-best: not selected"] != 2 {
+		t.Fatalf("expected 2 pick-best rejections, got %v", report.Rejections)
+	}
+}
+
+func TestRun_PickBest_DownloadsOnlyOne(t *testing.T) {
+	watch := t.TempDir()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/torrent/search":
+			_, _ = w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{"total":"2","data":[
+				{"id":"1","name":"LowCompleted","size":"20","status":{"seeders":"10","discount":"FREE","timesCompleted":"5"},"createdDate":"2025-01-01 00:00:00"},
+				{"id":"2","name":"HighCompleted","size":"20","status":{"seeders":"10","discount":"FREE","timesCompleted":"50"},"createdDate":"2024-01-01 00:00:00"}
+			]}}`))
+		case "/torrent/genDlToken":
+			u := "http://" + r.Host + "/dl/best.torrent"
+			_, _ = w.Write([]byte(`{"code":"0","message":"SUCCESS","data":"` + u + `"}`))
+		case "/dl/best.torrent":
+			_, _ = w.Write([]byte("d8:announce4:teste"))
+		default:
+			http.Error(w, r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	c := NewClient("K", WithBaseURL(srv.URL), WithHTTPClient(srv.Client()))
+	report, err := Run(context.Background(), c, RunOptions{
+		Rule:     Rule{RequireFree: true},
+		WatchDir: watch,
+		PickBest: true,
+		MaxPages: 1,
+		PageSize: 50,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Matched != 2 {
+		t.Fatalf("expected 2 matched, got %d", report.Matched)
+	}
+	if report.Downloaded != 1 {
+		t.Fatalf("expected 1 downloaded, got %d", report.Downloaded)
+	}
+	if report.Skipped != 1 {
+		t.Fatalf("expected 1 skipped (non-selected), got %d", report.Skipped)
+	}
+	if report.Rejections["pick-best: not selected"] != 1 {
+		t.Fatalf("expected 1 pick-best rejection, got %v", report.Rejections)
+	}
+	entries, _ := os.ReadDir(watch)
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 file in watch dir, got %d", len(entries))
+	}
+}
+
+func TestPickBest_MalformedCompleted(t *testing.T) {
+	ts := []*Torrent{
+		{ID: "1", Name: "BadNum", CreatedDate: "2025-12-01 00:00:00", Status: Status{TimesCompleted: "abc"}},
+		{ID: "2", Name: "GoodNum", CreatedDate: "2025-01-01 00:00:00", Status: Status{TimesCompleted: "50"}},
+	}
+	got := pickBest(ts)
+	// "abc" parses as 0 (< 20), id=2 has 50 (≥ 20) → id=2 wins.
+	if got.ID != "2" {
+		t.Fatalf("expected id=2 (valid completed beats malformed), got id=%s", got.ID)
+	}
+}
+
+func TestPickBest_EqualCompleted_NewerWins(t *testing.T) {
+	ts := []*Torrent{
+		{ID: "1", Name: "Older", CreatedDate: "2025-01-01 00:00:00", Status: Status{TimesCompleted: "30"}},
+		{ID: "2", Name: "Newer", CreatedDate: "2025-06-01 00:00:00", Status: Status{TimesCompleted: "30"}},
+	}
+	got := pickBest(ts)
+	// Both ≥ 20 with equal completions → newer CreatedDate wins.
+	if got.ID != "2" {
+		t.Fatalf("expected id=2 (newer date breaks tie), got id=%s", got.ID)
+	}
+}
+
+func TestPickBest_EqualCompletedAndDate_IDBreaks(t *testing.T) {
+	ts := []*Torrent{
+		{ID: "10", Name: "A", CreatedDate: "2025-06-01 00:00:00", Status: Status{TimesCompleted: "30"}},
+		{ID: "20", Name: "B", CreatedDate: "2025-06-01 00:00:00", Status: Status{TimesCompleted: "30"}},
+	}
+	got := pickBest(ts)
+	// Same completions, same date → higher ID wins.
+	if got.ID != "20" {
+		t.Fatalf("expected id=20 (higher ID breaks tie), got id=%s", got.ID)
+	}
+}
+
+func TestRun_PickBest_DownloadError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/torrent/search":
+			_, _ = w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{"total":"1","data":[
+				{"id":"1","name":"Movie","size":"20","status":{"seeders":"10","discount":"FREE","timesCompleted":"50"},"createdDate":"2025-01-01 00:00:00"}
+			]}}`))
+		case "/torrent/genDlToken":
+			// Return error to trigger download failure.
+			_, _ = w.Write([]byte(`{"code":"1","message":"FAIL"}`))
+		default:
+			http.Error(w, r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	c := NewClient("K", WithBaseURL(srv.URL), WithHTTPClient(srv.Client()))
+	report, err := Run(context.Background(), c, RunOptions{
+		Rule:     Rule{RequireFree: true},
+		WatchDir: t.TempDir(),
+		PickBest: true,
+		MaxPages: 1,
+		PageSize: 50,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Matched != 1 {
+		t.Fatalf("expected 1 matched, got %d", report.Matched)
+	}
+	if report.Errors != 1 {
+		t.Fatalf("expected 1 error, got %d", report.Errors)
+	}
+	if report.Downloaded != 0 {
+		t.Fatalf("expected 0 downloaded, got %d", report.Downloaded)
+	}
+}
+
+func TestHumanSize(t *testing.T) {
+	cases := []struct {
+		in   int64
+		want string
+	}{
+		{0, "0B"},
+		{512, "512B"},
+		{1 << 20, "1.0M"},
+		{int64(1.5 * float64(1<<30)), "1.5G"},
+		{2 * (1 << 40), "2.0T"},
+	}
+	for _, c := range cases {
+		got := humanSize(c.in)
+		if got != c.want {
+			t.Errorf("humanSize(%d) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
