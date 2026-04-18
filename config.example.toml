@@ -47,3 +47,12 @@ sources = ["jav321", "javfree"]
 host = "127.0.0.1"
 port = 9000
 jellyfin_url = "http://localhost:8096"
+
+# M-Team OpenAPI subscription downloader. Generates .torrent files into a
+# local watch folder that your BT client (qBittorrent / Transmission) monitors.
+# Does NOT interact with 115.
+[mteam]
+api_key = ""                                # 从 M-Team 用户中心 → 实验室 → API 签发
+base_url = "https://api.m-team.cc/api"
+min_interval_seconds = 30                   # 每次 API 请求之间的最短间隔
+default_watch_dir = ""                      # 例 "/Users/you/Downloads/watch"
