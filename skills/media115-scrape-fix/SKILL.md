@@ -2,7 +2,7 @@
 name: media115-scrape-fix
 description: Fix a wrong scrape result using the CLI command
 metadata:
-  version: "5.0"
+  version: "6.0"
 ---
 
 修正一个错误的刮削结果。
@@ -14,6 +14,12 @@ metadata:
 3. 一个文件显示 `not_found` 但你知道它是什么
 
 ## Step 1: 确认正确的内容
+
+**优先级：`--tmdb-id` > `--search 中文名` > `--search 英文名`。**
+
+`--search` 可能命中错误条目。如果用户已经提供了 TMDB ID，直接用 `--tmdb-id`，不要再走 search。
+
+如果必须搜索，优先用中文名（文件名中的中文部分），英文子标题经常命中同名但不同的内容。
 
 对于电影/剧目，用 `scrape-fix --search` 搜索确认：
 
@@ -58,6 +64,12 @@ media115 scrape-fix "SomeShow.S02E03.mkv" --tmdb-id 12345 --season 2 --episode 3
 
 ```bash
 media115 organize $CATEGORY --execute
+```
+
+如果只想处理刚修正的文件，用 `--file` 过滤：
+
+```bash
+media115 organize $CATEGORY --file "文件名关键词" --execute
 ```
 
 ## 错误处理

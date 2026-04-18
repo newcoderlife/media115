@@ -21,6 +21,7 @@ type organizeOpts struct {
 	Out            io.Writer
 	Category       string
 	Execute        bool
+	File           string
 	GetClient      func() (*cloud115.Client, error)
 	GetTreeEntries func(string) ([]cloud115.TreeEntry, error)
 	CacheDir       func() string
@@ -40,10 +41,12 @@ CATEGORY: AV, 电影, 剧目, etc.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			execute, _ := cmd.Flags().GetBool("execute")
+			file, _ := cmd.Flags().GetString("file")
 			return organizeRun(&organizeOpts{
 				Out:            cmd.OutOrStdout(),
 				Category:       args[0],
 				Execute:        execute,
+				File:           file,
 				GetClient:      getClient,
 				GetTreeEntries: getTreeEntries,
 				CacheDir:       mediaCacheDir,
@@ -52,6 +55,7 @@ CATEGORY: AV, 电影, 剧目, etc.`,
 		},
 	}
 	cmd.Flags().Bool("execute", false, "实际执行重命名/移动（默认为演练）")
+	cmd.Flags().String("file", "", "仅处理匹配的文件（支持通配符，如 'SKMJ-*'）")
 	return cmd
 }
 
@@ -72,6 +76,17 @@ func organizeRun(o *organizeOpts) error {
 		if strings.Contains("/"+e.Path+"/", "/"+o.Category+"/") {
 			entries = append(entries, e)
 		}
+	}
+
+	// Filter by file pattern
+	if o.File != "" {
+		var filtered []cloud115.TreeEntry
+		for _, e := range entries {
+			if matched, _ := filepath.Match(o.File, e.Name); matched || strings.Contains(e.Name, o.File) {
+				filtered = append(filtered, e)
+			}
+		}
+		entries = filtered
 	}
 
 	plan := organizer.BuildPlan(o.Category, entries, nil)

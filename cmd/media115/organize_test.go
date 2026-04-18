@@ -261,3 +261,73 @@ func TestOrganizeRunWithAVRenames(t *testing.T) {
 		t.Error("expected dry-run message")
 	}
 }
+
+func TestOrganizeRunFileFilter(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", tmpDir)
+
+	writeFileMap(tmpDir, "Good.Movie.2022", map[string]any{
+		"type": "movie", "title": "Good Movie", "year": 2022, "tmdb_id": "111",
+	})
+	writeFileMap(tmpDir, "Bad.Movie.2023", map[string]any{
+		"type": "movie", "title": "Bad Movie", "year": 2023, "tmdb_id": "222",
+	})
+
+	entries := []cloud115.TreeEntry{
+		{Path: "影音/电影/a/Good.Movie.2022.mp4", Name: "Good.Movie.2022.mp4", Parent: "影音/电影/a", IsVideo: true},
+		{Path: "影音/电影/b/Bad.Movie.2023.mp4", Name: "Bad.Movie.2023.mp4", Parent: "影音/电影/b", IsVideo: true},
+	}
+
+	t.Run("substring match", func(t *testing.T) {
+		var buf bytes.Buffer
+		o := newTestOrganizeOpts(&buf, tmpDir)
+		o.Category = "电影"
+		o.File = "Good"
+		o.GetTreeEntries = func(string) ([]cloud115.TreeEntry, error) { return entries, nil }
+
+		if err := organizeRun(o); err != nil {
+			t.Fatal(err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "1 个重命名") {
+			t.Errorf("expected 1 rename, got: %s", out)
+		}
+		if strings.Contains(out, "Bad Movie") {
+			t.Error("Bad Movie should be filtered out")
+		}
+	})
+
+	t.Run("glob match", func(t *testing.T) {
+		var buf bytes.Buffer
+		o := newTestOrganizeOpts(&buf, tmpDir)
+		o.Category = "电影"
+		o.File = "Bad.Movie.*"
+		o.GetTreeEntries = func(string) ([]cloud115.TreeEntry, error) { return entries, nil }
+
+		if err := organizeRun(o); err != nil {
+			t.Fatal(err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "1 个重命名") {
+			t.Errorf("expected 1 rename, got: %s", out)
+		}
+		if strings.Contains(out, "Good Movie") {
+			t.Error("Good Movie should be filtered out")
+		}
+	})
+
+	t.Run("no match", func(t *testing.T) {
+		var buf bytes.Buffer
+		o := newTestOrganizeOpts(&buf, tmpDir)
+		o.Category = "电影"
+		o.File = "NonExistent"
+		o.GetTreeEntries = func(string) ([]cloud115.TreeEntry, error) { return entries, nil }
+
+		if err := organizeRun(o); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(buf.String(), "0 个重命名, 0 个不变") {
+			t.Error("expected empty plan")
+		}
+	})
+}

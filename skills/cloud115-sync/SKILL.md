@@ -2,7 +2,7 @@
 name: cloud115-sync
 description: Refresh local SQLite cache from 115 cloud. Required before scan/scrape.
 metadata:
-  version: "4.0"
+  version: "5.0"
 ---
 
 Refresh the local cache from 115 cloud. This populates the SQLite `tree_entry` table, which is the source of truth for `scan`, `scrape`, and `organize`.
@@ -53,3 +53,10 @@ Pre-fetches directory listings into SQLite. Each directory = 2 API calls. Shows 
 - If `scan` shows stale or unexpected results
 
 You do NOT need to re-run sync after `organize --execute`. Organize's verify phase refreshes the tree cache automatically.
+
+## Error handling
+
+115 经常返回临时 EOF（限流）。遇到时：
+1. 等待 5-10 秒后重试，至少重试 3 次
+2. 不要因为 sync 失败就跳过后续验证步骤
+3. 如果持续失败，告诉用户可能需要等一段时间再试

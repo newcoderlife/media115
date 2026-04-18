@@ -2,7 +2,7 @@
 name: media115-scrape
 description: Scrape metadata for media files — agent drives matching, code only provides tools
 metadata:
-  version: "7.0"
+  version: "8.0"
 ---
 
 刮削媒体文件的元数据（NFO + 海报）。**你（agent）负责判断文件是什么，代码只负责搜索和生成。**
@@ -54,13 +54,16 @@ scrape 自动处理文件名清晰、数据源精确匹配的文件。
 
 ## Step 3: 审查自动匹配结果（关键步骤，不要跳过）
 
+**每一个**自动匹配结果都必须逐行检查，不能只给用户一个分类汇总。
+
 检查输出中每一行：
 
 - 中文标题是否合理？"Youth.Periplous.2019" 匹配到 "Youth" 而不是 "青春环游记" 就是错的。
 - 年份是否吻合？文件名里有 2019 但匹配到一部没有年份的内容说明匹配错了。
 - 类型是否对？电影文件匹配到 TV show 说明错了。
+- 文件名含中文时（如 `[钢铁森林]`），**必须用中文搜**，不要只用英文子标题搜。英文子标题经常命中错误条目。
 
-**如果发现可疑匹配，立即用 `/scrape-fix` 修正。**
+**如果发现可疑匹配，立即用 `/scrape-fix` 修正，优先使用 `--tmdb-id`（最精确）。**
 
 ## Step 4: 处理 not_found 和 unrecognized
 
@@ -83,6 +86,8 @@ media115 scrape-fix "SONE-001.mkv" --number "SONE-001"                    # 日�
 - 不要盲取第一个搜索结果
 - 不要在不确定时强行匹配
 - 不要用文件名中的单个英文单词去搜（太宽泛）
+- 不要直接查 SQLite 数据库，只能用 CLI 命令（`cloud115 ls`、`cloud115 find` 等）
+- 不要手动拼 `cloud115 mv/put/rename` 来替代 `media115 organize --execute`，那是 organize 的工作
 
 ## Step 5: 修正错误匹配
 
@@ -96,11 +101,15 @@ media115 scrape-fix "T-3800040.mkv" --number "T28-003"
 
 ## Step 6: 报告并执行 organize
 
-输出汇总表：
+**必须输出逐文件汇总表**，不能只给分类级别的汇总：
 
 | 文件 | 匹配结果 | 置信度 | 备注 |
 |------|---------|--------|------|
 | xxx.mkv | 青春环游记 (tmdb:106938) | 高 | 年份+标题吻合 |
 | yyy.mkv | ？ | — | 未找到匹配，需用户确认 |
 
-确认后，执行 `/organize`。
+用户确认后，执行 `/organize`。如果需要只处理部分文件，用 `--file` 过滤：
+
+```bash
+media115 organize $CATEGORY --file "SKMJ-*" --execute
+```

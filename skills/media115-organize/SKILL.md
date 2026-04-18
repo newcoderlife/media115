@@ -2,10 +2,12 @@
 name: media115-organize
 description: Rename, move, upload NFO, and cleanup — the main operation
 metadata:
-  version: "5.0"
+  version: "6.0"
 ---
 
 The single operation that does everything: move files to correct dirs, rename to standard format, upload NFO/poster, clean up old dirs, and verify.
+
+**绝对不要手动拼 `cloud115 mv/put/rename` 来代替 organize。** organize 有 6 个阶段，包含冲突检测、NFO 重命名、旧目录清理和验证，手动拼必然漏步骤。
 
 ## Input
 
@@ -22,6 +24,13 @@ $ARGUMENTS — category: `电影`, `AV`, or `剧目`.
 media115 organize $CATEGORY
 ```
 
+如果只需要处理部分文件，用 `--file` 过滤（支持子串匹配和 glob 通配符）：
+
+```bash
+media115 organize $CATEGORY --file "SKMJ-*"
+media115 organize 电影 --file "梦起云上"
+```
+
 Expected output:
 ```
 Organize plan for '电影': 5 to rename, 120 unchanged
@@ -29,7 +38,7 @@ Organize plan for '电影': 5 to rename, 120 unchanged
 ```
 
 Show the plan table to the user. Check for:
-- Target conflicts (two files → same name) — resolve before executing
+- Target conflicts (two files → same name) — resolve before executing. **冲突时 organize 会自动拒绝执行并提示。** 解决方法：用 `scrape-fix` 修改其中一个文件的目标名，或用 `--file` 排除冲突项
 - Unexpected titles — verify they look correct
 - "0 to rename" when anomalies exist — means you forgot `media115 scrape --force`
 
@@ -37,6 +46,7 @@ Show the plan table to the user. Check for:
 
 ```bash
 media115 organize $CATEGORY --execute
+media115 organize $CATEGORY --file "SKMJ-*" --execute  # 只处理匹配的文件
 ```
 
 This does 6 phases automatically:
