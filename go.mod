@@ -7,7 +7,7 @@ require (
 	github.com/antchfx/htmlquery v1.3.6
 	github.com/bytedance/gg v1.1.0
 	github.com/bytedance/mockey v1.4.6
-	github.com/pierrec/lz4/v4 v4.1.26
+	github.com/pierrec/lz4/v4 v4.1.27
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/net v0.53.0
 	modernc.org/sqlite v1.49.1
